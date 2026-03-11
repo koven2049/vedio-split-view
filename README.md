@@ -1,0 +1,157 @@
+# VideoSplit
+
+将长视频拆分为独立主题片段的自动化分析服务。支持 Bilibili / YouTube。
+
+## 分析流程
+
+```
+┌──────────┐     ┌───────────────┐     ┌──────────────┐     ┌────────────┐     ┌──────────┐
+│  用户输入  │────▶│  提取视频元数据  │────▶│  获取字幕/转录  │────▶│  LLM 内容分析 │────▶│  保存结果  │
+│  视频 URL  │     │  (yt-dlp)      │     │              │     │  (主题分段)  │     │  (SQLite) │
+└──────────┘     └───────────────┘     └──────┬───────┘     └────────────┘     └──────────┘
+                                              │
+                              ┌────────────────┼────────────────┐
+                              ▼                ▼                ▼
+                     YouTube 字幕 API    Bilibili 字幕      音频转录
+                     (无需认证)          (需 QR 登录)      (无字幕时)
+                                                               │
+                                                    ┌──────────┴──────────┐
+                                                    ▼                     ▼
+                                              OpenAI Whisper        Aliyun Fun-ASR
+                                              (直传文件)            (OSS → 签名URL)
+```
+
+**音频转录细节：**
+```
+音频文件 ──▶ ffmpeg 按 5min 切片 ──▶ 逐片转录（带缓存） ──▶ 合并时间线 ──▶ 完整文本
+                                       │
+                                  .transcript.json 缓存
+                                  (重试时跳过已完成片段)
+```
+
+## 快速开始
+
+```bash
+# 1. 初始化（生成配置 + HTTPS 证书）
+bash manage.sh init
+
+# 2. 编辑配置（必填 admin.password, llm.api_key, transcription.api_key）
+vim config/app.yaml
+
+# 3. 构建并启动
+bash manage.sh rebuild
+```
+
+打开 `https://localhost:5180`，用 admin 账号登录后创建普通用户。
+
+## manage.sh
+
+```bash
+bash manage.sh init                  # 初始化目录、配置、证书
+bash manage.sh start                 # 启动
+bash manage.sh stop                  # 停止
+bash manage.sh restart               # 重启
+bash manage.sh rebuild               # 增量构建并重启（最常用）
+bash manage.sh rebuild backend       # 仅重建后端
+bash manage.sh rebuild -n            # 无缓存完全重建
+bash manage.sh rebuild -p            # 重新拉取基础镜像
+bash manage.sh status                # 查看状态 + 健康检查
+bash manage.sh logs                  # 跟踪所有日志
+bash manage.sh logs backend          # 仅跟踪后端日志
+bash manage.sh mirror cn             # 切换国内镜像（默认）
+bash manage.sh mirror default        # 切换 docker.io
+bash manage.sh clean                 # 清理构建缓存
+```
+
+## 配置说明 (config/app.yaml)
+
+| 节 | 关键字段 | 说明 |
+|---|---------|------|
+| `app` | `port`, `frontend_port`, `secret_key` | 后端端口、前端端口、JWT 密钥 |
+| `admin` | `password` | **必填**，管理员密码，启动时覆盖 DB |
+| `llm` | `base_url`, `model`, `api_key` | OpenAI 兼容 LLM（智谱/OpenAI/DeepSeek 等） |
+| `transcription` | `base_url`, `model`, `api_key` | ASR 模型（Whisper 或 Fun-ASR） |
+| `oss` | `endpoint`, `access_key_id/secret`, `bucket_name` | Fun-ASR 时必填（Whisper 不需要） |
+| `network` | `proxy_enabled`, `http_proxy` | 代理配置 |
+| `storage` | `max_pending_tasks_per_user` | 每用户最大未完成任务数（默认 3） |
+| `video` | `max_duration_seconds`, `confirm_threshold_seconds` | 视频时长限制 / 二次确认阈值 |
+| `logging` | `level`, `dir` | 日志级别和目录（默认 `INFO`, `logs/`） |
+
+## Debug API
+
+通过 `http://localhost:{port}/docs` 查看 Swagger UI。以下为调试常用接口：
+
+```bash
+# 登录获取 token
+TOKEN=$(curl -s http://localhost:4305/api/auth/login \
+  -X POST -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"password"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+# 仅下载音频（SSE 流，实时进度）
+curl -N http://localhost:4305/api/debug/download \
+  -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"url":"https://www.bilibili.com/video/BV1xxxxxx/"}'
+
+# 列出当前任务
+curl http://localhost:4305/api/debug/tasks -H "Authorization: Bearer $TOKEN"
+
+# 查看某任务的音频分片
+curl http://localhost:4305/api/debug/tasks/3/chunks -H "Authorization: Bearer $TOKEN"
+
+# 转录指定任务（全部分片）
+curl http://localhost:4305/api/debug/transcribe \
+  -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"task_id": 3}'
+
+# 转录指定任务的单个分片
+curl http://localhost:4305/api/debug/transcribe \
+  -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"task_id": 3, "chunk_index": 0}'
+
+# 直接转录本地文件（不占配额，用于测试 ASR 连通性）
+curl http://localhost:4305/api/debug/test-asr \
+  -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -d '{"file_path": "/app/data/tmp/3/chunks/chunk_000.mp3"}'
+
+# 清理某个任务（删除文件 + DB 记录）
+curl -X DELETE http://localhost:4305/api/debug/tasks/3 -H "Authorization: Bearer $TOKEN"
+```
+
+## 本地测试脚本
+
+```bash
+# 端到端 ASR 测试（需先通过 debug/download 下载音频）
+# 编辑 test_transcribe.py 中的 test_file 路径，然后：
+cd vedio-split-view
+python3 test_transcribe.py
+# 结果输出到 test_transcription_result.txt
+```
+
+## 日志
+
+应用日志写入 `logs/app.log`（自动轮转，50MB/文件，保留 5 份）。
+
+```bash
+# 实时查看
+tail -f logs/app.log
+
+# 筛选外部调用
+grep '\[metadata\]\|\[download\]\|\[whisper\]\|\[funasr\]\|\[llm\]\|\[oss\]' logs/app.log
+```
+
+## 目录结构
+
+```
+vedio-split-view/
+├── manage.sh              # 容器管理脚本
+├── compose.yaml           # Podman Compose 定义
+├── config/
+│   ├── app.yaml           # 运行时配置（gitignore）
+│   ├── app.yaml.example   # 配置模板
+│   └── certs/             # HTTPS 证书（mkcert 生成）
+├── backend/               # Python FastAPI
+├── frontend/              # React + Vite + Tailwind
+├── data/                  # SQLite DB + 临时文件（gitignore）
+├── logs/                  # 应用日志（gitignore）
+└── test_transcribe.py     # ASR 端到端测试脚本
+```
