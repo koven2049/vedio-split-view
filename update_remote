@@ -1,0 +1,3 @@
+rsy-aliyun -i aliyun-sz1 -p vedio-split-view -e ".DS_Store;logs;__pycache__;.mirror_state;.venv;.pytest_cache;*.egg-info;dist;node_modules;app.yaml;data"
+
+rsync -avz data/exports/ data/thumbnails/ root@aliyun-sz1:ai/vedio-split-view/data/

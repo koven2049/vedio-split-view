@@ -138,6 +138,8 @@ async def extract_metadata(
     }
     if settings.network.proxy_enabled and settings.network.http_proxy:
         ydl_opts["proxy"] = settings.network.http_proxy
+    else:
+        ydl_opts["proxy"] = ""
 
     if platform == "bilibili":
         ydl_opts["http_headers"] = _bilibili_headers(sessdata, bili_jct, buvid3)
@@ -273,6 +275,8 @@ async def fetch_bilibili_subtitles(
     }
     if settings.network.proxy_enabled and settings.network.http_proxy:
         ydl_opts["proxy"] = settings.network.http_proxy
+    else:
+        ydl_opts["proxy"] = ""
 
     ydl_opts["http_headers"] = _bilibili_headers(sessdata, bili_jct, buvid3)
     logger.info("[subtitle] Bilibili subtitle fetch (cookies=%s): %s", bool(sessdata), url)
@@ -360,6 +364,8 @@ async def download_audio(
     }
     if settings.network.proxy_enabled and settings.network.http_proxy:
         ydl_opts["proxy"] = settings.network.http_proxy
+    else:
+        ydl_opts["proxy"] = ""
 
     if platform == "bilibili":
         ydl_opts["http_headers"] = _bilibili_headers(sessdata, bili_jct, buvid3)

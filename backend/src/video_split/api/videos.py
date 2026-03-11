@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, or_
@@ -11,6 +12,9 @@ from video_split.database import get_db
 from video_split.dependencies import get_current_user, require_user
 from video_split.models import Tag, User, Video, video_tags
 from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut
+from video_split.service.data_sync import EXPORTS_DIR, _export_filename
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
@@ -180,8 +184,14 @@ async def delete_video(
     video = result.scalar_one_or_none()
     if video is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
+    export_path = EXPORTS_DIR / _export_filename(video.platform, video.video_id)
     await db.delete(video)
     await db.commit()
+    if export_path.exists():
+        try:
+            export_path.unlink()
+        except OSError:
+            logger.warning("[delete] Failed to remove export file %s", export_path)
 
 
 @router.post("/{video_id}/share")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +9,7 @@ from video_split.dependencies import require_admin
 from video_split.models import User, Video
 from video_split.schemas import AdminCreateUser, UserInfo
 from video_split.service.auth_service import hash_password
+from video_split.service.data_sync import export_all_videos, import_videos
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -84,3 +85,29 @@ async def delete_user(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     await db.delete(user)
     await db.commit()
+
+
+@router.post("/export")
+async def admin_export_all(
+    platform: str = Query("", description="Filter by platform: youtube, bilibili, or empty for all"),
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export videos to data/exports/ as JSON files."""
+    count = await export_all_videos(db, platform=platform)
+    return {"exported": count, "platform": platform or "all"}
+
+
+@router.post("/import")
+async def admin_import_videos(
+    target_username: str = Query(..., description="Import videos into this user's library"),
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import videos from data/exports/ into the specified user's library (incremental)."""
+    result = await db.execute(select(User).where(User.username == target_username))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"User '{target_username}' not found")
+    stats = await import_videos(db, user.id)
+    return stats
