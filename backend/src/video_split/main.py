@@ -49,6 +49,8 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
 
     from video_split.api.admin import router as admin_router
     from video_split.api.analysis import router as analysis_router
+    from video_split.api.api_keys import router as api_keys_router
+    from video_split.api.apidocs import router as apidocs_router
     from video_split.api.auth import router as auth_router
     from video_split.api.bilibili import router as bilibili_router
     from video_split.api.debug import router as debug_router
@@ -65,6 +67,8 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     app.include_router(bilibili_router)
     app.include_router(youtube_router)
     app.include_router(admin_router)
+    app.include_router(api_keys_router)
+    app.include_router(apidocs_router)
     app.include_router(debug_router)
 
     @app.middleware("http")

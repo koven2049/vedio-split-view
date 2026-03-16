@@ -6,6 +6,7 @@ import AnalyzePage from './pages/AnalyzePage'
 import LibraryPage from './pages/LibraryPage'
 import VideoDetailPage from './pages/VideoDetailPage'
 import SettingsPage from './pages/SettingsPage'
+import ApiDocsPage from './pages/ApiDocsPage'
 import AdminPage from './pages/AdminPage'
 
 function ProtectedRoute({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/" element={<HomeRedirect />} />
         <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
         <Route path="/video/:id" element={<ProtectedRoute><VideoDetailPage /></ProtectedRoute>} />
+        <Route path="/api-docs" element={<UserOnlyRoute><ApiDocsPage /></UserOnlyRoute>} />
         <Route path="/settings" element={<UserOnlyRoute><SettingsPage /></UserOnlyRoute>} />
         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
       </Route>

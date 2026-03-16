@@ -1,11 +1,12 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Library, Settings, Shield, LogOut, Video } from 'lucide-react'
+import { BookOpen, LayoutDashboard, Library, Settings, Shield, LogOut, Video } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { cn } from '../lib/utils'
 
 const navItems = [
   { path: '/', label: 'Analyze', icon: Video, roles: ['user'] },
   { path: '/library', label: 'Library', icon: Library, roles: ['user', 'admin', 'viewer'] },
+  { path: '/api-docs', label: 'API Docs', icon: BookOpen, roles: ['user'] },
   { path: '/settings', label: 'Settings', icon: Settings, roles: ['user'] },
   { path: '/admin', label: 'Users', icon: Shield, roles: ['admin'] },
 ]

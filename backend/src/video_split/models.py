@@ -38,6 +38,7 @@ class User(Base):
 
     videos: Mapped[list[Video]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     tasks: Mapped[list[Task]] = relationship(back_populates="owner", cascade="all, delete-orphan")
+    api_keys: Mapped[list[ApiKey]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     bilibili_credential: Mapped[BilibiliCredential | None] = relationship(
         back_populates="owner", uselist=False, cascade="all, delete-orphan"
     )
@@ -118,6 +119,21 @@ class Task(Base):
     )
 
     owner: Mapped[User] = relationship(back_populates="tasks")
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    key_hash: Mapped[str] = mapped_column(String(128), unique=True)
+    key_prefix: Mapped[str] = mapped_column(String(16))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    owner: Mapped[User] = relationship(back_populates="api_keys")
 
 
 class BilibiliCredential(Base):

@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { User, Link2, Loader2, CheckCircle, RefreshCw, X } from 'lucide-react'
+import { User, Link2, Loader2, CheckCircle, RefreshCw, X, Key, Copy, Check, Plus, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../stores/authStore'
 
 interface BiliStatus { connected: boolean; bilibili_username: string; expired: boolean }
 interface QRData { qr_key: string; qr_url: string; qr_image_base64: string }
 interface TaskItem { id: number; url: string; status: string; video_title: string; error_message: string }
+interface ApiKeyItem { id: number; name: string; key_prefix: string; is_active: boolean; last_used_at: string | null; created_at: string }
+interface ApiKeyCreated extends ApiKeyItem { full_key: string }
 
 export default function SettingsPage() {
   const { username } = useAuthStore()
@@ -129,6 +131,9 @@ export default function SettingsPage() {
         )}
       </section>
 
+      {/* API Keys */}
+      <ApiKeysSection />
+
       {/* Pending Tasks */}
       <section className="p-5 rounded-xl space-y-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         <h2 className="font-semibold flex items-center gap-2"><RefreshCw size={18} /> Unfinished Tasks</h2>
@@ -151,5 +156,117 @@ export default function SettingsPage() {
         )}
       </section>
     </div>
+  )
+}
+
+
+function ApiKeysSection() {
+  const queryClient = useQueryClient()
+  const [newName, setNewName] = useState('')
+  const [createdKey, setCreatedKey] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const keysQuery = useQuery({
+    queryKey: ['api-keys'],
+    queryFn: () => api.get<ApiKeyItem[]>('/settings/api-keys'),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (name: string) => api.post<ApiKeyCreated>('/settings/api-keys', { name }),
+    onSuccess: (data) => {
+      setCreatedKey(data.full_key)
+      setNewName('')
+      queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.delete(`/settings/api-keys/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['api-keys'] }),
+  })
+
+  const handleCopyKey = async () => {
+    if (!createdKey) return
+    await navigator.clipboard.writeText(createdKey)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const keys = keysQuery.data || []
+
+  return (
+    <section className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+      <h2 className="font-semibold flex items-center gap-2"><Key size={18} /> API Keys</h2>
+      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        Create API keys to allow external services to access your videos via the API.
+      </p>
+
+      {/* Created key banner */}
+      {createdKey && (
+        <div className="p-3 rounded-lg space-y-2" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-success)' }}>
+          <p className="text-sm font-medium" style={{ color: 'var(--color-success)' }}>
+            API key created! Copy it now — it won't be shown again.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="text-xs flex-1 font-mono px-2 py-1.5 rounded" style={{ background: 'var(--color-bg)' }}>
+              {createdKey}
+            </code>
+            <button onClick={handleCopyKey} className="p-1.5 rounded-md" style={{ color: copied ? 'var(--color-success)' : 'var(--color-text-secondary)' }}>
+              {copied ? <Check size={16} /> : <Copy size={16} />}
+            </button>
+          </div>
+          <button onClick={() => setCreatedKey(null)} className="text-xs underline" style={{ color: 'var(--color-text-secondary)' }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Create form */}
+      <div className="flex gap-2">
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="Key name (e.g. my-bot)"
+          className="flex-1 text-sm px-3 py-2 rounded-lg"
+          style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && newName.trim()) createMutation.mutate(newName.trim()) }}
+        />
+        <button
+          onClick={() => newName.trim() && createMutation.mutate(newName.trim())}
+          disabled={!newName.trim() || createMutation.isPending}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+          style={{ background: 'var(--color-primary)' }}
+        >
+          <Plus size={14} /> Create
+        </button>
+      </div>
+
+      {/* Keys list */}
+      {keys.length === 0 ? (
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No API keys yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {keys.map((k) => (
+            <div key={k.id} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{k.name}</p>
+                <p className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                  {k.key_prefix}
+                  {k.last_used_at && <span className="ml-2">· Last used: {new Date(k.last_used_at).toLocaleDateString()}</span>}
+                </p>
+              </div>
+              <button
+                onClick={() => deleteMutation.mutate(k.id)}
+                className="p-1.5 rounded hover:opacity-70"
+                style={{ color: 'var(--color-danger)' }}
+                title="Delete key"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
