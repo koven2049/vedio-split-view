@@ -12,7 +12,7 @@ from video_split.database import get_db
 from video_split.dependencies import require_user
 from video_split.models import ApiKey, User
 
-router = APIRouter(prefix="/api/settings/api-keys", tags=["api-keys"])
+router = APIRouter(tags=["api-keys"])
 
 KEY_PREFIX = "vsk_"
 KEY_BYTES = 24
@@ -45,7 +45,8 @@ def _hash_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-@router.get("", response_model=list[ApiKeyOut])
+@router.get("/api/settings/api-keys", response_model=list[ApiKeyOut])
+@router.get("/api/settings/tokens", response_model=list[ApiKeyOut])
 async def list_api_keys(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
@@ -64,7 +65,8 @@ async def list_api_keys(
     ]
 
 
-@router.post("", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
+@router.post("/api/settings/api-keys", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
+@router.post("/api/settings/tokens", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     body: ApiKeyCreate,
     user: User = Depends(require_user),
@@ -88,7 +90,8 @@ async def create_api_key(
     )
 
 
-@router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/api/settings/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/api/settings/tokens/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_api_key(
     key_id: int,
     user: User = Depends(require_user),

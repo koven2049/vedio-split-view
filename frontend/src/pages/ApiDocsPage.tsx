@@ -202,7 +202,7 @@ export default function ApiDocsPage() {
       >
         <p className="font-medium">Authentication</p>
         <p style={{ color: 'var(--color-text-secondary)' }}>
-          All API requests require an API key. Add the following header:
+          For scripts and external tools, add your API token with the following header:
         </p>
         <div className="flex items-center gap-2">
           <code
@@ -214,7 +214,7 @@ export default function ApiDocsPage() {
           <CopyButton text={data.auth_header} />
         </div>
         <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          Create API keys in <strong>Settings → API Keys</strong>.
+          Create tokens in <strong>Settings → API Tokens</strong>.
         </p>
       </div>
 

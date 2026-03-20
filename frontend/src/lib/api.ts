@@ -2,6 +2,16 @@ import { useAuthStore } from '../stores/authStore'
 
 const BASE = '/api'
 
+export class ApiError extends Error {
+  status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = useAuthStore.getState().token
   const headers: Record<string, string> = {
@@ -19,7 +29,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail || `Request failed: ${res.status}`)
+    throw new ApiError(res.status, body.detail || `Request failed: ${res.status}`)
   }
   if (res.status === 204) return undefined as T
   return res.json()

@@ -1,11 +1,24 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Shield, UserCheck, Trash2, UserPlus, Loader2, Clock } from 'lucide-react'
+import { Shield, UserCheck, Trash2, UserPlus, Loader2, Clock, AlertTriangle, X } from 'lucide-react'
 import { api } from '../lib/api'
 
 interface AdminUser {
   id: number; username: string; role: string
   is_active: boolean; created_at: string; video_count: number
+}
+interface DeletePreview {
+  user_id: number
+  username: string
+  library_videos: number
+  public_videos: number
+  private_videos: number
+  task_count: number
+  api_token_count: number
+  export_files: number
+  thumbnail_files: number
+  temp_dirs: number
+  total_items: number
 }
 
 export default function AdminPage() {
@@ -15,6 +28,8 @@ export default function AdminPage() {
   const [newPassword, setNewPassword] = useState('')
   const [newRole, setNewRole] = useState<'user' | 'viewer'>('user')
   const [formError, setFormError] = useState('')
+  const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
+  const [deleteError, setDeleteError] = useState('')
 
   const usersQuery = useQuery({
     queryKey: ['admin-users'],
@@ -28,7 +43,21 @@ export default function AdminPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (userId: number) => api.delete(`/admin/users/${userId}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      setDeletePreview(null)
+      setDeleteError('')
+    },
+    onError: (e: Error) => setDeleteError(e.message),
+  })
+
+  const previewMutation = useMutation({
+    mutationFn: (userId: number) => api.get<DeletePreview>(`/admin/users/${userId}/delete-preview`),
+    onSuccess: (data) => {
+      setDeletePreview(data)
+      setDeleteError('')
+    },
+    onError: (e: Error) => setDeleteError(e.message),
   })
 
   const createMutation = useMutation({
@@ -49,6 +78,11 @@ export default function AdminPage() {
     if (newUsername.length < 2) { setFormError('Username must be at least 2 characters'); return }
     if (newPassword.length < 4) { setFormError('Password must be at least 4 characters'); return }
     createMutation.mutate({ username: newUsername, password: newPassword, role: newRole })
+  }
+
+  const handleDeleteClick = (userId: number) => {
+    setDeleteError('')
+    previewMutation.mutate(userId)
   }
 
   return (
@@ -124,6 +158,12 @@ export default function AdminPage() {
         </div>
       )}
 
+      {deleteError && !deletePreview && !previewMutation.isPending && (
+        <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', color: 'var(--color-danger)' }}>
+          {deleteError}
+        </div>
+      )}
+
       <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
           <thead>
@@ -185,7 +225,7 @@ export default function AdminPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => { if (confirm(`Delete user "${user.username}" and all their data?`)) deleteMutation.mutate(user.id) }}
+                      onClick={() => handleDeleteClick(user.id)}
                       className="px-2.5 py-1 rounded text-xs"
                       style={{ color: 'var(--color-danger)', border: '1px solid var(--color-border)' }}
                     >
@@ -205,6 +245,80 @@ export default function AdminPage() {
           </tbody>
         </table>
       </div>
+
+      {(previewMutation.isPending || deletePreview) && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full max-w-md p-6 rounded-2xl space-y-4 relative" style={{ background: 'var(--color-bg)' }}>
+            {!deleteMutation.isPending && (
+              <button
+                onClick={() => { setDeletePreview(null); setDeleteError('') }}
+                className="absolute top-3 right-3 opacity-50 hover:opacity-100"
+              >
+                <X size={18} />
+              </button>
+            )}
+
+            {previewMutation.isPending ? (
+              <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                <Loader2 size={16} className="animate-spin" /> Loading delete impact...
+              </div>
+            ) : deletePreview ? (
+              <>
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={20} style={{ color: 'var(--color-danger)' }} />
+                  <div className="space-y-1">
+                    <h3 className="font-semibold">Delete user "{deletePreview.username}"?</h3>
+                    <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                      This will remove the account and permanently delete its related files.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg text-sm space-y-1" style={{ background: 'var(--color-bg-tertiary)' }}>
+                  <p>Library: <strong>{deletePreview.library_videos}</strong></p>
+                  <p>Public: <strong>{deletePreview.public_videos}</strong></p>
+                  <p>Private: <strong>{deletePreview.private_videos}</strong></p>
+                  <p>Tasks: <strong>{deletePreview.task_count}</strong></p>
+                  <p>API tokens: <strong>{deletePreview.api_token_count}</strong></p>
+                </div>
+
+                <div className="text-sm space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  <p>Files to delete: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.total_items}</strong></p>
+                  <p>Export files: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.export_files}</strong></p>
+                  <p>Thumbnails: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.thumbnail_files}</strong></p>
+                  <p>Task temp dirs: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.temp_dirs}</strong></p>
+                </div>
+
+                {deleteError && (
+                  <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', color: 'var(--color-danger)' }}>
+                    {deleteError}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => { setDeletePreview(null); setDeleteError('') }}
+                    disabled={deleteMutation.isPending}
+                    className="px-4 py-2 rounded-lg text-sm"
+                    style={{ border: '1px solid var(--color-border)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => deleteMutation.mutate(deletePreview.user_id)}
+                    disabled={deleteMutation.isPending}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
+                    style={{ background: 'var(--color-danger)' }}
+                  >
+                    {deleteMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    Delete user and files
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -44,6 +44,35 @@ class UserInfo(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AdminUserDeletePreviewOut(BaseModel):
+    user_id: int
+    username: str
+    library_videos: int
+    public_videos: int
+    private_videos: int
+    task_count: int
+    api_token_count: int
+    export_files: int
+    thumbnail_files: int
+    temp_dirs: int
+    total_items: int
+
+
+class AdminCleanupSummaryOut(BaseModel):
+    orphan_exports: int
+    orphan_thumbnails: int
+    orphan_task_dirs: int
+    total_items: int
+
+
+class AdminCleanupResultOut(AdminCleanupSummaryOut):
+    removed_exports: int
+    removed_thumbnails: int
+    removed_task_dirs: int
+    removed_total: int
+    errors: list[str] = []
+
+
 class AnalyzeRequest(BaseModel):
     url: str = Field(min_length=5, max_length=1024)
 

@@ -7,7 +7,7 @@ const navItems = [
   { path: '/', label: 'Analyze', icon: Video, roles: ['user'] },
   { path: '/library', label: 'Library', icon: Library, roles: ['user', 'admin', 'viewer'] },
   { path: '/api-docs', label: 'API Docs', icon: BookOpen, roles: ['user'] },
-  { path: '/settings', label: 'Settings', icon: Settings, roles: ['user'] },
+  { path: '/settings', label: 'Settings', icon: Settings, roles: ['user', 'admin'] },
   { path: '/admin', label: 'Users', icon: Shield, roles: ['admin'] },
 ]
 

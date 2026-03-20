@@ -73,6 +73,36 @@ _API_DOCS = [
         ],
     },
     {
+        "group": "Tokens",
+        "endpoints": [
+            {
+                "method": "GET",
+                "path": "/api/settings/tokens",
+                "description": "List API tokens for the authenticated user.",
+                "params": [],
+                "response": '[{ "id", "name", "key_prefix", "is_active", "last_used_at", "created_at" }]',
+            },
+            {
+                "method": "POST",
+                "path": "/api/settings/tokens",
+                "description": "Issue a new API token. The full token is returned only once.",
+                "params": [
+                    {"name": "name", "in": "body", "type": "string", "description": "Token name"},
+                ],
+                "response": '{ "id", "name", "key_prefix", "full_key", "is_active", "created_at" }',
+            },
+            {
+                "method": "DELETE",
+                "path": "/api/settings/tokens/{token_id}",
+                "description": "Delete an API token.",
+                "params": [
+                    {"name": "token_id", "in": "path", "type": "int", "description": "Token ID"},
+                ],
+                "response": "204 No Content",
+            },
+        ],
+    },
+    {
         "group": "Analysis",
         "endpoints": [
             {
