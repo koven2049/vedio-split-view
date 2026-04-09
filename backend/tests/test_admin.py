@@ -84,6 +84,34 @@ async def test_admin_toggle_user(client):
 
 
 @pytest.mark.asyncio
+async def test_admin_reset_user_password(client):
+    admin_token = await get_admin_token(client)
+    await admin_create_user(client, "reset_password_user", password="oldpass123", role="user")
+
+    users_resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
+    target = next(u for u in users_resp.json() if u["username"] == "reset_password_user")
+
+    reset_resp = await client.put(
+        f"/api/admin/users/{target['id']}/password",
+        json={"password": "newpass456"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert reset_resp.status_code == 200
+
+    old_login = await client.post(
+        "/api/auth/login",
+        json={"username": "reset_password_user", "password": "oldpass123"},
+    )
+    assert old_login.status_code == 401
+
+    new_login = await client.post(
+        "/api/auth/login",
+        json={"username": "reset_password_user", "password": "newpass456"},
+    )
+    assert new_login.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_admin_delete_user(client):
     admin_token = await get_admin_token(client)
     await admin_create_user(client, "delete_admin_user", role="user")

@@ -34,6 +34,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(16), default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     lang_preference: Mapped[str] = mapped_column(String(4), default="zh")
+    preferences_json: Mapped[str] = mapped_column(Text, default="{}")
+    usage_stats_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     videos: Mapped[list[Video]] = relationship(back_populates="owner", cascade="all, delete-orphan")

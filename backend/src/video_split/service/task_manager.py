@@ -31,12 +31,13 @@ async def count_pending_tasks(db: AsyncSession, user_id: int) -> int:
     return result.scalar() or 0
 
 
-async def check_task_quota(db: AsyncSession, user_id: int) -> None:
+async def check_task_quota(db: AsyncSession, user_id: int, max_override: int = 0) -> None:
     settings = get_settings()
+    limit = max_override or settings.storage.max_pending_tasks_per_user
     count = await count_pending_tasks(db, user_id)
-    if count >= settings.storage.max_pending_tasks_per_user:
+    if count >= limit:
         raise QuotaExceededError(
-            f"You have {count} unfinished tasks (max {settings.storage.max_pending_tasks_per_user}). "
+            f"You have {count} unfinished tasks (max {limit}). "
             "Please retry or delete them before starting a new analysis."
         )
 
@@ -108,6 +109,21 @@ async def get_user_tasks(db: AsyncSession, user_id: int) -> list[Task]:
         select(Task)
         .where(Task.user_id == user_id)
         .where(Task.status.notin_(TERMINAL_STATUSES))
+        .order_by(Task.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_user_recoverable_tasks(db: AsyncSession, user_id: int) -> list[Task]:
+    """Return tasks that should still be visible on Analyze page after restarts.
+
+    This intentionally includes ``failed_download`` so interrupted jobs that were
+    recovered during startup remain visible to the user instead of disappearing.
+    """
+    result = await db.execute(
+        select(Task)
+        .where(Task.user_id == user_id)
+        .where(Task.status.notin_({"completed", "cancelled"}))
         .order_by(Task.created_at.desc())
     )
     return list(result.scalars().all())

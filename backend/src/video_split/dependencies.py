@@ -66,3 +66,9 @@ async def require_user(user: User = Depends(get_current_user)) -> User:
     if user.role != "user":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "User access required for this action")
     return user
+
+
+async def require_user_or_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role not in {"user", "admin"}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "User or admin access required for this action")
+    return user

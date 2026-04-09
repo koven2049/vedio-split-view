@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from video_split.config import get_settings
-from video_split.dependencies import require_user
+from video_split.dependencies import require_user_or_admin
 from video_split.models import User
+from video_split.service.downloader import _apply_youtube_opts
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
+
+_YT_PROBE_VIDEO_ID = "jNQXAC9IVRw"
+_BOT_HINT = "not a bot"
 
 
 class CookiesStatusOut(BaseModel):
@@ -23,6 +29,50 @@ class CookiesStatusOut(BaseModel):
     expired: bool = False
     cookie_count: int = 0
     domain_summary: str = ""
+    usability_checked: bool = False
+    usable: bool | None = None
+    usability_message: str = ""
+    checked_at: str | None = None
+
+
+def _probe_youtube_cookiefile() -> tuple[bool | None, str]:
+    """Check whether the configured YouTube cookies can pass a lightweight yt-dlp probe."""
+    import yt_dlp
+
+    settings = get_settings()
+    ydl_opts: dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extract_flat": True,
+        "socket_timeout": 20,
+        "extractor_retries": 1,
+    }
+    if settings.network.proxy_enabled and settings.network.http_proxy:
+        ydl_opts["proxy"] = settings.network.http_proxy
+    else:
+        ydl_opts["proxy"] = ""
+    _apply_youtube_opts(ydl_opts)
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/watch?v={_YT_PROBE_VIDEO_ID}",
+                download=False,
+            )
+        if info:
+            return True, "Cookies look usable for yt-dlp metadata requests."
+        return None, "Probe completed but returned no metadata."
+    except Exception as exc:
+        message = str(exc).strip()
+        lower = message.lower()
+        if _BOT_HINT in lower or "sign in to confirm" in lower:
+            return False, "Configured cookies are present, but YouTube still requires bot/login verification."
+        if "cookie" in lower and ("expired" in lower or "invalid" in lower):
+            return False, "Configured cookies were rejected by YouTube."
+        if "proxy" in lower:
+            return None, f"Probe could not reach YouTube through the configured proxy: {message}"
+        return None, f"Probe failed: {message}"
 
 
 def _parse_cookies_file(path: str) -> list[dict]:
@@ -53,22 +103,23 @@ def _parse_cookies_file(path: str) -> list[dict]:
 
 
 @router.get("/cookies-status", response_model=CookiesStatusOut)
-async def cookies_status(_user: User = Depends(require_user)):
+async def cookies_status(_user: User = Depends(require_user_or_admin)):
     settings = get_settings()
     path_str = settings.network.youtube_cookies_file
+    checked_at = datetime.now(tz=timezone.utc).isoformat()
     if not path_str:
-        return CookiesStatusOut()
+        return CookiesStatusOut(checked_at=checked_at)
 
     p = Path(path_str)
     if not p.is_absolute():
         p = Path("config") / p
 
     if not p.exists():
-        return CookiesStatusOut(configured=True, file_exists=False)
+        return CookiesStatusOut(configured=True, file_exists=False, checked_at=checked_at)
 
     cookies = _parse_cookies_file(path_str)
     if not cookies:
-        return CookiesStatusOut(configured=True, file_exists=True)
+        return CookiesStatusOut(configured=True, file_exists=True, checked_at=checked_at)
 
     yt_cookies = [c for c in cookies if "youtube" in c["domain"] or "google" in c["domain"]]
     auth_names = {"SID", "HSID", "SSID", "APISID", "SAPISID", "LOGIN_INFO", "__Secure-1PSID", "__Secure-3PSID"}
@@ -84,11 +135,21 @@ async def cookies_status(_user: User = Depends(require_user)):
             configured=True, file_exists=True,
             cookie_count=len(cookies),
             domain_summary=f"{len(yt_cookies)} YouTube/Google cookies",
+            checked_at=checked_at,
         )
 
     earliest = min(relevant, key=lambda c: c["expiry"])
     expiry_dt = datetime.fromtimestamp(earliest["expiry"], tz=timezone.utc)
     now = datetime.now(tz=timezone.utc)
+    usable: bool | None = None
+    usability_message = ""
+    usability_checked = False
+
+    if expiry_dt >= now:
+        usability_checked = True
+        usable, usability_message = await asyncio.get_running_loop().run_in_executor(
+            None, _probe_youtube_cookiefile,
+        )
 
     return CookiesStatusOut(
         configured=True,
@@ -98,4 +159,8 @@ async def cookies_status(_user: User = Depends(require_user)):
         expired=expiry_dt < now,
         cookie_count=len(yt_cookies),
         domain_summary=f"{len(auth_cookies)} auth cookies, earliest: {earliest['name']}",
+        usability_checked=usability_checked,
+        usable=usable,
+        usability_message=usability_message,
+        checked_at=checked_at,
     )

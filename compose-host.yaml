@@ -5,21 +5,20 @@ services:
       args:
         REGISTRY: ${REGISTRY:-docker.io}
     container_name: vsplit-backend
-    ports:
-      - "${APP_PORT:-8080}:8080"
+    network_mode: "host"
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data
       - ./logs:/app/logs
     environment:
-      - PORT=8080
+      - PORT=${APP_PORT:-8080}
       - http_proxy=
       - https_proxy=
       - HTTP_PROXY=
       - HTTPS_PROXY=
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:${APP_PORT:-8080}/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -30,8 +29,7 @@ services:
       args:
         REGISTRY: ${REGISTRY:-docker.io}
     container_name: vsplit-frontend
-    ports:
-      - "${FRONTEND_PORT:-5180}:443"
+    network_mode: "host"
     volumes:
       - ./config/certs:/etc/nginx/certs:ro
       - ./logs/nginx:/var/log/nginx

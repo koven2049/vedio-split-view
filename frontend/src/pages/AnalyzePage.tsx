@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, Download, Play, Save, Share2, Loader2, AlertCircle, Trash2, Copy, CheckCircle2, FileAudio, TriangleAlert, Cookie } from 'lucide-react'
+import { Search, Download, Play, Save, Share2, Loader2, AlertCircle, Trash2, Copy, CheckCircle2, FileAudio, TriangleAlert, Cookie, X, RefreshCw } from 'lucide-react'
 import { createSSE, api } from '../lib/api'
 import { formatDuration, formatTimeRange, generatePlaybackUrl, platformLabel, cn } from '../lib/utils'
-import { useAnalysisStore } from '../stores/analysisStore'
+import { useAnalysisStore, type SlotState } from '../stores/analysisStore'
 import LangToggle from '../components/LangToggle'
 import UsageDisplay from '../components/UsageDisplay'
 import { useLangPreference } from '../hooks/useLangPreference'
@@ -30,6 +30,17 @@ interface CookiesStatus {
   expired: boolean
   cookie_count: number
   domain_summary: string
+  usability_checked: boolean
+  usable: boolean | null
+  usability_message: string
+  checked_at: string | null
+}
+
+interface PreferencesData {
+  max_duration_seconds: number
+  confirm_threshold_seconds: number
+  max_concurrent_analyses: number
+  defaults: { max_duration_seconds: number; confirm_threshold_seconds: number; max_concurrent_analyses: number }
 }
 
 const STAGES = ['metadata', 'subtitle_check', 'audio_download', 'transcription', 'analysis', 'complete']
@@ -50,18 +61,283 @@ function detectPlatform(url: string): 'youtube' | 'bilibili' | null {
   return null
 }
 
+function AnalysisSlotCard({
+  slot,
+  lang,
+  setLang,
+  onNavigateVideo,
+  onRetry,
+  canRetry,
+}: {
+  slot: SlotState
+  lang: 'zh' | 'en'
+  setLang: (l: 'zh' | 'en') => void
+  onNavigateVideo: (videoId: number) => void
+  onRetry?: () => void
+  canRetry: boolean
+}) {
+  const store = useAnalysisStore()
+  const queryClient = useQueryClient()
+  const { analyzing, progress, stepLog, result, error, completedVideoId, pendingConfirm, slotId } = slot
+
+  useEffect(() => {
+    if (completedVideoId) {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['videos'] })
+      store.fetchResultDetails(slotId, completedVideoId)
+    }
+  }, [completedVideoId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const currentStageIndex = progress ? STAGES.indexOf(progress.stage) : -1
+
+  const hasMetadata = !!(slot.title || slot.uploader || slot.durationSeconds)
+
+  return (
+    <div className="space-y-4">
+      {/* Header with metadata */}
+      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+        <div className="flex items-start gap-3 px-4 py-3" style={{ background: 'var(--color-bg-secondary)' }}>
+          {slot.thumbnailUrl && (
+            <img src={slot.thumbnailUrl} alt="" className="w-24 h-14 object-cover rounded-md shrink-0 mt-0.5" />
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(59,130,246,0.1)', color: 'var(--color-primary)' }}>
+                {platformLabel(slot.platform)}
+              </span>
+              {slot.status && !analyzing && (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                  style={{
+                    background: slot.status.startsWith('failed') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(59,130,246,0.1)',
+                    color: slot.status.startsWith('failed') ? 'var(--color-danger)' : 'rgb(59,130,246)',
+                  }}
+                >
+                  {slot.status}
+                </span>
+              )}
+              {slot.reconnected && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(59,130,246,0.1)', color: 'rgb(59,130,246)' }}>
+                  Reconnected
+                </span>
+              )}
+              <div className="flex-1" />
+              {!analyzing && (
+                <button onClick={() => store.removeSlot(slotId)} className="p-1 rounded hover:opacity-70 shrink-0" title="Dismiss">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
+              {slot.title || slot.url}
+            </p>
+            {hasMetadata && (
+              <div className="flex items-center gap-3 mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {slot.uploader && <span>{slot.uploader}</span>}
+                {slot.durationSeconds != null && slot.durationSeconds > 0 && <span>{formatDuration(slot.durationSeconds)}</span>}
+                {slot.uploadDate && <span>{slot.uploadDate}</span>}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Progress */}
+      {(analyzing || stepLog.length > 0) && progress && (
+        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <div className="px-5 pt-4 pb-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {analyzing && <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-primary)' }} />}
+                <span className="text-sm font-medium">{progress.message}</span>
+              </div>
+              {analyzing && (
+                <button onClick={() => store.cancelAnalysis(slotId)} className="px-3 py-1 rounded-lg text-xs font-medium transition-opacity hover:opacity-70" style={{ border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}>
+                  Cancel
+                </button>
+              )}
+            </div>
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
+              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress.progress}%`, background: 'var(--color-primary)' }} />
+            </div>
+            <div className="flex gap-1.5 items-center">
+              {STAGES.slice(0, -1).map((stage, i) => {
+                const isCurrent = stage === progress.stage
+                const isDone = i < currentStageIndex
+                const isSkipped = stage === 'audio_download' && stepLog.some((s) => s.detail?.method === 'subtitle')
+                const isSkippedTranscript = stage === 'transcription' && stepLog.some((s) => s.detail?.method === 'subtitle')
+                return (
+                  <div key={stage} className="flex items-center gap-1.5">
+                    <div className={cn('rounded-full transition-all', isCurrent ? 'w-2.5 h-2.5' : 'w-2 h-2')}
+                      style={{
+                        background: (isSkipped || isSkippedTranscript)
+                          ? 'var(--color-text-secondary)'
+                          : (isDone || isCurrent) ? 'var(--color-primary)' : 'var(--color-bg-tertiary)',
+                        opacity: (isSkipped || isSkippedTranscript) ? 0.4 : 1,
+                      }} />
+                    <span className="text-[10px] pr-2" style={{ color: isCurrent ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: isCurrent ? 600 : 400 }}>
+                      {(isSkipped || isSkippedTranscript) ? <s>{STAGE_LABELS[stage]}</s> : STAGE_LABELS[stage]}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {stepLog.some((s) => s.detail?.method) && (
+            <div className="px-5 pb-2">
+              {stepLog.filter((s) => s.detail?.method).slice(-1).map((s, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+                  style={{
+                    background: s.detail?.method === 'subtitle' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                    color: s.detail?.method === 'subtitle' ? 'rgb(16, 185, 129)' : 'rgb(59, 130, 246)',
+                  }}>
+                  {s.detail?.method === 'subtitle' ? '📝 Using subtitles (fast, free)' : '🎤 Using Whisper transcription (slower, costs API credits)'}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {stepLog.length > 0 && (
+            <div className="px-5 pb-4">
+              <div className="max-h-48 overflow-y-auto space-y-0.5 rounded-lg p-3" style={{ background: 'var(--color-bg-tertiary)' }}>
+                {stepLog.map((entry, i) => (
+                  <div key={i} className="flex items-start gap-2 py-1 text-xs" style={{ color: entry.stage === 'error' ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>
+                    <span className="shrink-0 opacity-50 font-mono tabular-nums" style={{ minWidth: '52px' }}>
+                      {new Date(entry.timestamp).toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <span className="shrink-0 font-medium uppercase tracking-wider" style={{ minWidth: '90px', color: entry.stage === 'error' ? 'var(--color-danger)' : 'var(--color-primary)', fontSize: '10px', lineHeight: '16px' }}>
+                      {STAGE_LABELS[entry.stage] ?? entry.stage}
+                    </span>
+                    <span style={{ color: entry.stage === 'error' ? 'var(--color-danger)' : 'var(--color-text)' }}>
+                      {entry.message}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="p-4 rounded-xl flex items-start gap-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-danger)' }}>
+          <AlertCircle size={18} style={{ color: 'var(--color-danger)' }} className="mt-0.5 shrink-0" />
+          <p className="text-sm flex-1">{error}</p>
+          {slot.taskId && onRetry && (
+            <button
+              onClick={onRetry}
+              disabled={!canRetry}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40 shrink-0"
+              style={{ background: 'var(--color-primary)' }}
+            >
+              <RefreshCw size={13} /> Retry
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Confirm Modal */}
+      {pendingConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="relative w-full max-w-sm mx-4 rounded-2xl shadow-2xl p-6 space-y-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-full" style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
+                <AlertCircle size={20} style={{ color: 'var(--color-warning, #f59e0b)' }} />
+              </div>
+              <h3 className="text-base font-semibold">Video Duration Warning</h3>
+            </div>
+            <div className="space-y-2">
+              {pendingConfirm.title && <p className="text-sm font-medium">{pendingConfirm.title}</p>}
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                Video duration is <strong>{formatDuration(pendingConfirm.durationSeconds)}</strong>.
+                Processing may take a while and consume API credits. Continue?
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => store.declineTask(slotId)} className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>Cancel</button>
+              <button onClick={() => store.confirmTask(slotId)} className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90" style={{ background: 'var(--color-primary)' }}>Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Result */}
+      {result && result.title && (
+        <div className="space-y-6">
+          <div className="p-5 rounded-xl" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            <div className="flex gap-4">
+              {result.thumbnail_url && (
+                <img src={result.thumbnail_url} alt="" className="w-48 h-28 object-cover rounded-lg shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h2 className="text-lg font-semibold truncate">{result.title}</h2>
+                    <a href={generatePlaybackUrl(result.platform, result.videoId, 0)} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-lg hover:opacity-70 transition-opacity shrink-0" style={{ color: 'var(--color-primary)' }} title="Play from beginning">
+                      <Play size={16} />
+                    </a>
+                  </div>
+                  {result.summary_en && <LangToggle lang={lang} onChange={setLang} className="shrink-0 ml-3" />}
+                </div>
+                <div className="flex items-center gap-3 text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span>{platformLabel(result.platform)}</span>
+                  <span>{formatDuration(result.duration_seconds)}</span>
+                  {result.upload_date && <span>{result.upload_date}</span>}
+                </div>
+                <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {lang === 'en' && result.summary_en ? result.summary_en : result.summary}
+                </p>
+              </div>
+            </div>
+            {result.usage && (
+              <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+                <UsageDisplay usage={result.usage} />
+              </div>
+            )}
+            <div className="flex gap-2 mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <button onClick={() => result.video_id && onNavigateVideo(result.video_id)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white" style={{ background: 'var(--color-primary)' }}>
+                <Save size={14} /> View Details
+              </button>
+              <button onClick={() => result.video_id && api.post(`/videos/${result.video_id}/share`)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm" style={{ border: '1px solid var(--color-border)' }}>
+                <Share2 size={14} /> Share
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold">Segments ({result.segments.length})</h3>
+            {result.segments.map((seg) => (
+              <div key={seg.index} className="p-4 rounded-xl flex items-start gap-4 hover:shadow-sm transition-shadow" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                <span className="text-xs font-mono px-2 py-1 rounded shrink-0" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)' }}>
+                  {formatTimeRange(seg.start_seconds, seg.end_seconds)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-medium text-sm mb-1">{lang === 'en' && seg.title_en ? seg.title_en : seg.title}</h4>
+                  <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{lang === 'en' && seg.summary_en ? seg.summary_en : seg.summary}</p>
+                </div>
+                <a href={generatePlaybackUrl(result.platform, result.videoId, seg.start_seconds)} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:opacity-70 transition-opacity shrink-0" style={{ color: 'var(--color-primary)' }} title="Play from here">
+                  <Play size={18} />
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 export default function AnalyzePage() {
   const store = useAnalysisStore()
 
   const [activeTab, setActiveTab] = useState<'youtube' | 'bilibili'>('youtube')
-
-  const slot = store.getSlot(activeTab)
-  const { analyzing, progress, stepLog, result, error, completedVideoId, pendingConfirm } = slot
-
-  const [url, setUrl] = useState(() => slot.url || '')
+  const [draftUrls, setDraftUrls] = useState<string[]>([''])
   const { lang, setLang } = useLangPreference()
 
-  // Download-only local state
   const [downloading, setDownloading] = useState(false)
   const [downloadStatus, setDownloadStatus] = useState('')
   const [downloadProgress, setDownloadProgress] = useState(0)
@@ -86,17 +362,35 @@ export default function AnalyzePage() {
     retry: false,
   })
 
-  // Sync URL input when switching tabs or navigating back
-  useEffect(() => {
-    const tabSlot = store.getSlot(activeTab)
-    if (tabSlot.url) {
-      setUrl(tabSlot.url)
-    } else {
-      setUrl('')
-    }
-  }, [activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { data: prefs } = useQuery({
+    queryKey: ['user-preferences'],
+    queryFn: () => api.get<PreferencesData>('/auth/preferences'),
+    staleTime: 60_000,
+  })
 
-  // Load existing downloaded task on mount
+  const maxConcurrent = prefs?.max_concurrent_analyses ?? 3
+  const analyzingCount = store.countAnalyzing()
+  const activeSlots = store.getActiveSlots()
+  const availableSlotCount = Math.max(0, maxConcurrent - analyzingCount)
+
+  const MAX_FAILED_DISPLAY = 3
+  const runningOrDoneSlots = activeSlots.filter((s) => s.analyzing || (!s.error && s.result))
+  const failedSlots = activeSlots.filter((s) => !s.analyzing && !!s.error)
+  const displaySlots = [...runningOrDoneSlots, ...failedSlots.slice(0, MAX_FAILED_DISPLAY)]
+  const visibleInputCount = Math.max(1, availableSlotCount)
+
+  useEffect(() => {
+    setDraftUrls((prev) => {
+      const next = prev.slice(0, visibleInputCount)
+      while (next.length < visibleInputCount) next.push('')
+      return next
+    })
+  }, [visibleInputCount])
+
+  useEffect(() => {
+    store.reconnectActiveTasks()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     api.get<Array<{
       task_id: number; url: string; platform: string; status: string
@@ -115,30 +409,22 @@ export default function AnalyzePage() {
           chunks: downloaded.chunks ?? [],
           chunk_duration_config: 0,
           quota_used: tasks.length,
-          quota_max: 3,
+          quota_max: maxConcurrent,
         })
       }
     }).catch(() => {})
-  }, [])
+  }, [maxConcurrent])
 
-  // Handle analysis completion: invalidate queries + fetch details
-  useEffect(() => {
-    if (completedVideoId) {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: ['videos'] })
-      store.fetchResultDetails(activeTab, completedVideoId)
-    }
-  }, [completedVideoId, queryClient, activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleUrlChange = (value: string) => {
-    setUrl(value)
+  const handleUrlChange = (index: number, value: string) => {
+    setDraftUrls((prev) => prev.map((item, itemIndex) => (itemIndex === index ? value : item)))
     if (downloadError) setDownloadError('')
     const detected = detectPlatform(value)
     if (detected) setActiveTab(detected)
   }
 
-  const validatePlatformMatch = (): boolean => {
-    const detected = detectPlatform(url)
+  const validatePlatformMatch = (inputUrl: string): boolean => {
+    const trimmed = inputUrl.trim()
+    const detected = detectPlatform(trimmed)
     if (!detected) {
       setDownloadError(activeTab === 'youtube'
         ? '请输入有效的 YouTube 链接 (youtube.com / youtu.be)'
@@ -154,20 +440,28 @@ export default function AnalyzePage() {
     return true
   }
 
-  const handleAnalyze = () => {
-    if (!validatePlatformMatch()) return
-    store.startAnalysis(activeTab, url)
+  const handleAnalyze = async (index: number) => {
+    const inputUrl = draftUrls[index]?.trim() || ''
+    if (!validatePlatformMatch(inputUrl)) return
+    if (analyzingCount >= maxConcurrent) {
+      setDownloadError(`已达到并发上限 (${maxConcurrent})，请等待当前分析完成`)
+      return
+    }
+    await store.startAnalysis(activeTab, inputUrl)
+    setDraftUrls((prev) => prev.map((item, itemIndex) => (itemIndex === index ? '' : item)))
   }
 
   const handleAnalyzeDownloaded = () => {
     if (!downloadResult) return
     const platform = downloadResult.platform as 'youtube' | 'bilibili'
+    const taskId = downloadResult.task_id
     setDownloadResult(null)
-    store.startTaskRetry(platform, downloadResult.task_id)
+    void store.retryTask(platform, taskId)
   }
 
-  const handleDownloadOnly = () => {
-    if (!validatePlatformMatch()) return
+  const handleDownloadOnly = (index: number) => {
+    const inputUrl = draftUrls[index]?.trim() || ''
+    if (!validatePlatformMatch(inputUrl)) return
     setDownloading(true)
     setDownloadResult(null)
     setDownloadProgress(0)
@@ -180,7 +474,7 @@ export default function AnalyzePage() {
 
     const samples: Array<{ time: number; pct: number }> = []
 
-    const sse = createSSE('/debug/download', { url }, (_event, raw) => {
+    const sse = createSSE('/debug/download', { url: inputUrl }, (_event, raw) => {
       const d = raw as { stage: string; progress: number; message: string; detail?: Record<string, unknown> }
 
       if (d.stage === 'error') {
@@ -287,21 +581,24 @@ export default function AnalyzePage() {
     setTimeout(() => setCopiedPath(''), 2000)
   }
 
-  const currentStageIndex = progress ? STAGES.indexOf(progress.stage) : -1
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold mb-1">Analyze Video</h1>
         <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
           Paste a video URL to extract topics and segments
+          {maxConcurrent > 1 && (
+            <span className="ml-2 opacity-60">
+              (running: {analyzingCount}/{maxConcurrent}, available: {availableSlotCount})
+            </span>
+          )}
         </p>
       </div>
 
       {/* Platform Tabs */}
       <div className="flex gap-1 p-1 rounded-lg w-fit" style={{ background: 'var(--color-bg-tertiary)' }}>
         {(['youtube', 'bilibili'] as const).map((tab) => {
-          const tabSlot = store.getSlot(tab)
+          const tabAnalyzing = activeSlots.some((s) => s.platform === tab && s.analyzing)
           return (
             <button
               key={tab}
@@ -310,7 +607,7 @@ export default function AnalyzePage() {
               style={activeTab === tab ? { background: 'var(--color-bg)', color: 'var(--color-primary)' } : {}}
             >
               {platformLabel(tab)}
-              {tabSlot.analyzing && activeTab !== tab && (
+              {tabAnalyzing && activeTab !== tab && (
                 <Loader2 size={12} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
               )}
             </button>
@@ -339,6 +636,22 @@ export default function AnalyzePage() {
             </div>
           )
         }
+        if (cs.usability_checked && cs.usable === false) {
+          return (
+            <div className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--color-danger)' }}>
+              <Cookie size={13} />
+              <span>{cs.usability_message || 'YouTube cookies 已配置，但当前不可用'}</span>
+            </div>
+          )
+        }
+        if (cs.usability_checked && cs.usable === null) {
+          return (
+            <div className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--color-warning, #f59e0b)' }}>
+              <Cookie size={13} />
+              <span>{cs.usability_message || 'YouTube cookies 探测未得到确定结果'}</span>
+            </div>
+          )
+        }
         if (cs.earliest_expiry) {
           const expiryDate = new Date(cs.earliest_expiry).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
           const daysLeft = cs.earliest_expiry_ts
@@ -359,38 +672,42 @@ export default function AnalyzePage() {
         return null
       })()}
 
-      {/* URL Input */}
-      <div className="flex gap-3">
-        <div className="flex-1 relative">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" />
-          <input
-            type="text"
-            value={url}
-            onChange={(e) => handleUrlChange(e.target.value)}
-            placeholder={activeTab === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'https://www.bilibili.com/video/BV...'}
-            disabled={analyzing || downloading}
-            className="w-full pl-10 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
-            style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
-          />
-        </div>
-        <button
-          onClick={handleAnalyze}
-          disabled={analyzing || downloading || !url.trim()}
-          className="px-6 py-3 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-40"
-          style={{ background: 'var(--color-primary)' }}
-        >
-          {analyzing ? <Loader2 size={18} className="animate-spin" /> : 'Analyze'}
-        </button>
-        <button
-          onClick={handleDownloadOnly}
-          disabled={analyzing || downloading || !url.trim()}
-          className="px-4 py-3 rounded-xl text-sm font-medium transition-colors disabled:opacity-40 flex items-center gap-2"
-          style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
-          title="Download audio only (for testing)"
-        >
-          {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-          <span className="hidden sm:inline">Download Only</span>
-        </button>
+      {/* URL Inputs */}
+      <div className="space-y-3">
+        {draftUrls.map((draftUrl, index) => (
+          <div key={`input-${index}`} className="flex gap-3">
+            <div className="flex-1 relative">
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" />
+              <input
+                type="text"
+                value={draftUrl}
+                onChange={(e) => handleUrlChange(index, e.target.value)}
+                placeholder={activeTab === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'https://www.bilibili.com/video/BV...'}
+                disabled={downloading}
+                className="w-full pl-10 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
+                style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+            <button
+              onClick={() => void handleAnalyze(index)}
+              disabled={downloading || !draftUrl.trim() || analyzingCount >= maxConcurrent}
+              className="px-6 py-3 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-40"
+              style={{ background: 'var(--color-primary)' }}
+            >
+              Analyze
+            </button>
+            <button
+              onClick={() => handleDownloadOnly(index)}
+              disabled={downloading || !draftUrl.trim()}
+              className="px-4 py-3 rounded-xl text-sm font-medium transition-colors disabled:opacity-40 flex items-center gap-2"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+              title="Download audio only (for testing)"
+            >
+              {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              <span className="hidden sm:inline">Download Only</span>
+            </button>
+          </div>
+        ))}
       </div>
 
       {/* Download Progress */}
@@ -442,84 +759,27 @@ export default function AnalyzePage() {
         </div>
       )}
 
-      {/* Analysis Progress */}
-      {(analyzing || stepLog.length > 0) && progress && (
-        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          {/* Header with progress bar */}
-          <div className="px-5 pt-4 pb-3 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {analyzing && <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-primary)' }} />}
-                <span className="text-sm font-medium">{progress.message}</span>
-              </div>
-              {analyzing && (
-                <button onClick={() => store.cancelAnalysis(activeTab)} className="px-3 py-1 rounded-lg text-xs font-medium transition-opacity hover:opacity-70" style={{ border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}>
-                  Cancel
-                </button>
-              )}
-            </div>
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
-              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress.progress}%`, background: 'var(--color-primary)' }} />
-            </div>
-            {/* Stage dots */}
-            <div className="flex gap-1.5 items-center">
-              {STAGES.slice(0, -1).map((stage, i) => {
-                const isCurrent = stage === progress.stage
-                const isDone = i < currentStageIndex
-                const isSkipped = stage === 'audio_download' && stepLog.some((s) => s.detail?.method === 'subtitle')
-                const isSkippedTranscript = stage === 'transcription' && stepLog.some((s) => s.detail?.method === 'subtitle')
-                return (
-                  <div key={stage} className="flex items-center gap-1.5">
-                    <div className={cn('rounded-full transition-all', isCurrent ? 'w-2.5 h-2.5' : 'w-2 h-2')}
-                      style={{
-                        background: (isSkipped || isSkippedTranscript)
-                          ? 'var(--color-text-secondary)'
-                          : (isDone || isCurrent) ? 'var(--color-primary)' : 'var(--color-bg-tertiary)',
-                        opacity: (isSkipped || isSkippedTranscript) ? 0.4 : 1,
-                      }} />
-                    <span className="text-[10px] pr-2" style={{ color: isCurrent ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: isCurrent ? 600 : 400 }}>
-                      {(isSkipped || isSkippedTranscript) ? <s>{STAGE_LABELS[stage]}</s> : STAGE_LABELS[stage]}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Method Badge */}
-          {stepLog.some((s) => s.detail?.method) && (
-            <div className="px-5 pb-2">
-              {stepLog.filter((s) => s.detail?.method).slice(-1).map((s, i) => (
-                <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
-                  style={{
-                    background: s.detail?.method === 'subtitle' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)',
-                    color: s.detail?.method === 'subtitle' ? 'rgb(16, 185, 129)' : 'rgb(59, 130, 246)',
-                  }}>
-                  {s.detail?.method === 'subtitle' ? '📝 Using subtitles (fast, free)' : '🎤 Using Whisper transcription (slower, costs API credits)'}
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Step Timeline */}
-          {stepLog.length > 0 && (
-            <div className="px-5 pb-4">
-              <div className="max-h-48 overflow-y-auto space-y-0.5 rounded-lg p-3" style={{ background: 'var(--color-bg-tertiary)' }}>
-                {stepLog.map((entry, i) => (
-                  <div key={i} className="flex items-start gap-2 py-1 text-xs" style={{ color: entry.stage === 'error' ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>
-                    <span className="shrink-0 opacity-50 font-mono tabular-nums" style={{ minWidth: '52px' }}>
-                      {new Date(entry.timestamp).toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </span>
-                    <span className="shrink-0 font-medium uppercase tracking-wider" style={{ minWidth: '90px', color: entry.stage === 'error' ? 'var(--color-danger)' : 'var(--color-primary)', fontSize: '10px', lineHeight: '16px' }}>
-                      {STAGE_LABELS[entry.stage] ?? entry.stage}
-                    </span>
-                    <span style={{ color: entry.stage === 'error' ? 'var(--color-danger)' : 'var(--color-text)' }}>
-                      {entry.message}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+      {/* Active Analysis Slots */}
+      {displaySlots.length > 0 && (
+        <div className="space-y-6">
+          {displaySlots.map((slot) => (
+            <AnalysisSlotCard
+              key={slot.slotId}
+              slot={slot}
+              lang={lang}
+              setLang={setLang}
+              onNavigateVideo={(id) => navigate(`/video/${id}`)}
+              canRetry={analyzingCount < maxConcurrent}
+              onRetry={slot.taskId ? () => {
+                store.removeSlot(slot.slotId)
+                void store.retryTask(slot.platform, slot.taskId!, slot.url)
+              } : undefined}
+            />
+          ))}
+          {failedSlots.length > MAX_FAILED_DISPLAY && (
+            <p className="text-xs text-center" style={{ color: 'var(--color-text-secondary)' }}>
+              {failedSlots.length - MAX_FAILED_DISPLAY} more failed task(s) hidden — check Library for full list
+            </p>
           )}
         </div>
       )}
@@ -540,7 +800,7 @@ export default function AnalyzePage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleAnalyzeDownloaded}
-                disabled={analyzing || cleaning}
+                disabled={analyzingCount >= maxConcurrent || cleaning}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                 style={{ background: 'var(--color-primary)' }}
               >
@@ -548,7 +808,7 @@ export default function AnalyzePage() {
               </button>
               <button
                 onClick={() => setConfirmCleanup(downloadResult.task_id)}
-                disabled={cleaning || analyzing}
+                disabled={cleaning}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity hover:opacity-70 disabled:opacity-40"
                 style={{ border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}
               >
@@ -558,7 +818,6 @@ export default function AnalyzePage() {
             </div>
           </div>
 
-          {/* Audio path */}
           <div className="px-5 py-3 space-y-2">
             <div className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Audio File</div>
             <div className="flex items-center gap-2">
@@ -571,7 +830,6 @@ export default function AnalyzePage() {
             </div>
           </div>
 
-          {/* Chunks */}
           {downloadResult.chunks.length > 0 && (
             <div className="px-5 pb-4 space-y-2">
               <div className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
@@ -617,137 +875,10 @@ export default function AnalyzePage() {
       )}
 
       {/* Error */}
-      {(error || downloadError) && (
+      {downloadError && (
         <div className="p-4 rounded-xl flex items-start gap-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-danger)' }}>
           <AlertCircle size={18} style={{ color: 'var(--color-danger)' }} className="mt-0.5 shrink-0" />
-          <p className="text-sm">{error || downloadError}</p>
-        </div>
-      )}
-
-      {/* Result */}
-      {result && result.title && (
-        <div className="space-y-6">
-          <div className="p-5 rounded-xl" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-            <div className="flex gap-4">
-              {result.thumbnail_url && (
-                <img src={result.thumbnail_url} alt="" className="w-48 h-28 object-cover rounded-lg shrink-0" />
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <h2 className="text-lg font-semibold truncate">{result.title}</h2>
-                    <a
-                      href={generatePlaybackUrl(result.platform, result.videoId, 0)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 rounded-lg hover:opacity-70 transition-opacity shrink-0"
-                      style={{ color: 'var(--color-primary)' }}
-                      title="Play from beginning"
-                    >
-                      <Play size={16} />
-                    </a>
-                  </div>
-                  {result.summary_en && <LangToggle lang={lang} onChange={setLang} className="shrink-0 ml-3" />}
-                </div>
-                <div className="flex items-center gap-3 text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-                  <span>{platformLabel(result.platform)}</span>
-                  <span>{formatDuration(result.duration_seconds)}</span>
-                  {result.upload_date && <span>{result.upload_date}</span>}
-                </div>
-                <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                  {lang === 'en' && result.summary_en ? result.summary_en : result.summary}
-                </p>
-              </div>
-            </div>
-            {result.usage && (
-              <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-                <UsageDisplay usage={result.usage} />
-              </div>
-            )}
-            <div className="flex gap-2 mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
-              <button onClick={() => result.video_id && navigate(`/video/${result.video_id}`)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white" style={{ background: 'var(--color-primary)' }}>
-                <Save size={14} /> View Details
-              </button>
-              <button onClick={() => result.video_id && api.post(`/videos/${result.video_id}/share`)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm" style={{ border: '1px solid var(--color-border)' }}>
-                <Share2 size={14} /> Share
-              </button>
-            </div>
-          </div>
-
-          {/* Segments */}
-          <div className="space-y-2">
-            <h3 className="text-lg font-semibold">Segments ({result.segments.length})</h3>
-            {result.segments.map((seg) => (
-              <div key={seg.index} className="p-4 rounded-xl flex items-start gap-4 hover:shadow-sm transition-shadow"
-                style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                <span className="text-xs font-mono px-2 py-1 rounded shrink-0" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)' }}>
-                  {formatTimeRange(seg.start_seconds, seg.end_seconds)}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-medium text-sm mb-1">
-                    {lang === 'en' && seg.title_en ? seg.title_en : seg.title}
-                  </h4>
-                  <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                    {lang === 'en' && seg.summary_en ? seg.summary_en : seg.summary}
-                  </p>
-                </div>
-                <a
-                  href={generatePlaybackUrl(result.platform, result.videoId, seg.start_seconds)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-lg hover:opacity-70 transition-opacity shrink-0"
-                  style={{ color: 'var(--color-primary)' }}
-                  title="Play from here"
-                >
-                  <Play size={18} />
-                </a>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Confirm Duration Modal */}
-      {pendingConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          <div
-            className="relative w-full max-w-sm mx-4 rounded-2xl shadow-2xl p-6 space-y-4"
-            style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-full" style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
-                <AlertCircle size={20} style={{ color: 'var(--color-warning, #f59e0b)' }} />
-              </div>
-              <h3 className="text-base font-semibold">Video Duration Warning</h3>
-            </div>
-            <div className="space-y-2">
-              {pendingConfirm.title && (
-                <p className="text-sm font-medium">{pendingConfirm.title}</p>
-              )}
-              <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                Video duration is <strong>{formatDuration(pendingConfirm.durationSeconds)}</strong>.
-                Processing may take a while and consume API credits. Continue?
-              </p>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => store.declineTask(activeTab)}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
-                style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => store.confirmTask(activeTab)}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
-                style={{ background: 'var(--color-primary)' }}
-              >
-                Continue
-              </button>
-            </div>
-          </div>
+          <p className="text-sm">{downloadError}</p>
         </div>
       )}
 

@@ -50,6 +50,8 @@ from video_split.service.transcriber import (
 
 router = APIRouter(prefix="/api/debug", tags=["debug"])
 
+_debug_confirmations: dict[int, asyncio.Event] = {}
+
 
 def _sse_event(stage: str, progress: int, message: str, detail: dict | None = None) -> dict:
     payload = {"stage": stage, "progress": progress, "message": message}
@@ -115,11 +117,10 @@ async def debug_download(
             await update_task_status(db, task, "downloading", video_title=meta.title)
             task_dir = get_task_temp_dir(task)
 
-            from video_split.api.analysis import _active_confirmations
             settings = get_settings()
             threshold = settings.video.confirm_threshold_seconds
             if meta.duration_seconds > threshold:
-                _active_confirmations[task.id] = confirm_event
+                _debug_confirmations[task.id] = confirm_event
                 yield _sse_event("confirm_required", 10,
                     f"Video duration {duration_str} exceeds {threshold // 60} min threshold. Please confirm to continue.",
                     {"task_id": task.id, "title": meta.title, "duration_seconds": meta.duration_seconds})
@@ -131,7 +132,7 @@ async def debug_download(
                     await cleanup_task_files(task)
                     return
                 finally:
-                    _active_confirmations.pop(task.id, None)
+                    _debug_confirmations.pop(task.id, None)
 
             yield _sse_event("downloading", 12, "Starting audio download...")
 

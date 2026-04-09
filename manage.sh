@@ -1,38 +1,39 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# ── colour helpers ────────────────────────────────────────────────────────────
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
+log_info()  { echo -e "${GREEN}[info]${NC}  $*"; }
+log_warn()  { echo -e "${YELLOW}[warn]${NC}  $*"; }
+log_error() { echo -e "${RED}[error]${NC} $*"; }
+log_step()  { echo -e "${BLUE}[step]${NC}  $*"; }
+log_ok()    { echo -e "${GREEN}[ok]${NC}    $*"; }
+
+# ── constants ─────────────────────────────────────────────────────────────────
 COMPOSE_FILE="compose.yaml"
-APP_NAME="vsplit"
 DATA_DIR="./data"
 CONFIG_DIR="./config"
 CONFIG_FILE="$CONFIG_DIR/app.yaml"
 CONFIG_EXAMPLE="$CONFIG_DIR/app.yaml.example"
-MIRROR_STATE_FILE="$SCRIPT_DIR/.mirror_state"
+CERTS_DIR="$CONFIG_DIR/certs"
+REGISTRY="${REGISTRY:-docker.m.daocloud.io}"
 
-DEFAULT_REGISTRY="docker.m.daocloud.io"
+DEPLOY_EXCLUDE_FILE=".rsync-exclude"
+DEPLOY_DEFAULT_REMOTE_DIR="ai/vedio-split-view"
 
+# ── config helpers ────────────────────────────────────────────────────────────
 read_yaml_value() {
-    local key="$1"
-    local default="$2"
-    if [ ! -f "$CONFIG_FILE" ]; then
-        echo "$default"
-        return
-    fi
-    local section="${key%%.*}"
-    local field="${key#*.}"
-    local in_section=0
-    local val=""
+    local key="$1" default="$2"
+    if [[ ! -f "$CONFIG_FILE" ]]; then echo "$default"; return; fi
+    local section="${key%%.*}" field="${key#*.}"
+    local in_section=0 val=""
     while IFS= read -r line; do
-        if echo "$line" | grep -qE "^${section}:"; then
-            in_section=1
-            continue
-        fi
-        if [ $in_section -eq 1 ] && echo "$line" | grep -qE "^[a-zA-Z]"; then
-            break
-        fi
-        if [ $in_section -eq 1 ] && echo "$line" | grep -qE "^[[:space:]]+${field}:"; then
+        if echo "$line" | grep -qE "^${section}:"; then in_section=1; continue; fi
+        if [[ $in_section -eq 1 ]] && echo "$line" | grep -qE "^[a-zA-Z]"; then break; fi
+        if [[ $in_section -eq 1 ]] && echo "$line" | grep -qE "^[[:space:]]+${field}:"; then
             val=$(echo "$line" | sed "s/^[^:]*:[[:space:]]*//" | sed 's/[[:space:]]*#.*//' | sed 's/^"//' | sed 's/"$//')
             break
         fi
@@ -40,446 +41,483 @@ read_yaml_value() {
     echo "${val:-$default}"
 }
 
-get_app_port() {
-    read_yaml_value "app.port" "8080"
+get_app_port()      { read_yaml_value "app.port" "8080"; }
+get_frontend_port() { read_yaml_value "app.frontend_port" "5180"; }
+
+ensure_config() {
+    [[ -f "$CONFIG_FILE" ]] || { log_error "Config not found. Run: $0 init"; exit 1; }
 }
 
-get_frontend_port() {
-    read_yaml_value "app.frontend_port" "5180"
+export_compose_env() {
+    export APP_PORT="$(get_app_port)"
+    export FRONTEND_PORT="$(get_frontend_port)"
+    export REGISTRY
 }
 
-get_current_mirror() {
-    if [ -f "$MIRROR_STATE_FILE" ]; then
-        cat "$MIRROR_STATE_FILE"
-    else
-        echo "cn"
+_admin_login() {
+    local port="$1" admin_user="${2:-admin}" admin_pass="$3"
+    curl -sf --noproxy '*' "http://localhost:$port/api/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"$admin_user\",\"password\":\"$admin_pass\"}" \
+        | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4
+}
+
+# ── deploy exclude file ──────────────────────────────────────────────────────
+_ensure_deploy_exclude() {
+    if [[ ! -f "$DEPLOY_EXCLUDE_FILE" ]]; then
+        cat > "$DEPLOY_EXCLUDE_FILE" <<'EXCLUDE'
+# rsync exclude rules for code deployment — edit freely
+# one rule per line, # = comment
+# reference: https://ss64.com/bash/rsync.html
+
+# ── version control & IDE ────────────────────────────────────────────────────
+.git/
+.DS_Store
+.vscode/
+.idea/
+
+# ── python cache / build ─────────────────────────────────────────────────────
+backend/.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# ── frontend cache / build ───────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+
+# ── test fixtures (large audio / video) ──────────────────────────────────────
+test/
+test_transcribe.py
+
+# ── CI / tooling artefacts ───────────────────────────────────────────────────
+.playwright-cli/
+.mirror_state
+
+# ── sensitive config (never overwrite remote secrets) ────────────────────────
+config/app.yaml
+config/certs/
+config/*_cookies.txt
+
+# ── runtime data & logs (never overwrite remote DB / logs) ───────────────────
+data/
+logs/
+
+# ── this file itself (remote may have its own) ──────────────────────────────
+.rsync-exclude
+EXCLUDE
+        log_info "Created $DEPLOY_EXCLUDE_FILE (edit to customise)"
     fi
 }
 
-get_registry() {
-    MODE=$(get_current_mirror)
-    if [ "$MODE" = "cn" ]; then
-        echo "$DEFAULT_REGISTRY"
-    else
-        echo "docker.io"
-    fi
-}
-
-CERTS_DIR="$CONFIG_DIR/certs"
-
-generate_certs() {
-    if [ -f "$CERTS_DIR/cert.pem" ] && [ -f "$CERTS_DIR/key.pem" ]; then
-        echo "Certificates already exist in $CERTS_DIR"
+# ── generate certs ────────────────────────────────────────────────────────────
+_generate_certs() {
+    if [[ -f "$CERTS_DIR/cert.pem" ]] && [[ -f "$CERTS_DIR/key.pem" ]]; then
+        log_info "Certificates already exist in $CERTS_DIR"
         return 0
     fi
-
     if ! command -v mkcert &>/dev/null; then
-        echo -e "\033[31mmkcert not found. Install it first:\033[0m"
-        echo "  macOS:  brew install mkcert"
-        echo "  Linux:  https://github.com/FiloSottile/mkcert#installation"
-        echo ""
-        echo "Then run: mkcert -install"
+        log_error "mkcert not found. Install: brew install mkcert (macOS)"
         return 1
     fi
-
     mkdir -p "$CERTS_DIR"
-    echo "Generating TLS certificates with mkcert..."
+    log_step "Generating TLS certificates …"
     mkcert -cert-file "$CERTS_DIR/cert.pem" -key-file "$CERTS_DIR/key.pem" \
         localhost 127.0.0.1 ::1
-    echo "Certificates generated in $CERTS_DIR"
-    echo ""
-    echo "If browsers still show warnings, run once:"
-    echo "  mkcert -install"
+    log_ok "Certificates generated in $CERTS_DIR"
 }
 
-init() {
-    echo "=== Initializing project ==="
-    mkdir -p "$DATA_DIR/tmp"
+# ── commands ──────────────────────────────────────────────────────────────────
 
-    if [ ! -f "$CONFIG_FILE" ]; then
+run_init() {
+    log_step "Initialising project …"
+    mkdir -p "$DATA_DIR/tmp" logs/nginx
+
+    if [[ ! -f "$CONFIG_FILE" ]]; then
         cp "$CONFIG_EXAMPLE" "$CONFIG_FILE"
-        echo "Config created: $CONFIG_FILE"
-        echo "Please edit the config file before starting the service."
+        log_info "Created $CONFIG_FILE from example — please edit before starting."
     else
-        echo "Config already exists: $CONFIG_FILE"
+        log_info "$CONFIG_FILE already exists"
     fi
 
-    generate_certs
-
-    echo "Initialization complete."
+    _generate_certs
+    _ensure_deploy_exclude
+    log_ok "Init complete."
 }
 
-start() {
-    echo "=== Starting services ==="
-    if [ ! -f "$CONFIG_FILE" ]; then
-        echo "Config not found. Run: $0 init"
-        exit 1
-    fi
-
-    local PORT=$(get_app_port)
-    local FPORT=$(get_frontend_port)
-
-    APP_PORT=$PORT FRONTEND_PORT=$FPORT REGISTRY=$(get_registry) \
-        podman-compose -f "$COMPOSE_FILE" up -d
-
-    echo "Services started."
-    echo "  Backend:  http://localhost:$PORT"
-    echo "  Frontend: https://localhost:$FPORT"
-    echo "  API Docs: http://localhost:$PORT/docs"
+run_start() {
+    ensure_config
+    export_compose_env
+    mkdir -p logs/nginx
+    log_step "Starting services …"
+    podman-compose -f "$COMPOSE_FILE" up -d
+    log_ok "Backend: http://localhost:$APP_PORT  Frontend: https://localhost:$FRONTEND_PORT"
 }
 
-stop() {
-    echo "=== Stopping services ==="
+run_stop() {
+    log_step "Stopping services …"
     podman-compose -f "$COMPOSE_FILE" down
-    echo "Services stopped."
+    log_ok "Stopped."
 }
 
-restart() {
-    stop
-    start
+run_restart() { run_stop; run_start; }
+
+run_rebuild() {
+    local no_cache="" pull=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--no-cache) no_cache="--no-cache" ;;
+            -p|--pull)     pull="--pull-always" ;;
+            *) log_error "Unknown option: $1"; exit 1 ;;
+        esac
+        shift
+    done
+
+    ensure_config
+    export_compose_env
+
+    log_step "Building images (registry: $REGISTRY) …"
+    [[ -n "$no_cache" ]] && log_info "--no-cache"
+    [[ -n "$pull" ]]     && log_info "--pull"
+
+    local use_proxy=0
+    if [[ -n "${http_proxy:-}" ]] || [[ -n "${https_proxy:-}" ]]; then
+        use_proxy=1
+        log_info "proxy detected → podman build --network=host"
+    fi
+
+    for svc in backend frontend; do
+        log_step "Building $svc …"
+        local image_tag="vedio-split-view_${svc}"
+
+        if [[ "$use_proxy" -eq 1 ]]; then
+            local args="--network=host --build-arg REGISTRY=$REGISTRY"
+            [[ -n "${http_proxy:-}" ]]  && args="$args --build-arg http_proxy=$http_proxy"
+            [[ -n "${https_proxy:-}" ]] && args="$args --build-arg https_proxy=$https_proxy"
+            [[ -n "$no_cache" ]] && args="$args --no-cache"
+            podman build $args -t "$image_tag" "./${svc}"
+        else
+            local compose_args="--build-arg REGISTRY=$REGISTRY"
+            [[ -n "$no_cache" ]] && compose_args="$compose_args --no-cache"
+            [[ -n "$pull" ]]     && compose_args="$compose_args $pull"
+            REGISTRY=$REGISTRY podman-compose -f "$COMPOSE_FILE" build $compose_args $svc
+        fi
+
+        if ! podman image exists "$image_tag" 2>/dev/null; then
+            log_error "$svc image not found after build."
+            exit 1
+        fi
+        log_ok "$svc"
+    done
+
+    log_step "Restarting services …"
+    podman-compose -f "$COMPOSE_FILE" down 2>/dev/null || true
+    mkdir -p logs/nginx
+    podman-compose -f "$COMPOSE_FILE" up -d
+
+    log_ok "Done. Backend: http://localhost:$APP_PORT  Frontend: https://localhost:$FRONTEND_PORT"
 }
 
-rebuild() {
-    REGISTRY=$(get_registry)
-    local PORT=$(get_app_port)
-    local FPORT=$(get_frontend_port)
+run_status() {
+    export_compose_env
+    log_step "Container status:"
+    podman-compose -f "$COMPOSE_FILE" ps
+    echo
 
-    local NO_CACHE=""
-    local PULL=""
-    local SERVICE=""
+    log_step "Health check …"
+    if curl -sf --noproxy '*' "http://localhost:$APP_PORT/api/health" >/dev/null 2>&1; then
+        log_ok "Backend  :$APP_PORT"
+    else
+        log_error "Backend  :$APP_PORT  not responding"
+    fi
+    if curl -skf --noproxy '*' "https://localhost:$FRONTEND_PORT/" >/dev/null 2>&1; then
+        log_ok "Frontend :$FRONTEND_PORT"
+    else
+        log_error "Frontend :$FRONTEND_PORT  not responding"
+    fi
+}
+
+run_export() {
+    ensure_config
+    local port
+    port="$(get_app_port)"
+    local platform="" admin_user="admin"
 
     for arg in "$@"; do
         case "$arg" in
-            --no-cache|-n)  NO_CACHE="--no-cache" ;;
-            --pull|-p)      PULL="--pull-always" ;;
-            backend|frontend) SERVICE="$arg" ;;
+            youtube|bilibili) platform="$arg" ;;
+            *) admin_user="$arg" ;;
         esac
     done
 
-    echo "=== Building images (registry: $REGISTRY) ==="
-    [ -n "$NO_CACHE" ] && echo "  --no-cache: ignoring layer cache"
-    [ -n "$PULL" ]     && echo "  --pull:     re-pulling base images"
-    [ -n "$SERVICE" ]  && echo "  service:    $SERVICE only"
-    echo ""
-
-    local SERVICES_TO_BUILD
-    if [ -n "$SERVICE" ]; then
-        SERVICES_TO_BUILD="$SERVICE"
+    if [[ -n "$platform" ]]; then
+        log_step "Exporting $platform videos …"
     else
-        SERVICES_TO_BUILD="backend frontend"
+        log_step "Exporting all videos …"
     fi
 
-    local USE_PROXY=0
-    if [ -n "${http_proxy:-}" ] || [ -n "${https_proxy:-}" ]; then
-        USE_PROXY=1
-        echo "  proxy detected, will use --network=host via podman build directly"
-        echo ""
-    fi
+    local admin_pass
+    read -r -s -p "Admin password: " admin_pass; echo
 
-    for svc in $SERVICES_TO_BUILD; do
-        echo "--- Building $svc ---"
-        local IMAGE_TAG="vedio-split-view_${svc}"
+    local token
+    token=$(_admin_login "$port" "$admin_user" "$admin_pass")
+    [[ -z "$token" ]] && { log_error "Login failed."; exit 1; }
 
-        if [ "$USE_PROXY" -eq 1 ]; then
-            local PODMAN_ARGS="--network=host --build-arg REGISTRY=$REGISTRY"
-            [ -n "${http_proxy:-}" ]  && PODMAN_ARGS="$PODMAN_ARGS --build-arg http_proxy=$http_proxy"
-            [ -n "${https_proxy:-}" ] && PODMAN_ARGS="$PODMAN_ARGS --build-arg https_proxy=$https_proxy"
-            [ -n "$NO_CACHE" ] && PODMAN_ARGS="$PODMAN_ARGS --no-cache"
-            podman build $PODMAN_ARGS -t "$IMAGE_TAG" "./${svc}"
-        else
-            local COMPOSE_ARGS="--build-arg REGISTRY=$REGISTRY"
-            [ -n "$NO_CACHE" ] && COMPOSE_ARGS="$COMPOSE_ARGS --no-cache"
-            [ -n "$PULL" ]     && COMPOSE_ARGS="$COMPOSE_ARGS $PULL"
-            REGISTRY=$REGISTRY podman-compose -f $COMPOSE_FILE build $COMPOSE_ARGS $svc
-        fi
+    local url="http://localhost:$port/api/admin/export"
+    [[ -n "$platform" ]] && url="${url}?platform=${platform}"
 
-        if [ $? -ne 0 ]; then
-            echo -e "\033[31m$svc build command failed!\033[0m"
-            exit 1
-        fi
+    curl -sf --noproxy '*' -X POST "$url" -H "Authorization: Bearer $token"
+    echo
+    log_ok "Export complete → data/exports/"
+}
 
-        if ! podman image exists "$IMAGE_TAG" 2>/dev/null; then
-            echo -e "\033[31m$svc image '$IMAGE_TAG' not found after build — build likely failed silently.\033[0m"
-            exit 1
-        fi
-        echo -e "\033[32m$svc build OK\033[0m"
-        echo ""
-    done
+run_import() {
+    ensure_config
+    local port
+    port="$(get_app_port)"
+    local target_user="${1:-}" admin_user="${2:-admin}" admin_pass="${3:-}"
 
-    echo ""
-    echo "=== Restarting services ==="
-
-    podman-compose -f "$COMPOSE_FILE" down 2>/dev/null
-    APP_PORT=$PORT FRONTEND_PORT=$FPORT REGISTRY=$REGISTRY \
-        podman-compose -f "$COMPOSE_FILE" up -d
-
-    if [ $? -ne 0 ]; then
-        echo -e "\033[31mStart failed!\033[0m"
+    if [[ -z "$target_user" ]]; then
+        log_error "Usage: $0 import <target_user> [admin_user]"
+        echo "  Imports JSON from data/exports/ into the user's library (skip existing)."
         exit 1
     fi
 
-    echo -e "\033[32mBuild and start complete.\033[0m"
-    echo "  Backend:  http://localhost:$PORT"
-    echo "  Frontend: https://localhost:$FPORT"
-    echo "  API Docs: http://localhost:$PORT/docs"
+    log_step "Importing into user '$target_user' …"
+    if [[ -z "$admin_pass" ]]; then
+        read -r -s -p "Admin password: " admin_pass; echo
+    fi
+
+    local token
+    token=$(_admin_login "$port" "$admin_user" "$admin_pass")
+    [[ -z "$token" ]] && { log_error "Login failed."; exit 1; }
+
+    curl -sf --noproxy '*' -X POST "http://localhost:$port/api/admin/import?target_username=$target_user" \
+        -H "Authorization: Bearer $token"
+    echo
+    log_ok "Import complete."
 }
 
-status() {
-    local PORT=$(get_app_port)
+run_deploy() {
+    local dry_run=false remote="" remote_dir="$DEPLOY_DEFAULT_REMOTE_DIR"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -d|--dry-run) dry_run=true ;;
+            *)
+                if [[ -z "$remote" ]]; then remote="$1"
+                else remote_dir="$1"; fi
+                ;;
+        esac
+        shift
+    done
 
-    echo "=== Service Status ==="
-    podman-compose -f "$COMPOSE_FILE" ps
+    if [[ -z "$remote" ]]; then
+        cat <<EOF
+Usage: $0 deploy [-d] <user@host> [remote_dir]
 
-    echo ""
-    echo "=== Health Check ==="
-    if curl -sf --noproxy '*' "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
-        echo -e "\033[32mBackend (port $PORT): healthy\033[0m"
+  Sync source code to remote (no data, no secrets).
+  Default remote dir: ~/$DEPLOY_DEFAULT_REMOTE_DIR
+  Exclusion rules:    $DEPLOY_EXCLUDE_FILE (edit freely)
+
+Options:
+  -d, --dry-run   Show what would be transferred without actually doing it
+
+After deploy, on the remote:
+  1. cp config/app.yaml.example config/app.yaml   # first time
+  2. ./manage.sh rebuild
+EOF
+        exit 1
+    fi
+
+    _ensure_deploy_exclude
+
+    local rsync_opts=(-avz --progress --delete --exclude-from="$DEPLOY_EXCLUDE_FILE")
+    if [[ "$dry_run" == true ]]; then
+        rsync_opts+=(--dry-run)
+        log_step "[DRY RUN] Deploying code → ${remote}:${remote_dir} …"
     else
-        echo -e "\033[31mBackend (port $PORT): not responding\033[0m"
+        log_step "Deploying code → ${remote}:${remote_dir} …"
+    fi
+    log_info "Exclusion rules: $DEPLOY_EXCLUDE_FILE"
+
+    rsync "${rsync_opts[@]}" ./ "${remote}:${remote_dir}/"
+
+    if [[ "$dry_run" == true ]]; then
+        echo
+        log_ok "Dry run complete — no files were transferred."
+    else
+        log_ok "Deploy complete."
+        echo
+        echo "On the remote:"
+        echo "  cd ~/$remote_dir && ./manage.sh rebuild"
     fi
 }
 
-logs() {
-    SERVICE="${2:-}"
-    if [ -n "$SERVICE" ]; then
-        podman-compose -f "$COMPOSE_FILE" logs -f "$SERVICE"
+run_deploy_data() {
+    local dry_run=false remote="" remote_dir="$DEPLOY_DEFAULT_REMOTE_DIR"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -d|--dry-run) dry_run=true ;;
+            *)
+                if [[ -z "$remote" ]]; then remote="$1"
+                else remote_dir="$1"; fi
+                ;;
+        esac
+        shift
+    done
+
+    if [[ -z "$remote" ]]; then
+        cat <<EOF
+Usage: $0 deploy-data [-d] <user@host> [remote_dir]
+
+  Append-only sync of exports (JSON) + thumbnails (JPG) to remote.
+  Only adds files that don't exist on the remote (no overwrite).
+  Default remote dir: ~/$DEPLOY_DEFAULT_REMOTE_DIR
+
+Options:
+  -d, --dry-run   Show what would be transferred without actually doing it
+
+Typical workflow:
+  Local:   $0 export && $0 deploy-data user@host
+  Remote:  $0 import <username>
+EOF
+        exit 1
+    fi
+
+    local exports_dir="$DATA_DIR/exports"
+    local thumbs_dir="$DATA_DIR/thumbnails"
+
+    if [[ ! -d "$exports_dir" ]] || [[ -z "$(ls -A "$exports_dir" 2>/dev/null)" ]]; then
+        log_warn "No export files in $exports_dir."
+        echo "Run '$0 export' first."
+        exit 1
+    fi
+
+    local rsync_opts=(-avz --progress --ignore-existing)
+    if [[ "$dry_run" == true ]]; then
+        rsync_opts+=(--dry-run)
+        log_step "[DRY RUN] Syncing data → ${remote}:${remote_dir}/data/ (append-only) …"
     else
-        podman-compose -f "$COMPOSE_FILE" logs -f
+        log_step "Syncing data → ${remote}:${remote_dir}/data/ (append-only) …"
+    fi
+    echo
+
+    log_info "exports (JSON) …"
+    rsync "${rsync_opts[@]}" "$exports_dir/" "${remote}:${remote_dir}/data/exports/"
+
+    if [[ -d "$thumbs_dir" ]] && [[ -n "$(ls -A "$thumbs_dir" 2>/dev/null)" ]]; then
+        echo
+        log_info "thumbnails (JPG) …"
+        rsync "${rsync_opts[@]}" "$thumbs_dir/" "${remote}:${remote_dir}/data/thumbnails/"
+    fi
+
+    echo
+    if [[ "$dry_run" == true ]]; then
+        log_ok "Dry run complete — no files were transferred."
+    else
+        log_ok "Data synced."
+        echo "On the remote: cd ~/$remote_dir && ./manage.sh import <username>"
     fi
 }
 
-mirror() {
-    case "$2" in
-        cn)
-            echo "cn" > "$MIRROR_STATE_FILE"
-            echo "Switched to CN mirror: $DEFAULT_REGISTRY"
-            ;;
-        default)
-            echo "default" > "$MIRROR_STATE_FILE"
-            echo "Switched to default: docker.io"
-            ;;
-        status)
-            MODE=$(get_current_mirror)
-            if [ "$MODE" = "cn" ]; then
-                echo "Current: CN ($DEFAULT_REGISTRY)"
-            else
-                echo "Current: default (docker.io)"
-            fi
-            ;;
-        *)
-            echo "Usage: $0 mirror {cn|default|status}"
-            ;;
+run_clean_exports() {
+    local platform="${1:-}"
+    local exports_dir="$DATA_DIR/exports"
+    local pattern="*.json"
+
+    if [[ -n "$platform" ]]; then
+        pattern="${platform}_*.json"
+    fi
+
+    local count
+    count=$(find "$exports_dir" -maxdepth 1 -name "$pattern" 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ "$count" -eq 0 ]]; then
+        log_info "No export files to clean${platform:+ (platform: $platform)}."
+        return
+    fi
+
+    log_warn "This will delete $count export file(s)${platform:+ (platform: $platform)} in $exports_dir."
+    read -r -p "Continue? [y/N] " confirm
+    [[ "${confirm,,}" == "y" ]] || { log_info "Aborted."; exit 0; }
+
+    find "$exports_dir" -maxdepth 1 -name "$pattern" -delete
+    log_ok "Deleted $count export file(s)."
+}
+
+run_clean() {
+    log_warn "This will remove dangling images and build cache."
+    read -r -p "Continue? [y/N] " confirm
+    [[ "${confirm,,}" == "y" ]] || { log_info "Aborted."; exit 0; }
+
+    log_step "Pruning images …"
+    podman image prune -f
+    log_step "Pruning system …"
+    podman system prune -f
+    log_ok "Clean complete."
+}
+
+# ── usage ─────────────────────────────────────────────────────────────────────
+usage() {
+    cat <<EOF
+Usage: $0 <command> [options]
+
+Lifecycle:
+  init                       Create config, certs, directories
+  start                      Start all services
+  stop                       Stop all services
+  restart                    Stop + start
+  rebuild [-n] [-p]          Build images and restart
+    -n, --no-cache             Ignore layer cache
+    -p, --pull                 Re-pull base images
+  status                     Show container status + health check
+  clean                      Remove dangling images / build cache
+
+Data:
+  export [youtube|bilibili]        Export video data to data/exports/
+  import <user> [admin]            Import from data/exports/ (skip existing)
+  clean-exports [youtube|bilibili] Delete exported JSON files (all or by platform)
+
+Deploy (between machines):
+  deploy [-d] <user@host> [dir]        Sync source code to remote (no data/secrets)
+  deploy-data [-d] <user@host> [dir]   Append-only sync of exports + thumbnails
+    -d, --dry-run                        Preview what would be transferred
+                                         Default remote dir: ~/$DEPLOY_DEFAULT_REMOTE_DIR
+                                         Exclusion rules:    $DEPLOY_EXCLUDE_FILE
+
+Examples:
+  $0 rebuild                              # build and restart
+  $0 rebuild -n                           # no cache
+  REGISTRY=docker.io $0 rebuild           # Docker Hub instead of CN mirror
+
+  $0 deploy -d root@srv                   # dry run — preview code sync
+  $0 deploy root@srv                      # push code, then rebuild on remote
+  $0 deploy-data -d root@srv              # dry run — preview data sync
+  $0 export && $0 deploy-data root@srv    # export + push data, then import on remote
+EOF
+}
+
+# ── main ──────────────────────────────────────────────────────────────────────
+main() {
+    local cmd="${1:-}"
+    [[ $# -gt 0 ]] && shift || true
+    case "$cmd" in
+        init)        run_init ;;
+        start)       run_start ;;
+        stop)        run_stop ;;
+        restart)     run_restart ;;
+        rebuild)     run_rebuild "$@" ;;
+        status)      run_status ;;
+        export)      run_export "$@" ;;
+        import)      run_import "$@" ;;
+        deploy)        run_deploy "$@" ;;
+        deploy-data)   run_deploy_data "$@" ;;
+        clean-exports) run_clean_exports "$@" ;;
+        clean)         run_clean ;;
+        *)           usage; exit 1 ;;
     esac
 }
 
-hotpatch() {
-    local SERVICE="${1:-}"
-
-    if [ -z "$SERVICE" ] || { [ "$SERVICE" != "backend" ] && [ "$SERVICE" != "frontend" ]; }; then
-        echo "Usage: $0 hotpatch {backend|frontend}"
-        echo ""
-        echo "Quickly patch source code into a running container (seconds, no image rebuild)."
-        echo "  backend  — copy .py files + restart uvicorn"
-        echo "  frontend — rebuild dist inside container + reload nginx"
-        echo ""
-        echo "Use 'rebuild' instead when you changed dependencies (pyproject.toml / package.json)."
-        exit 1
-    fi
-
-    if [ "$SERVICE" = "backend" ]; then
-        echo "=== Hot-patching backend ==="
-        local CONTAINER="vsplit-backend"
-
-        if ! podman ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
-            echo -e "\033[31m$CONTAINER is not running. Use 'rebuild backend' first.\033[0m"
-            exit 1
-        fi
-
-        echo "  Copying source..."
-        podman cp ./backend/src/video_split/. "${CONTAINER}:/app/src/video_split/"
-        echo "  Restarting..."
-        podman restart "$CONTAINER"
-        echo -e "\033[32mBackend patched — done in seconds.\033[0m"
-
-    elif [ "$SERVICE" = "frontend" ]; then
-        echo "=== Hot-patching frontend ==="
-        local CONTAINER="vsplit-frontend"
-
-        if ! podman ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
-            echo -e "\033[31m$CONTAINER is not running. Use 'rebuild frontend' first.\033[0m"
-            exit 1
-        fi
-
-        local IMG="vedio-split-view_frontend"
-        local DIST_DIR=$(mktemp -d)
-
-        echo "  Building dist in temporary container..."
-        podman run --rm \
-            -v "$(pwd)/frontend/src:/app/src:ro" \
-            -v "$(pwd)/frontend/index.html:/app/index.html:ro" \
-            -v "${DIST_DIR}:/app/dist" \
-            "$IMG" sh -c '
-                cd /app 2>/dev/null
-                PATH=/app/node_modules/.bin:$PATH
-                if command -v tsc >/dev/null 2>&1; then
-                    tsc -b && vite build
-                elif [ -f node_modules/.bin/tsc ]; then
-                    node_modules/.bin/tsc -b && node_modules/.bin/vite build
-                else
-                    echo "ERROR: tsc not found in image"
-                    exit 1
-                fi
-            ' 2>&1
-
-        if [ $? -ne 0 ] || [ ! -f "${DIST_DIR}/index.html" ]; then
-            rm -rf "$DIST_DIR"
-            echo -e "\033[33mFrontend hot-patch failed. Falling back to rebuild...\033[0m"
-            rebuild frontend
-            return
-        fi
-
-        echo "  Replacing nginx html..."
-        podman cp "${DIST_DIR}/." "${CONTAINER}:/usr/share/nginx/html/"
-        podman exec "$CONTAINER" nginx -s reload 2>/dev/null || podman restart "$CONTAINER"
-        rm -rf "$DIST_DIR"
-        echo -e "\033[32mFrontend patched — done.\033[0m"
-    fi
-}
-
-export_data() {
-    local PORT=$(get_app_port)
-    local PLATFORM=""
-    local ADMIN_USER="admin"
-    local ADMIN_PASS=""
-
-    for arg in "$@"; do
-        case "$arg" in
-            youtube|bilibili) PLATFORM="$arg" ;;
-            *) ADMIN_USER="$arg" ;;
-        esac
-    done
-
-    if [ -n "$PLATFORM" ]; then
-        echo "=== Exporting $PLATFORM videos to data/exports/ ==="
-    else
-        echo "=== Exporting all videos to data/exports/ ==="
-    fi
-
-    read -s -p "Admin password: " ADMIN_PASS
-    echo ""
-
-    local TOKEN
-    TOKEN=$(curl -sf --noproxy '*' "http://localhost:$PORT/api/auth/login" \
-        -H "Content-Type: application/json" \
-        -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}" \
-        | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
-
-    if [ -z "$TOKEN" ]; then
-        echo -e "\033[31mLogin failed.\033[0m"
-        exit 1
-    fi
-
-    local URL="http://localhost:$PORT/api/admin/export"
-    [ -n "$PLATFORM" ] && URL="${URL}?platform=${PLATFORM}"
-
-    local RESULT
-    RESULT=$(curl -sf --noproxy '*' -X POST "$URL" \
-        -H "Authorization: Bearer $TOKEN")
-    echo "$RESULT"
-    echo -e "\033[32mExport complete. Files in data/exports/\033[0m"
-}
-
-import_data() {
-    echo "=== Importing video data from data/exports/ ==="
-    local PORT=$(get_app_port)
-    local TARGET_USER="${1:-}"
-    local ADMIN_USER="${2:-admin}"
-    local ADMIN_PASS="${3:-}"
-
-    if [ -z "$TARGET_USER" ]; then
-        echo "Usage: $0 import <target_username> [admin_user] [admin_pass]"
-        echo "  Imports all JSON files from data/exports/ into the specified user's library."
-        echo "  Only new videos are imported (existing ones are skipped)."
-        exit 1
-    fi
-
-    if [ -z "$ADMIN_PASS" ]; then
-        read -s -p "Admin password: " ADMIN_PASS
-        echo ""
-    fi
-
-    local TOKEN
-    TOKEN=$(curl -sf --noproxy '*' "http://localhost:$PORT/api/auth/login" \
-        -H "Content-Type: application/json" \
-        -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}" \
-        | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
-
-    if [ -z "$TOKEN" ]; then
-        echo -e "\033[31mLogin failed.\033[0m"
-        exit 1
-    fi
-
-    local RESULT
-    RESULT=$(curl -sf --noproxy '*' -X POST "http://localhost:$PORT/api/admin/import?target_username=$TARGET_USER" \
-        -H "Authorization: Bearer $TOKEN")
-    echo "$RESULT"
-    echo -e "\033[32mImport complete.\033[0m"
-}
-
-clean() {
-    echo "=== Cleaning build cache ==="
-    podman system prune -f
-    echo "=== Removing dangling images ==="
-    podman image prune -f
-    echo "Done."
-}
-
-case "$1" in
-    init)    init ;;
-    start)   start ;;
-    stop)    stop ;;
-    restart) restart ;;
-    rebuild)  rebuild "${@:2}" ;;
-    hotpatch) hotpatch "${2:-}" ;;
-    export)   export_data "${@:2}" ;;
-    import)   import_data "${2:-}" "${3:-admin}" "${4:-}" ;;
-    status)   status ;;
-    logs)     logs "$@" ;;
-    mirror)   mirror "$@" ;;
-    clean)    clean ;;
-    *)
-        echo "Usage: $0 {init|start|stop|restart|rebuild|hotpatch|export|import|status|logs|mirror|clean}"
-        echo ""
-        echo "Commands:"
-        echo "  init                    Create config and data directories"
-        echo "  start                   Start all services"
-        echo "  stop                    Stop all services"
-        echo "  restart                 Restart all services"
-        echo "  rebuild [opts] [svc]    Rebuild images and restart (slow, full)"
-        echo "    -n, --no-cache          Ignore layer cache"
-        echo "    -p, --pull              Re-pull base images"
-        echo "    backend|frontend        Rebuild one service only"
-        echo "  hotpatch backend|frontend  Patch source code without rebuild (fast, seconds)"
-        echo "  export [youtube|bilibili] Export video data to data/exports/ (default: all)"
-        echo "  import <user> [admin]   Import videos from data/exports/ into a user's library"
-        echo "  status                  Show service status"
-        echo "  logs [service]          Follow logs"
-        echo "  mirror cn|default       Switch registry mirror"
-        echo "  clean                   Remove dangling images and build cache"
-        echo ""
-        echo "Examples:"
-        echo "  $0 hotpatch backend          # code-only change, ~3 seconds"
-        echo "  $0 hotpatch frontend         # code-only change, ~10 seconds"
-        echo "  $0 rebuild backend           # dependency/Dockerfile changed"
-        echo "  $0 rebuild -n backend        # full rebuild, no cache"
-        echo ""
-        echo "Data sync between machines:"
-        echo "  $0 export bilibili           # only export bilibili videos"
-        echo ""
-        echo "Data sync between machines:"
-        echo "  Machine A:  $0 export               # export all videos"
-        echo "  Transfer:   rsync -avz data/exports/ data/thumbnails/ user@B:path/data/"
-        echo "  Machine B:  $0 import myuser         # import new videos"
-        exit 1
-        ;;
-esac
+main "$@"

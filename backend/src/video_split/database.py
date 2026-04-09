@@ -48,6 +48,8 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("videos", "usage_json", "TEXT DEFAULT ''"),
     ("videos", "upload_date", "VARCHAR(16) DEFAULT ''"),
     ("users", "lang_preference", "VARCHAR(4) DEFAULT 'zh'"),
+    ("users", "preferences_json", "TEXT DEFAULT '{}'"),
+    ("users", "usage_stats_json", "TEXT DEFAULT '{}'"),
 ]
 
 

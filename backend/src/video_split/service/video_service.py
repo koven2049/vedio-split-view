@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from video_split.config import get_settings
 from sqlalchemy import select
 
-from video_split.models import BilibiliCredential, Segment, Tag, Task, Video, video_tags
+from video_split.models import BilibiliCredential, Segment, Tag, Task, User, Video, video_tags
 from video_split.schemas import ProgressEvent
 from video_split.service.analyzer import analyze_transcript
 from video_split.service.downloader import (
@@ -78,12 +78,60 @@ def _cred_kwargs(cred: BilibiliCredential | None) -> dict[str, str]:
     return {"sessdata": cred.sessdata, "bili_jct": cred.bili_jct, "buvid3": cred.buvid3}
 
 
+def get_user_limits(user) -> dict[str, int]:
+    """Return effective limits for a user, merging per-user overrides with global config."""
+    settings = get_settings()
+    prefs: dict = {}
+    try:
+        prefs = json.loads(user.preferences_json or "{}")
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return {
+        "max_duration_seconds": prefs.get("max_duration_seconds") or settings.video.max_duration_seconds,
+        "confirm_threshold_seconds": prefs.get("confirm_threshold_seconds") or settings.video.confirm_threshold_seconds,
+        "max_concurrent": prefs.get("max_concurrent_analyses") or settings.storage.max_pending_tasks_per_user,
+    }
+
+
+async def accumulate_usage(db: AsyncSession, user_id: int, usage_data: dict) -> None:
+    """Add analysis usage to the user's cumulative stats (persisted in DB)."""
+    from sqlalchemy import select as sa_select
+    result = await db.execute(sa_select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        return
+    try:
+        stats = json.loads(user.usage_stats_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        stats = {}
+
+    asr_model = usage_data.get("asr_model", "")
+    if asr_model:
+        asr = stats.setdefault("asr", {}).setdefault(asr_model, {"total_seconds": 0, "requests": 0})
+        asr["total_seconds"] += usage_data.get("asr_duration_seconds", 0)
+        asr["requests"] += 1
+
+    llm_model = usage_data.get("llm_model", "")
+    if llm_model:
+        llm = stats.setdefault("llm", {}).setdefault(llm_model, {
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "requests": 0,
+        })
+        llm["prompt_tokens"] += usage_data.get("llm_prompt_tokens", 0)
+        llm["completion_tokens"] += usage_data.get("llm_completion_tokens", 0)
+        llm["total_tokens"] += usage_data.get("llm_total_tokens", 0)
+        llm["requests"] += 1
+
+    user.usage_stats_json = json.dumps(stats, ensure_ascii=False)
+    await db.commit()
+
+
 async def run_analysis(
     db: AsyncSession,
     task: Task,
     cancel_event: asyncio.Event,
     bilibili_cred: BilibiliCredential | None = None,
     confirm_event: asyncio.Event | None = None,
+    user_limits: dict[str, int] | None = None,
 ) -> AsyncGenerator[ProgressEvent, None]:
     """Run the full analysis pipeline, yielding progress events."""
     settings = get_settings()
@@ -109,14 +157,15 @@ async def run_analysis(
         await update_task_status(db, task, "downloading", video_title=meta.title)
 
         duration = meta.duration_seconds
-        max_dur = settings.video.max_duration_seconds
+        limits = user_limits or {}
+        max_dur = limits.get("max_duration_seconds") or settings.video.max_duration_seconds
         if duration > max_dur:
             raise ValueError(
                 f"Video is {duration // 3600}h{(duration % 3600) // 60}m, "
                 f"exceeding the {max_dur // 3600}h{(max_dur % 3600) // 60}m limit."
             )
 
-        threshold = settings.video.confirm_threshold_seconds
+        threshold = limits.get("confirm_threshold_seconds") or settings.video.confirm_threshold_seconds
         if confirm_event and duration > threshold:
             duration_str_confirm = f"{duration // 60}m{duration % 60:02d}s"
             yield ProgressEvent(
@@ -141,7 +190,10 @@ async def run_analysis(
                 "title": meta.title,
                 "platform": meta.platform,
                 "duration": duration_str,
+                "duration_seconds": meta.duration_seconds,
                 "thumbnail_url": meta.thumbnail_url,
+                "uploader": meta.uploader,
+                "upload_date": meta.upload_date,
             },
         )
         _check_cancelled()
@@ -387,6 +439,7 @@ async def run_analysis(
         await update_task_status(db, task, "completed")
         await cleanup_task_files(task)
         await db.commit()
+        await accumulate_usage(db, task.user_id, usage_data)
 
         logger.info("[analysis] Task #%d — complete, video_id=%d", task.id, video.id)
         yield ProgressEvent(
@@ -448,6 +501,24 @@ async def resume_analysis(
     task_dir = get_task_temp_dir(task)
     logger.info("[analysis] Resuming task #%d (status=%s)", task.id, task.status)
 
+    meta = await extract_metadata(task.url, **cred_kw)
+    local_thumb = await download_thumbnail(meta)
+    if local_thumb:
+        meta.thumbnail_url = local_thumb
+    duration_str = f"{meta.duration_seconds // 60}m{meta.duration_seconds % 60:02d}s"
+    yield ProgressEvent(
+        stage="metadata", progress=5, message=f"Video: {meta.title}",
+        detail={
+            "title": meta.title,
+            "platform": meta.platform,
+            "duration": duration_str,
+            "duration_seconds": meta.duration_seconds,
+            "thumbnail_url": meta.thumbnail_url,
+            "uploader": meta.uploader,
+            "upload_date": meta.upload_date,
+        },
+    )
+
     if task.status in ("failed_transcribe", "downloaded"):
         audio_files = list(task_dir.glob("audio.*"))
         if not audio_files:
@@ -484,10 +555,6 @@ async def resume_analysis(
 
         logger.info("[analysis] Task #%d — transcription done: %d segments", task.id, len(subtitles))
         yield ProgressEvent(stage="transcription", progress=85, message="Transcription complete.")
-        meta = await extract_metadata(task.url, **cred_kw)
-        local_thumb = await download_thumbnail(meta)
-        if local_thumb:
-            meta.thumbnail_url = local_thumb
 
         yield ProgressEvent(stage="analysis", progress=87, message="Analyzing with LLM...")
         await update_task_status(db, task, "analyzing")
@@ -534,6 +601,7 @@ async def resume_analysis(
         await update_task_status(db, task, "completed")
         await cleanup_task_files(task)
         await db.commit()
+        await accumulate_usage(db, task.user_id, usage_data)
         logger.info("[analysis] Task #%d — resume complete, video_id=%d", task.id, video.id)
         yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!", detail={"video_id": video.id, "usage": usage_data})
 
@@ -555,11 +623,6 @@ async def resume_analysis(
             yield ProgressEvent(stage="transcription", progress=56, message="Re-transcribing audio...")
             subtitles, asr_usage = await transcribe_audio(audio_files[0])
             yield ProgressEvent(stage="transcription", progress=85, message="Transcription complete.")
-
-        meta = await extract_metadata(task.url, **cred_kw)
-        local_thumb = await download_thumbnail(meta)
-        if local_thumb:
-            meta.thumbnail_url = local_thumb
 
         try:
             analysis = await analyze_transcript(subtitles, meta.duration_seconds)
@@ -604,5 +667,6 @@ async def resume_analysis(
         await update_task_status(db, task, "completed")
         await cleanup_task_files(task)
         await db.commit()
+        await accumulate_usage(db, task.user_id, usage_data)
         logger.info("[analysis] Task #%d — resume complete, video_id=%d", task.id, video.id)
         yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!", detail={"video_id": video.id, "usage": usage_data})

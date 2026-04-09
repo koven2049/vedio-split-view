@@ -18,7 +18,7 @@ export default function UsageDisplay({ usage, className }: UsageDisplayProps) {
   if (usage.llm_model && usage.llm_total_tokens > 0) {
     items.push({
       label: `LLM (${usage.llm_model})`,
-      value: `${usage.llm_total_tokens.toLocaleString()} tokens`,
+      value: `${usage.llm_prompt_tokens.toLocaleString()}↑ ${usage.llm_completion_tokens.toLocaleString()}↓ (${usage.llm_total_tokens.toLocaleString()})`,
     })
   }
 

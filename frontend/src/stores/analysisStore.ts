@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { createSSE, api } from '../lib/api'
+import { api } from '../lib/api'
+import { useAuthStore } from './authStore'
 
 export interface ProgressData {
   stage: string
@@ -56,6 +57,15 @@ export interface ConfirmInfo {
 }
 
 export interface SlotState {
+  slotId: string
+  taskId: number | null
+  platform: string
+  status?: string
+  title?: string
+  uploader?: string
+  uploadDate?: string
+  durationSeconds?: number
+  thumbnailUrl?: string
   analyzing: boolean
   url: string
   progress: ProgressData | null
@@ -64,10 +74,12 @@ export interface SlotState {
   error: string
   completedVideoId: number | null
   pendingConfirm: ConfirmInfo | null
-  _sseCancel: (() => void) | null
+  reconnected: boolean
+  _sseAbort: AbortController | null
 }
 
-const EMPTY_SLOT: SlotState = {
+const EMPTY_SLOT: Omit<SlotState, 'slotId' | 'platform'> = {
+  taskId: null,
   analyzing: false,
   url: '',
   progress: null,
@@ -76,45 +88,158 @@ const EMPTY_SLOT: SlotState = {
   error: '',
   completedVideoId: null,
   pendingConfirm: null,
-  _sseCancel: null,
+  reconnected: false,
+  _sseAbort: null,
 }
 
 interface AnalysisState {
   slots: Record<string, SlotState>
+  _nextId: number
+  _initialized: boolean
 
-  getSlot: (platform: string) => SlotState
-  startAnalysis: (platform: string, url: string) => void
-  startTaskRetry: (platform: string, taskId: number, taskUrl?: string) => void
-  cancelAnalysis: (platform: string) => void
-  confirmTask: (platform: string) => void
-  declineTask: (platform: string) => void
-  reset: (platform: string) => void
-  setResult: (platform: string, result: AnalysisResult) => void
-  fetchResultDetails: (platform: string, videoId: number) => void
+  getSlot: (slotId: string) => SlotState | null
+  getActiveSlots: () => SlotState[]
+  countAnalyzing: () => number
+  startAnalysis: (platform: string, url: string) => Promise<string>
+  retryTask: (platform: string, taskId: number, taskUrl?: string) => Promise<string>
+  cancelAnalysis: (slotId: string) => void
+  confirmTask: (slotId: string) => void
+  declineTask: (slotId: string) => void
+  removeSlot: (slotId: string) => void
+  fetchResultDetails: (slotId: string, videoId: number) => void
   isAnyAnalyzing: () => boolean
+  reconnectActiveTasks: () => Promise<void>
+}
+
+interface ActiveTask {
+  task_id: number
+  platform: string
+  url: string
+  finished: boolean
+  last_progress: { event: string; data: string } | null
+}
+
+interface RecoverableTask {
+  id: number
+  url: string
+  platform: string
+  status: string
+  video_title: string
+  error_message: string
+}
+
+const BASE = '/api'
+
+function progressFromTaskStatus(task: RecoverableTask): ProgressData | null {
+  switch (task.status) {
+    case 'downloading':
+      return { stage: 'audio_download', progress: 15, message: task.video_title || 'Download in progress before restart.' }
+    case 'downloaded':
+      return { stage: 'audio_download', progress: 55, message: 'Audio downloaded. Ready to resume transcription.' }
+    case 'transcribing':
+    case 'failed_transcribe':
+      return { stage: 'transcription', progress: 56, message: task.error_message || 'Transcription needs attention.' }
+    case 'analyzing':
+    case 'failed_analyze':
+      return { stage: 'analysis', progress: 87, message: task.error_message || 'Analysis needs attention.' }
+    case 'failed_download':
+      return { stage: 'audio_download', progress: 15, message: task.error_message || 'Download did not complete.' }
+    default:
+      return null
+  }
+}
+
+function stepLogFromRecoverableTask(task: RecoverableTask): StepEntry[] {
+  const message = task.error_message || task.video_title || task.url
+  const detail: Record<string, unknown> = { recovered: true, task_status: task.status }
+  if (task.video_title) detail.video_title = task.video_title
+  return [{ stage: 'error', message, detail, timestamp: Date.now() }]
+}
+
+function connectSSE(
+  taskId: number,
+  slotId: string,
+  set: (fn: (s: AnalysisState) => Partial<AnalysisState>) => void,
+  get: () => AnalysisState,
+): AbortController {
+  const ctrl = new AbortController()
+  const token = useAuthStore.getState().token
+
+  fetch(`${BASE}/videos/tasks/${taskId}/stream`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    signal: ctrl.signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      updateSlot(set, slotId, () => ({
+        error: err.detail || `Error ${res.status}`,
+        analyzing: false,
+      }))
+      return
+    }
+    const reader = res.body?.getReader()
+    if (!reader) return
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      let currentEvent = ''
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          try {
+            const data = JSON.parse(line.slice(5).trim())
+            processEvent(set, get, slotId, currentEvent || data.stage, data)
+          } catch { /* skip malformed */ }
+        }
+      }
+    }
+    const slot = get().slots[slotId]
+    if (slot?.analyzing) {
+      updateSlot(set, slotId, () => ({ analyzing: false }))
+    }
+  }).catch((err) => {
+    if (err.name !== 'AbortError') {
+      updateSlot(set, slotId, () => ({
+        error: err.message,
+        analyzing: false,
+      }))
+    }
+  })
+
+  return ctrl
 }
 
 function updateSlot(
   set: (fn: (s: AnalysisState) => Partial<AnalysisState>) => void,
-  platform: string,
+  slotId: string,
   updater: (slot: SlotState) => Partial<SlotState>,
 ) {
   set((s) => {
-    const prev = s.slots[platform] ?? { ...EMPTY_SLOT }
-    return { slots: { ...s.slots, [platform]: { ...prev, ...updater(prev) } } }
+    const prev = s.slots[slotId]
+    if (!prev) return {}
+    return { slots: { ...s.slots, [slotId]: { ...prev, ...updater(prev) } } }
   })
 }
 
 function processEvent(
   set: (fn: (s: AnalysisState) => Partial<AnalysisState>) => void,
-  platform: string,
+  _get: () => AnalysisState,
+  slotId: string,
   _event: string,
   data: unknown,
 ) {
   const d = data as ProgressData
 
   if (_event === 'error' || d.stage === 'error') {
-    updateSlot(set, platform, (slot) => ({
+    updateSlot(set, slotId, (slot) => ({
       error: d.message,
       analyzing: false,
       stepLog: [...slot.stepLog, { stage: 'error', message: d.message, detail: d.detail, timestamp: Date.now() }],
@@ -123,12 +248,12 @@ function processEvent(
   }
 
   if (_event === 'cancelled' || d.stage === 'cancelled') {
-    updateSlot(set, platform, () => ({ analyzing: false, progress: null, pendingConfirm: null }))
+    updateSlot(set, slotId, () => ({ analyzing: false, progress: null, pendingConfirm: null }))
     return
   }
 
   if (_event === 'confirm_required' || d.stage === 'confirm_required') {
-    updateSlot(set, platform, (slot) => ({
+    updateSlot(set, slotId, (slot) => ({
       progress: d,
       pendingConfirm: {
         taskId: d.detail?.task_id as number,
@@ -141,7 +266,7 @@ function processEvent(
     return
   }
 
-  updateSlot(set, platform, (slot) => {
+  updateSlot(set, slotId, (slot) => {
     const last = slot.stepLog[slot.stepLog.length - 1]
     let newLog = slot.stepLog
 
@@ -166,6 +291,14 @@ function processEvent(
 
     const updates: Partial<SlotState> = { progress: d, stepLog: newLog }
 
+    if (d.stage === 'metadata' && d.detail?.title) {
+      updates.title = d.detail.title as string
+      if (d.detail.uploader) updates.uploader = d.detail.uploader as string
+      if (d.detail.upload_date) updates.uploadDate = d.detail.upload_date as string
+      if (d.detail.duration_seconds) updates.durationSeconds = d.detail.duration_seconds as number
+      if (d.detail.thumbnail_url) updates.thumbnailUrl = d.detail.thumbnail_url as string
+    }
+
     if (d.stage === 'complete' && d.detail) {
       updates.analyzing = false
       updates.completedVideoId = d.detail.video_id as number
@@ -181,84 +314,135 @@ function processEvent(
   })
 }
 
+
 export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   slots: {},
+  _nextId: 1,
+  _initialized: false,
 
-  getSlot: (platform: string): SlotState => {
-    return get().slots[platform] ?? { ...EMPTY_SLOT }
+  getSlot: (slotId: string): SlotState | null => {
+    return get().slots[slotId] ?? null
   },
 
-  startAnalysis: (platform: string, url: string) => {
-    const prev = get().slots[platform]
-    prev?._sseCancel?.()
-    updateSlot(set, platform, () => ({
-      analyzing: true,
-      url,
-      progress: { stage: 'metadata', progress: 0, message: 'Starting...' },
-      stepLog: [],
-      result: null,
-      error: '',
-      completedVideoId: null,
-      pendingConfirm: null,
-      _sseCancel: null,
+  getActiveSlots: (): SlotState[] => {
+    return Object.values(get().slots)
+      .filter((s) => s.analyzing || s.result || s.error || s.progress)
+  },
+
+  countAnalyzing: (): number => {
+    return Object.values(get().slots).filter((s) => s.analyzing).length
+  },
+
+  startAnalysis: async (platform: string, url: string): Promise<string> => {
+    const id = get()._nextId
+    const slotId = `slot-${id}`
+
+    set((s) => ({
+      _nextId: s._nextId + 1,
+      slots: {
+        ...s.slots,
+        [slotId]: {
+          ...EMPTY_SLOT,
+          slotId,
+          platform,
+          status: undefined,
+          title: undefined,
+          analyzing: true,
+          url,
+          progress: { stage: 'metadata', progress: 0, message: 'Starting...' },
+        },
+      },
     }))
-    const sse = createSSE('/videos/analyze', { url }, (ev, data) => processEvent(set, platform, ev, data))
-    updateSlot(set, platform, () => ({ _sseCancel: sse.cancel }))
+
+    try {
+      const resp = await api.post<{ task_id: number; platform: string }>('/videos/analyze', { url })
+      updateSlot(set, slotId, () => ({ taskId: resp.task_id }))
+      const ctrl = connectSSE(resp.task_id, slotId, set, get)
+      updateSlot(set, slotId, () => ({ _sseAbort: ctrl }))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to start analysis'
+      updateSlot(set, slotId, () => ({ error: msg, analyzing: false, progress: null }))
+    }
+
+    return slotId
   },
 
-  startTaskRetry: (platform: string, taskId: number, taskUrl?: string) => {
-    const prev = get().slots[platform]
-    prev?._sseCancel?.()
-    updateSlot(set, platform, (slot) => ({
-      analyzing: true,
-      url: taskUrl ?? slot.url,
-      progress: { stage: 'transcription', progress: 56, message: 'Starting analysis...' },
-      stepLog: [],
-      result: null,
-      error: '',
-      completedVideoId: null,
-      pendingConfirm: null,
-      _sseCancel: null,
+  retryTask: async (platform: string, taskId: number, taskUrl?: string): Promise<string> => {
+    const id = get()._nextId
+    const slotId = `slot-${id}`
+
+    set((s) => ({
+      _nextId: s._nextId + 1,
+      slots: {
+        ...s.slots,
+        [slotId]: {
+          ...EMPTY_SLOT,
+          slotId,
+          platform,
+          status: undefined,
+          title: undefined,
+          analyzing: true,
+          url: taskUrl ?? '',
+          taskId,
+          progress: { stage: 'transcription', progress: 56, message: 'Resuming...' },
+        },
+      },
     }))
-    const sse = createSSE(`/videos/tasks/${taskId}/retry`, {}, (ev, data) => processEvent(set, platform, ev, data))
-    updateSlot(set, platform, () => ({ _sseCancel: sse.cancel }))
+
+    try {
+      const resp = await api.post<{ task_id: number }>(`/videos/tasks/${taskId}/retry`)
+      updateSlot(set, slotId, () => ({ taskId: resp.task_id }))
+      const ctrl = connectSSE(resp.task_id, slotId, set, get)
+      updateSlot(set, slotId, () => ({ _sseAbort: ctrl }))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to retry'
+      updateSlot(set, slotId, () => ({ error: msg, analyzing: false, progress: null }))
+    }
+
+    return slotId
   },
 
-  cancelAnalysis: (platform: string) => {
-    const prev = get().slots[platform]
-    prev?._sseCancel?.()
-    updateSlot(set, platform, () => ({ analyzing: false, progress: null, pendingConfirm: null, _sseCancel: null }))
+  cancelAnalysis: (slotId: string) => {
+    const slot = get().slots[slotId]
+    if (!slot) return
+    slot._sseAbort?.abort()
+    if (slot.taskId) {
+      api.delete(`/videos/tasks/${slot.taskId}/cancel`).catch(() => {})
+    }
+    updateSlot(set, slotId, () => ({ analyzing: false, progress: null, pendingConfirm: null, _sseAbort: null }))
   },
 
-  confirmTask: (platform: string) => {
-    const slot = get().slots[platform]
+  confirmTask: (slotId: string) => {
+    const slot = get().slots[slotId]
     if (!slot?.pendingConfirm) return
     api.post(`/videos/tasks/${slot.pendingConfirm.taskId}/confirm`).catch(() => {})
-    updateSlot(set, platform, () => ({ pendingConfirm: null }))
+    updateSlot(set, slotId, () => ({ pendingConfirm: null }))
   },
 
-  declineTask: (platform: string) => {
-    const slot = get().slots[platform]
+  declineTask: (slotId: string) => {
+    const slot = get().slots[slotId]
     if (!slot?.pendingConfirm) return
     const taskId = slot.pendingConfirm.taskId
-    slot._sseCancel?.()
+    slot._sseAbort?.abort()
     api.delete(`/videos/tasks/${taskId}/cancel`).catch(() => {})
-    updateSlot(set, platform, () => ({
-      analyzing: false, progress: null, pendingConfirm: null, _sseCancel: null,
+    updateSlot(set, slotId, () => ({
+      analyzing: false, progress: null, pendingConfirm: null, _sseAbort: null,
     }))
   },
 
-  reset: (platform: string) => {
-    const prev = get().slots[platform]
-    prev?._sseCancel?.()
-    updateSlot(set, platform, () => ({ ...EMPTY_SLOT }))
+  removeSlot: (slotId: string) => {
+    const slot = get().slots[slotId]
+    slot?._sseAbort?.abort()
+    if (slot?.taskId) {
+      api.delete(`/videos/tasks/${slot.taskId}`).catch(() => {})
+    }
+    set((s) => {
+      const { [slotId]: _, ...rest } = s.slots
+      return { slots: rest }
+    })
   },
 
-  setResult: (platform: string, result: AnalysisResult) => {
-    updateSlot(set, platform, () => ({ result }))
-  },
-
-  fetchResultDetails: (platform: string, videoId: number) => {
+  fetchResultDetails: (slotId: string, videoId: number) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     api.get<any>(`/videos/${videoId}`).then((v) => {
       let usage: UsageInfo | undefined
@@ -271,11 +455,95 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
         videoId: v.video_id as string,
         usage,
       }
-      updateSlot(set, platform, () => ({ result }))
+      updateSlot(set, slotId, () => ({ result }))
     })
   },
 
   isAnyAnalyzing: () => {
     return Object.values(get().slots).some((s) => s.analyzing)
+  },
+
+  reconnectActiveTasks: async () => {
+    if (get()._initialized) return
+    set(() => ({ _initialized: true }))
+
+    try {
+      const [activeTasks, recoverableTasks] = await Promise.all([
+        api.get<ActiveTask[]>('/videos/tasks/active').catch(() => []),
+        api.get<RecoverableTask[]>('/videos/tasks/recoverable').catch(() => []),
+      ])
+
+      for (const task of activeTasks) {
+        const existingSlot = Object.values(get().slots).find(
+          (s) => s.taskId === task.task_id
+        )
+        if (existingSlot) continue
+
+        const id = get()._nextId
+        const slotId = `slot-${id}`
+
+        set((s) => ({
+          _nextId: s._nextId + 1,
+          slots: {
+            ...s.slots,
+            [slotId]: {
+              ...EMPTY_SLOT,
+              slotId,
+              platform: task.platform,
+              status: undefined,
+              title: undefined,
+              analyzing: !task.finished,
+              url: task.url,
+              taskId: task.task_id,
+              reconnected: true,
+              progress: { stage: 'metadata', progress: 0, message: 'Reconnecting...' },
+            },
+          },
+        }))
+
+        const ctrl = connectSSE(task.task_id, slotId, set, get)
+        updateSlot(set, slotId, () => ({ _sseAbort: ctrl }))
+      }
+
+      const MAX_RECOVERABLE_DISPLAY = 3
+      let recoverableCount = 0
+      for (const task of recoverableTasks) {
+        if (recoverableCount >= MAX_RECOVERABLE_DISPLAY) break
+        const existingSlot = Object.values(get().slots).find(
+          (s) => s.taskId === task.id
+        )
+        if (existingSlot) continue
+        recoverableCount++
+
+        const id = get()._nextId
+        const slotId = `slot-${id}`
+        const recoveredProgress = progressFromTaskStatus(task)
+        const recoveredError = task.status.startsWith('failed') ? (task.error_message || 'Task needs attention.') : ''
+        const recoveredLog = recoveredError ? stepLogFromRecoverableTask(task) : []
+
+        set((s) => ({
+          _nextId: s._nextId + 1,
+          slots: {
+            ...s.slots,
+            [slotId]: {
+              ...EMPTY_SLOT,
+              slotId,
+              platform: task.platform,
+              status: task.status,
+              title: task.video_title,
+              analyzing: false,
+              url: task.url,
+              taskId: task.id,
+              reconnected: true,
+              progress: recoveredProgress,
+              error: recoveredError,
+              stepLog: recoveredLog,
+            },
+          },
+        }))
+      }
+    } catch {
+      // silently fail — user will see no active tasks
+    }
   },
 }))

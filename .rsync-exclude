@@ -1,0 +1,41 @@
+# rsync exclude rules for code deployment — edit freely
+# one rule per line, # = comment
+# reference: https://ss64.com/bash/rsync.html
+
+# ── version control & IDE ────────────────────────────────────────────────────
+.git/
+.DS_Store
+.vscode/
+.idea/
+
+# ── python cache / build ─────────────────────────────────────────────────────
+backend/.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# ── frontend cache / build ───────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+
+# ── test fixtures (large audio / video) ──────────────────────────────────────
+test/
+test_transcribe.py
+
+# ── CI / tooling artefacts ───────────────────────────────────────────────────
+.playwright-cli/
+.mirror_state
+
+# ── sensitive config (never overwrite remote secrets) ────────────────────────
+config/app.yaml
+config/certs/
+config/*_cookies.txt
+
+# ── runtime data & logs (never overwrite remote DB / logs) ───────────────────
+data/
+logs/
+
+# ── this file itself (remote may have its own) ──────────────────────────────
+.rsync-exclude

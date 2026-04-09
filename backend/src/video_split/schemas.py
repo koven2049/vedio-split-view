@@ -21,8 +21,18 @@ class AdminCreateUser(BaseModel):
     role: str = Field(default="user", pattern=r"^(user|viewer)$")
 
 
+class AdminResetPassword(BaseModel):
+    password: str = Field(min_length=4, max_length=128)
+
+
 class LangUpdate(BaseModel):
     lang: str = Field(pattern=r"^(zh|en)$")
+
+
+class UserPreferences(BaseModel):
+    max_duration_seconds: int = Field(default=0, ge=0, le=43200)
+    confirm_threshold_seconds: int = Field(default=0, ge=0, le=43200)
+    max_concurrent_analyses: int = Field(default=0, ge=0, le=10)
 
 
 class TokenResponse(BaseModel):

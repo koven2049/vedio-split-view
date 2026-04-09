@@ -11,6 +11,7 @@ from video_split.schemas import (
     AdminCleanupResultOut,
     AdminCleanupSummaryOut,
     AdminCreateUser,
+    AdminResetPassword,
     AdminUserDeletePreviewOut,
     UserInfo,
 )
@@ -80,6 +81,23 @@ async def toggle_user(
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     user.is_active = not user.is_active
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.put("/users/{user_id}/password", response_model=UserInfo)
+async def reset_user_password(
+    user_id: int,
+    req: AdminResetPassword,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.id == user_id, User.role != "admin"))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    user.password_hash = hash_password(req.password)
     await db.commit()
     await db.refresh(user)
     return user

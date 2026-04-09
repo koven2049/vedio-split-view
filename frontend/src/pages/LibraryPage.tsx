@@ -93,7 +93,7 @@ export default function LibraryPage() {
 
   const handleAnalyzeTask = (task: TaskItem) => {
     const platform = task.platform || 'youtube'
-    store.startTaskRetry(platform, task.id, task.url)
+    void store.retryTask(platform, task.id, task.url)
     navigate('/')
   }
 

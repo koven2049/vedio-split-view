@@ -20,6 +20,8 @@ RUN pip install --no-cache-dir --no-deps .
 
 RUN mkdir -p /data/tmp
 
-EXPOSE 8080
+ENV PORT=8080
 
-CMD ["uvicorn", "video_split.main:app", "--host", "0.0.0.0", "--port", "8080"]
+EXPOSE $PORT
+
+CMD ["sh", "-c", "uvicorn video_split.main:app --host 0.0.0.0 --port $PORT"]

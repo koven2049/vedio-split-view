@@ -20,6 +20,7 @@ class VideoMeta:
     duration_seconds: int
     thumbnail_url: str
     upload_date: str = ""
+    uploader: str = ""
 
 
 @dataclass
@@ -169,6 +170,7 @@ async def extract_metadata(
         duration_seconds=int(info.get("duration", 0)),
         thumbnail_url=info.get("thumbnail", ""),
         upload_date=upload_date,
+        uploader=info.get("uploader", "") or info.get("channel", "") or "",
     )
     logger.info(
         "[metadata] OK: title=%r duration=%ds platform=%s",

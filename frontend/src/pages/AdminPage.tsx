@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Shield, UserCheck, Trash2, UserPlus, Loader2, Clock, AlertTriangle, X } from 'lucide-react'
+import { Shield, UserCheck, Trash2, UserPlus, Loader2, Clock, AlertTriangle, X, KeyRound } from 'lucide-react'
 import { api } from '../lib/api'
 
 interface AdminUser {
@@ -20,6 +20,15 @@ interface DeletePreview {
   temp_dirs: number
   total_items: number
 }
+interface PasswordResetTarget {
+  id: number
+  username: string
+}
+interface PasswordResetInput {
+  userId: number
+  username: string
+  password: string
+}
 
 export default function AdminPage() {
   const queryClient = useQueryClient()
@@ -30,6 +39,10 @@ export default function AdminPage() {
   const [formError, setFormError] = useState('')
   const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
   const [deleteError, setDeleteError] = useState('')
+  const [passwordResetTarget, setPasswordResetTarget] = useState<PasswordResetTarget | null>(null)
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetError, setResetError] = useState('')
+  const [resetSuccess, setResetSuccess] = useState('')
 
   const usersQuery = useQuery({
     queryKey: ['admin-users'],
@@ -73,6 +86,19 @@ export default function AdminPage() {
     onError: (e: Error) => setFormError(e.message),
   })
 
+  const resetPasswordMutation = useMutation({
+    mutationFn: ({ userId, password }: PasswordResetInput) =>
+      api.put(`/admin/users/${userId}/password`, { password }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      setPasswordResetTarget(null)
+      setResetPassword('')
+      setResetError('')
+      setResetSuccess(`Password for "${vars.username}" has been updated.`)
+    },
+    onError: (e: Error) => setResetError(e.message),
+  })
+
   const handleCreate = () => {
     setFormError('')
     if (newUsername.length < 2) { setFormError('Username must be at least 2 characters'); return }
@@ -85,8 +111,29 @@ export default function AdminPage() {
     previewMutation.mutate(userId)
   }
 
+  const handleResetPasswordClick = (user: AdminUser) => {
+    setPasswordResetTarget({ id: user.id, username: user.username })
+    setResetPassword('')
+    setResetError('')
+    setResetSuccess('')
+  }
+
+  const submitPasswordReset = () => {
+    if (!passwordResetTarget) return
+    setResetError('')
+    if (resetPassword.length < 4) {
+      setResetError('Password must be at least 4 characters')
+      return
+    }
+    resetPasswordMutation.mutate({
+      userId: passwordResetTarget.id,
+      username: passwordResetTarget.username,
+      password: resetPassword,
+    })
+  }
+
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-6xl">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -164,8 +211,14 @@ export default function AdminPage() {
         </div>
       )}
 
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-        <table className="w-full text-sm">
+      {resetSuccess && (
+        <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', color: 'var(--color-success, #10b981)' }}>
+          {resetSuccess}
+        </div>
+      )}
+
+      <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid var(--color-border)' }}>
+        <table className="w-full min-w-[980px] text-sm">
           <thead>
             <tr style={{ background: 'var(--color-bg-secondary)' }}>
               <th className="text-left px-4 py-3 font-medium">Username</th>
@@ -173,7 +226,7 @@ export default function AdminPage() {
               <th className="text-left px-4 py-3 font-medium">Videos</th>
               <th className="text-left px-4 py-3 font-medium">Created</th>
               <th className="text-left px-4 py-3 font-medium">Status</th>
-              <th className="text-right px-4 py-3 font-medium">Actions</th>
+              <th className="text-right px-4 py-3 font-medium min-w-[320px]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -205,12 +258,19 @@ export default function AdminPage() {
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex gap-1 justify-end">
+                <td className="px-4 py-3 text-right min-w-[320px]">
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => handleResetPasswordClick(user)}
+                      className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded text-xs whitespace-nowrap"
+                      style={{ border: '1px solid var(--color-border)' }}
+                    >
+                      <KeyRound size={12} /> Reset Password
+                    </button>
                     {user.is_active ? (
                       <button
                         onClick={() => toggleMutation.mutate(user.id)}
-                        className="px-2.5 py-1 rounded text-xs"
+                        className="px-3 py-1.5 rounded text-xs whitespace-nowrap"
                         style={{ border: '1px solid var(--color-border)' }}
                       >
                         Disable
@@ -218,7 +278,7 @@ export default function AdminPage() {
                     ) : (
                       <button
                         onClick={() => toggleMutation.mutate(user.id)}
-                        className="px-2.5 py-1 rounded text-xs font-medium text-white"
+                        className="px-3 py-1.5 rounded text-xs font-medium text-white whitespace-nowrap"
                         style={{ background: 'var(--color-success, #10b981)' }}
                       >
                         Approve
@@ -226,10 +286,10 @@ export default function AdminPage() {
                     )}
                     <button
                       onClick={() => handleDeleteClick(user.id)}
-                      className="px-2.5 py-1 rounded text-xs"
+                      className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded text-xs whitespace-nowrap"
                       style={{ color: 'var(--color-danger)', border: '1px solid var(--color-border)' }}
                     >
-                      <Trash2 size={12} />
+                      <Trash2 size={12} /> Delete
                     </button>
                   </div>
                 </td>
@@ -316,6 +376,79 @@ export default function AdminPage() {
                 </div>
               </>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {passwordResetTarget && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="w-full max-w-md p-6 rounded-2xl space-y-4 relative" style={{ background: 'var(--color-bg)' }}>
+            {!resetPasswordMutation.isPending && (
+              <button
+                onClick={() => {
+                  setPasswordResetTarget(null)
+                  setResetPassword('')
+                  setResetError('')
+                }}
+                className="absolute top-3 right-3 opacity-50 hover:opacity-100"
+              >
+                <X size={18} />
+              </button>
+            )}
+
+            <div className="flex items-start gap-3">
+              <KeyRound size={20} style={{ color: 'var(--color-primary)' }} />
+              <div className="space-y-1">
+                <h3 className="font-semibold">Reset password for "{passwordResetTarget.username}"</h3>
+                <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                  Set a new password for this account. The old password will stop working immediately.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium">New password</label>
+              <input
+                type="password"
+                value={resetPassword}
+                onChange={(e) => setResetPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submitPasswordReset()}
+                autoFocus
+                placeholder="At least 4 characters"
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            {resetError && (
+              <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', color: 'var(--color-danger)' }}>
+                {resetError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setPasswordResetTarget(null)
+                  setResetPassword('')
+                  setResetError('')
+                }}
+                disabled={resetPasswordMutation.isPending}
+                className="px-4 py-2 rounded-lg text-sm"
+                style={{ border: '1px solid var(--color-border)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitPasswordReset}
+                disabled={resetPasswordMutation.isPending}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                style={{ background: 'var(--color-primary)' }}
+              >
+                {resetPasswordMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                Save new password
+              </button>
+            </div>
           </div>
         </div>
       )}
