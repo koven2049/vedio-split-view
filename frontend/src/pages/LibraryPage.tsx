@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Trash2, Share2, Lock, Clock, Play, X, Loader2, FileAudio, AlertCircle, TriangleAlert, CheckCircle2, BarChart3 } from 'lucide-react'
+import { Search, Trash2, Share2, Lock, Clock, Play, X, Loader2, FileAudio, AlertCircle, TriangleAlert, CheckCircle2, BarChart3, Globe } from 'lucide-react'
 import { api } from '../lib/api'
 import { formatDuration, platformLabel, timeAgo, cn } from '../lib/utils'
 import { useAnalysisStore } from '../stores/analysisStore'
 import { useAuthStore } from '../stores/authStore'
+import { useT, type TranslationKey, type TFunction } from '../i18n'
 
 interface AsrUsageSummary { model: string; total_seconds: number }
 interface LlmUsageSummary { model: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }
@@ -26,14 +27,20 @@ type LibraryItem =
   | { kind: 'video'; data: VideoItem }
   | { kind: 'task'; data: TaskItem }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  analyzed:          { label: 'Analyzed',           color: 'var(--color-success)',  bg: 'rgba(34,197,94,0.1)' },
-  downloaded:        { label: 'Downloaded',         color: 'var(--color-primary)',  bg: 'rgba(59,130,246,0.1)' },
-  downloading:       { label: 'Downloading...',     color: 'var(--color-warning)',  bg: 'rgba(245,158,11,0.1)' },
-  transcribing:      { label: 'Transcribing...',    color: 'var(--color-warning)',  bg: 'rgba(245,158,11,0.1)' },
-  analyzing:         { label: 'Analyzing...',       color: 'var(--color-warning)',  bg: 'rgba(245,158,11,0.1)' },
-  failed_transcribe: { label: 'Transcription Failed', color: 'var(--color-danger)', bg: 'rgba(239,68,68,0.1)' },
-  failed_analyze:    { label: 'Analysis Failed',    color: 'var(--color-danger)',   bg: 'rgba(239,68,68,0.1)' },
+const TASK_STATUS_STYLE: Record<string, { key: TranslationKey; color: string; bg: string }> = {
+  analyzed:          { key: 'library.analyzed',           color: 'var(--color-success)',  bg: 'rgba(34,197,94,0.1)' },
+  downloaded:        { key: 'library.downloaded',         color: 'var(--color-primary)',  bg: 'rgba(59,130,246,0.1)' },
+  downloading:       { key: 'library.downloading',        color: 'var(--color-warning)',  bg: 'rgba(245,158,11,0.1)' },
+  transcribing:      { key: 'library.transcribing',       color: 'var(--color-warning)',  bg: 'rgba(245,158,11,0.1)' },
+  analyzing:         { key: 'library.analyzing',          color: 'var(--color-warning)',  bg: 'rgba(245,158,11,0.1)' },
+  failed_transcribe: { key: 'library.transcriptionFailed', color: 'var(--color-danger)', bg: 'rgba(239,68,68,0.1)' },
+  failed_analyze:    { key: 'library.analysisFailed',     color: 'var(--color-danger)',   bg: 'rgba(239,68,68,0.1)' },
+}
+
+function taskStatusLabel(t: TFunction, status: string) {
+  const style = TASK_STATUS_STYLE[status]
+  if (!style) return { label: status, color: 'var(--color-text-secondary)', bg: 'var(--color-bg-tertiary)' }
+  return { label: t(style.key), color: style.color, bg: style.bg }
 }
 
 function canAnalyze(status: string): boolean {
@@ -41,6 +48,7 @@ function canAnalyze(status: string): boolean {
 }
 
 export default function LibraryPage() {
+  const t = useT()
   const isViewer = useAuthStore((s) => s.isViewer)()
   const [activeTab, setActiveTab] = useState<'mine' | 'public'>(isViewer ? 'public' : 'mine')
   const [search, setSearch] = useState('')
@@ -83,6 +91,12 @@ export default function LibraryPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['videos'] }),
   })
 
+  const bulkShareMutation = useMutation({
+    mutationFn: ({ ids, share }: { ids: number[]; share: boolean }) =>
+      api.post<{ affected: number }>('/videos/bulk-share', { ids, share }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['videos'] }),
+  })
+
   const discardTaskMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/videos/tasks/${id}`),
     onSuccess: () => {
@@ -93,12 +107,12 @@ export default function LibraryPage() {
 
   const handleAnalyzeTask = (task: TaskItem) => {
     const platform = task.platform || 'youtube'
-    void store.retryTask(platform, task.id, task.url)
-    navigate('/')
+    void store.retryTask(platform, task.id, task.url, task.status)
+    navigate('/analyze')
   }
 
   const handleViewProgress = () => {
-    navigate('/')
+    navigate('/analyze')
   }
 
   const tagsQuery = useQuery({
@@ -115,19 +129,23 @@ export default function LibraryPage() {
   const mergedItems: LibraryItem[] = []
   if (activeTab === 'mine') {
     const tasks = (tasksQuery.data || []).filter(
-      (t) => !['completed', 'cancelled', 'failed_download'].includes(t.status)
+      (task) => !['completed', 'cancelled', 'failed_download'].includes(task.status)
     )
-    for (const t of tasks) {
-      mergedItems.push({ kind: 'task', data: t })
+    for (const task of tasks) {
+      mergedItems.push({ kind: 'task', data: task })
     }
   }
   for (const v of (videosQuery.data || [])) {
     mergedItems.push({ kind: 'video', data: v })
   }
 
+  const myVideos = activeTab === 'mine' ? (videosQuery.data || []) : []
+  const publicCount = myVideos.filter((v) => v.is_public).length
+  const privateCount = myVideos.length - publicCount
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Library</h1>
+      <h1 className="text-2xl font-bold">{t('library.title')}</h1>
 
       {/* Tabs + Search */}
       <div className="flex items-center justify-between gap-4">
@@ -140,12 +158,12 @@ export default function LibraryPage() {
                 className={cn('px-4 py-2 rounded-md text-sm font-medium transition-colors', activeTab === tab ? 'shadow-sm' : 'opacity-60 hover:opacity-100')}
                 style={activeTab === tab ? { background: 'var(--color-bg)', color: 'var(--color-primary)' } : {}}
               >
-                {tab === 'mine' ? 'My Videos' : 'Public'}
+                {tab === 'mine' ? t('library.myVideos') : t('library.public')}
               </button>
             ))}
           </div>
         ) : (
-          <h2 className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>Public Videos</h2>
+          <h2 className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('library.publicVideos')}</h2>
         )}
 
         <div className="flex gap-2 items-center">
@@ -160,7 +178,7 @@ export default function LibraryPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search..."
+              placeholder={t('library.searchPlaceholder')}
               className="pl-9 pr-3 py-2 rounded-lg text-sm w-48 outline-none"
               style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
             />
@@ -176,17 +194,17 @@ export default function LibraryPage() {
         >
           <BarChart3 size={14} className="mt-0.5 shrink-0 opacity-50" />
           <div className="flex flex-wrap gap-x-5 gap-y-1" style={{ color: 'var(--color-text-secondary)' }}>
-            <span className="font-medium" style={{ color: 'var(--color-text)' }}>Total usage:</span>
+            <span className="font-medium" style={{ color: 'var(--color-text)' }}>{t('library.totalUsage')}</span>
             {usageQuery.data.asr.map((a) => (
               <span key={`asr-${a.model}`} className="inline-flex items-center gap-1">
-                <span className="opacity-60">ASR ({a.model}):</span>
+                <span className="opacity-60">{t('library.usageAsrPrefix', { model: a.model })}</span>
                 <span className="font-medium tabular-nums">{Math.round(a.total_seconds).toLocaleString()}s</span>
               </span>
             ))}
             {usageQuery.data.llm.map((l) => (
               <span key={`llm-${l.model}`} className="inline-flex items-center gap-1">
-                <span className="opacity-60">LLM ({l.model}):</span>
-                <span className="font-medium tabular-nums">{l.total_tokens.toLocaleString()} tokens</span>
+                <span className="opacity-60">{t('library.usageLlmPrefix', { model: l.model })}</span>
+                <span className="font-medium tabular-nums">{l.total_tokens.toLocaleString()} {t('library.tokensUnit')}</span>
               </span>
             ))}
           </div>
@@ -209,6 +227,36 @@ export default function LibraryPage() {
               {tag.name}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Bulk actions */}
+      {!isViewer && activeTab === 'mine' && myVideos.length > 0 && (
+        <div className="flex items-center gap-2">
+          {privateCount > 0 && (
+            <button
+              onClick={() => bulkShareMutation.mutate({ ids: myVideos.filter((v) => !v.is_public).map((v) => v.id), share: true })}
+              disabled={bulkShareMutation.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ background: 'var(--color-primary)', color: 'white' }}
+            >
+              {bulkShareMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Globe size={13} />}
+              {t('library.shareAll')} ({privateCount})
+            </button>
+          )}
+          {publicCount > 0 && (
+            <button
+              onClick={() => bulkShareMutation.mutate({ ids: myVideos.filter((v) => v.is_public).map((v) => v.id), share: false })}
+              disabled={bulkShareMutation.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-90 disabled:opacity-50"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+            >
+              <Lock size={13} /> {t('library.unshareAll')} ({publicCount})
+            </button>
+          )}
+          <span className="text-xs ml-1" style={{ color: 'var(--color-text-secondary)' }}>
+            {myVideos.length} {t('library.videos')} · {publicCount} {t('library.publicCount')}
+          </span>
         </div>
       )}
 
@@ -239,7 +287,7 @@ export default function LibraryPage() {
 
       {mergedItems.length === 0 && (
         <p className="text-center py-12 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          No videos found.
+          {t('library.noVideos')}
         </p>
       )}
 
@@ -256,12 +304,12 @@ export default function LibraryPage() {
               <div className="p-2.5 rounded-full" style={{ background: 'rgba(239, 68, 68, 0.1)' }}>
                 <TriangleAlert size={20} style={{ color: 'var(--color-danger)' }} />
               </div>
-              <h3 className="text-base font-semibold">Confirm Delete</h3>
+              <h3 className="text-base font-semibold">{t('library.confirmDelete')}</h3>
             </div>
             <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-              Delete <strong>{confirmDelete.title}</strong>?
-              {confirmDelete.type === 'task' && ' All associated audio files will also be removed.'}
-              {confirmDelete.type === 'video' && ' This cannot be undone.'}
+              {t('library.deleteNamed', { title: confirmDelete.title })}
+              {confirmDelete.type === 'task' && ` ${t('library.deleteTaskConfirm')}`}
+              {confirmDelete.type === 'video' && ` ${t('library.deleteVideoConfirm')}`}
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -269,7 +317,7 @@ export default function LibraryPage() {
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
                 style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
               >
-                Cancel
+                {t('library.cancel')}
               </button>
               <button
                 onClick={() => {
@@ -279,7 +327,7 @@ export default function LibraryPage() {
                 className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
                 style={{ background: 'var(--color-danger)' }}
               >
-                Delete
+                {t('library.delete')}
               </button>
             </div>
           </div>
@@ -297,7 +345,8 @@ function TaskCard({ task, isGlobalAnalyzing, onAnalyze, onViewProgress, onDelete
   onViewProgress: () => void
   onDelete: () => void
 }) {
-  const cfg = STATUS_CONFIG[task.status] ?? { label: task.status, color: 'var(--color-text-secondary)', bg: 'var(--color-bg-tertiary)' }
+  const t = useT()
+  const cfg = taskStatusLabel(t, task.status)
   const inProgress = ['downloading', 'transcribing', 'analyzing'].includes(task.status)
 
   return (
@@ -321,7 +370,7 @@ function TaskCard({ task, isGlobalAnalyzing, onAnalyze, onViewProgress, onDelete
         </span>
         {inProgress && (
           <span className="text-[10px]" style={{ color: 'var(--color-primary)' }}>
-            Click to view progress
+            {t('library.clickViewProgress')}
           </span>
         )}
       </div>
@@ -349,8 +398,8 @@ function TaskCard({ task, isGlobalAnalyzing, onAnalyze, onViewProgress, onDelete
               style={{ color: 'var(--color-primary)' }}
             >
               {isGlobalAnalyzing
-                ? <><Loader2 size={12} className="animate-spin" /> Busy</>
-                : <><Play size={12} /> {task.status === 'downloaded' ? 'Analyze' : 'Retry'}</>
+                ? <><Loader2 size={12} className="animate-spin" /> {t('library.busy')}</>
+                : <><Play size={12} /> {task.status === 'downloaded' ? t('library.analyze') : t('analyze.retry')}</>
               }
             </button>
           )}
@@ -360,7 +409,7 @@ function TaskCard({ task, isGlobalAnalyzing, onAnalyze, onViewProgress, onDelete
               className="flex items-center gap-1 text-xs px-2 py-1 rounded font-medium"
               style={{ color: 'var(--color-primary)' }}
             >
-              <Play size={12} /> View Progress
+              <Play size={12} /> {t('library.viewProgress')}
             </button>
           )}
           <button
@@ -369,7 +418,7 @@ function TaskCard({ task, isGlobalAnalyzing, onAnalyze, onViewProgress, onDelete
             className="flex items-center gap-1 text-xs px-2 py-1 rounded ml-auto disabled:opacity-40"
             style={{ color: 'var(--color-danger)' }}
           >
-            <Trash2 size={12} /> Delete
+            <Trash2 size={12} /> {t('library.delete')}
           </button>
         </div>
       </div>
@@ -385,28 +434,50 @@ function VideoCard({ video, isMine, isViewer: viewerMode, onShare, onDelete }: {
   onShare: (share: boolean) => void
   onDelete: () => void
 }) {
-  const cfg = STATUS_CONFIG.analyzed
+  const t = useT()
+  const analyzedLabel = t('library.analyzed')
 
   return (
     <div
-      className="rounded-xl overflow-hidden hover:shadow-md transition-shadow"
+      className="rounded-xl overflow-hidden hover:shadow-md transition-shadow group"
       style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
     >
-      <Link to={`/video/${video.id}`} className="relative block">
-        {video.thumbnail_url ? (
-          <img src={video.thumbnail_url} alt="" className="w-full h-36 object-cover" />
-        ) : (
-          <div className="w-full h-36 flex items-center justify-center" style={{ background: 'var(--color-bg-tertiary)' }}>
-            <span className="text-3xl opacity-30">{platformLabel(video.platform)[0]}</span>
-          </div>
-        )}
+      <div className="relative">
+        <Link to={`/video/${video.id}`} className="block">
+          {video.thumbnail_url ? (
+            <img src={video.thumbnail_url} alt="" className="w-full h-36 object-cover" />
+          ) : (
+            <div className="w-full h-36 flex items-center justify-center" style={{ background: 'var(--color-bg-tertiary)' }}>
+              <span className="text-3xl opacity-30">{platformLabel(video.platform)[0]}</span>
+            </div>
+          )}
+        </Link>
         <span
           className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium backdrop-blur-sm"
-          style={{ background: cfg.bg, color: cfg.color, border: '1px solid rgba(34,197,94,0.2)' }}
+          style={{ background: TASK_STATUS_STYLE.analyzed.bg, color: TASK_STATUS_STYLE.analyzed.color, border: '1px solid rgba(34,197,94,0.2)' }}
         >
-          <CheckCircle2 size={11} /> {cfg.label}
+          <CheckCircle2 size={11} /> {analyzedLabel}
         </span>
-      </Link>
+        {!viewerMode && isMine && (
+          <button
+            onClick={(e) => { e.preventDefault(); onShare(!video.is_public) }}
+            title={video.is_public ? t('library.makePrivate') : t('library.makePublic')}
+            className={cn(
+              'absolute top-2 left-2 flex items-center justify-center w-7 h-7 rounded-full backdrop-blur-sm transition-all',
+              video.is_public
+                ? 'opacity-100'
+                : 'opacity-0 group-hover:opacity-100',
+            )}
+            style={{
+              background: video.is_public ? 'rgba(34,197,94,0.85)' : 'rgba(0,0,0,0.5)',
+              color: 'white',
+              border: video.is_public ? '1.5px solid rgba(34,197,94,0.4)' : '1.5px solid rgba(255,255,255,0.2)',
+            }}
+          >
+            {video.is_public ? <Globe size={14} /> : <Share2 size={14} />}
+          </button>
+        )}
+      </div>
       <div className="p-3 space-y-2">
         <Link to={`/video/${video.id}`}>
           <h3 className="font-medium text-sm leading-snug line-clamp-2 hover:underline">{video.title}</h3>
@@ -431,11 +502,11 @@ function VideoCard({ video, isMine, isViewer: viewerMode, onShare, onDelete }: {
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded"
                 style={{ color: video.is_public ? 'var(--color-success)' : 'var(--color-text-secondary)' }}
               >
-                {video.is_public ? <><Share2 size={12} /> Public</> : <><Lock size={12} /> Private</>}
+                {video.is_public ? <><Share2 size={12} /> {t('library.public_label')}</> : <><Lock size={12} /> {t('library.private')}</>}
               </button>
             )}
             {!isMine && video.owner_name && (
-              <span className="text-xs px-2 py-1" style={{ color: 'var(--color-text-secondary)' }}>by {video.owner_name}</span>
+              <span className="text-xs px-2 py-1" style={{ color: 'var(--color-text-secondary)' }}>{t('library.by')} {video.owner_name}</span>
             )}
             {isMine && (
               <button
@@ -443,14 +514,14 @@ function VideoCard({ video, isMine, isViewer: viewerMode, onShare, onDelete }: {
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded ml-auto"
                 style={{ color: 'var(--color-danger)' }}
               >
-                <Trash2 size={12} /> Delete
+                <Trash2 size={12} /> {t('library.delete')}
               </button>
             )}
           </div>
         )}
         {viewerMode && video.owner_name && (
           <div className="pt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
-            <span className="text-xs px-2 py-1" style={{ color: 'var(--color-text-secondary)' }}>by {video.owner_name}</span>
+            <span className="text-xs px-2 py-1" style={{ color: 'var(--color-text-secondary)' }}>{t('library.by')} {video.owner_name}</span>
           </div>
         )}
       </div>

@@ -1,0 +1,169 @@
+<h2>思维导图展示形式</h2>
+<p class="subtitle">以一期科技播客为例，展示同一内容的不同可视化方式。点击选择你偏好的风格。</p>
+
+<div class="cards">
+  <!-- Option A: Tree Mind Map -->
+  <div class="card" data-choice="tree-mindmap" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 24px; background: #1a1a2e;">
+      <div style="display: flex; flex-direction: column; align-items: center; font-family: system-ui; color: #e0e0e0;">
+        <!-- Central node -->
+        <div style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 10px 24px; border-radius: 12px; font-weight: 600; font-size: 14px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(102,126,234,0.4);">
+          🎙️ AI 在医疗领域的突破
+        </div>
+        <!-- Branches -->
+        <div style="display: flex; gap: 12px; width: 100%;">
+          <!-- Branch 1 -->
+          <div style="flex: 1; background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); border-radius: 10px; padding: 10px;">
+            <div style="color: #667eea; font-weight: 600; font-size: 12px; margin-bottom: 6px;">📋 背景介绍</div>
+            <div style="font-size: 10px; color: #aaa; line-height: 1.5;">
+              <div style="background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 3px;">• 医疗AI市场规模</div>
+              <div style="background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 3px;">• 核心驱动因素</div>
+            </div>
+          </div>
+          <!-- Branch 2 -->
+          <div style="flex: 1; background: rgba(118,75,162,0.15); border: 1px solid rgba(118,75,162,0.3); border-radius: 10px; padding: 10px;">
+            <div style="color: #a78bfa; font-weight: 600; font-size: 12px; margin-bottom: 6px;">🔬 技术突破</div>
+            <div style="font-size: 10px; color: #aaa; line-height: 1.5;">
+              <div style="background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 3px;">• 影像诊断AI</div>
+              <div style="background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 3px;">• 药物研发加速</div>
+              <div style="background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 3px;">• 基因组分析</div>
+            </div>
+          </div>
+          <!-- Branch 3 -->
+          <div style="flex: 1; background: rgba(236,72,153,0.15); border: 1px solid rgba(236,72,153,0.3); border-radius: 10px; padding: 10px;">
+            <div style="color: #ec4899; font-weight: 600; font-size: 12px; margin-bottom: 6px;">⚠️ 挑战与伦理</div>
+            <div style="font-size: 10px; color: #aaa; line-height: 1.5;">
+              <div style="background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 3px;">• 数据隐私</div>
+              <div style="background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 3px;">• 监管框架</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 树状思维导图</h3>
+      <p>经典思维导图风格。中心主题向外发散，每个分支是一个章节，叶节点是关键要点。适合展示层级关系。</p>
+      <p style="font-size: 12px; color: #888; margin-top: 8px;">技术方案：Markmap（Markdown → 交互式思维导图）或 D3.js 自绘</p>
+    </div>
+  </div>
+
+  <!-- Option B: Structured Cards -->
+  <div class="card" data-choice="structured-cards" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 24px; background: #1a1a2e;">
+      <div style="font-family: system-ui; color: #e0e0e0;">
+        <!-- Title bar -->
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px;">
+          <div style="background: linear-gradient(135deg, #f59e0b, #ef4444); width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px;">🧠</div>
+          <div>
+            <div style="font-size: 13px; font-weight: 600;">AI 在医疗领域的突破</div>
+            <div style="font-size: 10px; color: #888;">3 个章节 · 8 个要点 · 2 个关键引用</div>
+          </div>
+        </div>
+        <!-- Cards grid -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div style="background: rgba(59,130,246,0.1); border-left: 3px solid #3b82f6; padding: 8px 10px; border-radius: 0 6px 6px 0;">
+            <div style="font-size: 11px; font-weight: 600; color: #3b82f6; margin-bottom: 4px;">01 背景介绍</div>
+            <div style="font-size: 10px; color: #aaa; line-height: 1.6;">
+              • 2025年全球医疗AI市场达450亿美元<br>
+              • 三大驱动力：数据、算力、政策
+            </div>
+          </div>
+          <div style="background: rgba(168,85,247,0.1); border-left: 3px solid #a855f7; padding: 8px 10px; border-radius: 0 6px 6px 0;">
+            <div style="font-size: 11px; font-weight: 600; color: #a855f7; margin-bottom: 4px;">02 技术突破</div>
+            <div style="font-size: 10px; color: #aaa; line-height: 1.6;">
+              • 影像AI准确率超过资深医生<br>
+              • 药物研发周期缩短60%
+            </div>
+          </div>
+          <div style="background: rgba(236,72,153,0.1); border-left: 3px solid #ec4899; padding: 8px 10px; border-radius: 0 6px 6px 0; grid-column: span 2;">
+            <div style="font-size: 11px; font-weight: 600; color: #ec4899; margin-bottom: 4px;">💬 关键引用</div>
+            <div style="font-size: 10px; color: #ccc; font-style: italic;">"未来5年，AI不会取代医生，但会使用AI的医生将取代不使用的医生"</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 结构化卡片（Podwise 风格）</h3>
+      <p>章节卡片 + 关键要点 + 引用高亮，类似 Notion/Podwise 的结构化笔记。信息密度高，阅读体验好。可折叠展开。</p>
+      <p style="font-size: 12px; color: #888; margin-top: 8px;">技术方案：纯 React 组件，无需第三方图表库</p>
+    </div>
+  </div>
+
+  <!-- Option C: Hybrid -->
+  <div class="card" data-choice="hybrid" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 24px; background: #1a1a2e;">
+      <div style="font-family: system-ui; color: #e0e0e0;">
+        <!-- Top: mini mindmap -->
+        <div style="display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 14px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+          <div style="font-size: 9px; background: rgba(59,130,246,0.2); color: #60a5fa; padding: 3px 8px; border-radius: 10px;">背景介绍</div>
+          <div style="color: #444;">—</div>
+          <div style="font-size: 10px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 5px 12px; border-radius: 10px; font-weight: 600;">🎙️ 主题</div>
+          <div style="color: #444;">—</div>
+          <div style="font-size: 9px; background: rgba(168,85,247,0.2); color: #c084fc; padding: 3px 8px; border-radius: 10px;">技术突破</div>
+          <div style="color: #444;">—</div>
+          <div style="font-size: 9px; background: rgba(236,72,153,0.2); color: #f472b6; padding: 3px 8px; border-radius: 10px;">挑战伦理</div>
+        </div>
+        <!-- Bottom: detail cards -->
+        <div style="border-left: 2px solid #3b82f6; padding-left: 10px; margin-bottom: 8px;">
+          <div style="font-size: 11px; font-weight: 600; color: #60a5fa; margin-bottom: 3px;">01 背景介绍 <span style="font-size: 9px; color: #666; font-weight: 400;">00:00 - 08:30</span></div>
+          <div style="font-size: 10px; color: #aaa;">全球医疗AI市场规模、三大驱动因素分析</div>
+        </div>
+        <div style="border-left: 2px solid #a855f7; padding-left: 10px;">
+          <div style="font-size: 11px; font-weight: 600; color: #c084fc; margin-bottom: 3px;">02 技术突破 <span style="font-size: 9px; color: #666; font-weight: 400;">08:30 - 25:00</span></div>
+          <div style="font-size: 10px; color: #aaa;">影像诊断、药物研发、基因组三大方向</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 混合模式（概览图 + 详情卡片）</h3>
+      <p>顶部是可交互的简化思维导图/概览，点击节点后下方展开该章节的详细卡片。兼顾全局视野和细节深度。</p>
+      <p style="font-size: 12px; color: #888; margin-top: 8px;">技术方案：顶部用 Markmap 或 ReactFlow，下方用 React 组件</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 20px;">
+  <h3>对比</h3>
+  <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+    <thead>
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+        <th style="text-align: left; padding: 8px; color: #888;">维度</th>
+        <th style="text-align: left; padding: 8px;">A. 树状思维导图</th>
+        <th style="text-align: left; padding: 8px;">B. 结构化卡片</th>
+        <th style="text-align: left; padding: 8px;">C. 混合模式</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <td style="padding: 8px; color: #888;">信息密度</td>
+        <td style="padding: 8px;">中等</td>
+        <td style="padding: 8px;">⭐ 高</td>
+        <td style="padding: 8px;">⭐ 高</td>
+      </tr>
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <td style="padding: 8px; color: #888;">视觉冲击力</td>
+        <td style="padding: 8px;">⭐ 强</td>
+        <td style="padding: 8px;">一般</td>
+        <td style="padding: 8px;">⭐ 强</td>
+      </tr>
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <td style="padding: 8px; color: #888;">长内容适应性</td>
+        <td style="padding: 8px;">差（节点太多会乱）</td>
+        <td style="padding: 8px;">⭐ 好（可滚动折叠）</td>
+        <td style="padding: 8px;">⭐ 好</td>
+      </tr>
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <td style="padding: 8px; color: #888;">开发复杂度</td>
+        <td style="padding: 8px;">中</td>
+        <td style="padding: 8px;">⭐ 低</td>
+        <td style="padding: 8px;">高</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px; color: #888;">移动端友好</td>
+        <td style="padding: 8px;">差</td>
+        <td style="padding: 8px;">⭐ 好</td>
+        <td style="padding: 8px;">中等</td>
+      </tr>
+    </tbody>
+  </table>
+</div>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Shield, UserCheck, Trash2, UserPlus, Loader2, Clock, AlertTriangle, X, KeyRound } from 'lucide-react'
 import { api } from '../lib/api'
+import { useT } from '../i18n'
 
 interface AdminUser {
   id: number; username: string; role: string
@@ -31,6 +32,7 @@ interface PasswordResetInput {
 }
 
 export default function AdminPage() {
+  const t = useT()
   const queryClient = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [newUsername, setNewUsername] = useState('')
@@ -94,15 +96,15 @@ export default function AdminPage() {
       setPasswordResetTarget(null)
       setResetPassword('')
       setResetError('')
-      setResetSuccess(`Password for "${vars.username}" has been updated.`)
+      setResetSuccess(t('admin.passwordUpdated', { username: vars.username }))
     },
     onError: (e: Error) => setResetError(e.message),
   })
 
   const handleCreate = () => {
     setFormError('')
-    if (newUsername.length < 2) { setFormError('Username must be at least 2 characters'); return }
-    if (newPassword.length < 4) { setFormError('Password must be at least 4 characters'); return }
+    if (newUsername.length < 2) { setFormError(t('admin.usernameMinLength')); return }
+    if (newPassword.length < 4) { setFormError(t('admin.passwordMinLength')); return }
     createMutation.mutate({ username: newUsername, password: newPassword, role: newRole })
   }
 
@@ -122,7 +124,7 @@ export default function AdminPage() {
     if (!passwordResetTarget) return
     setResetError('')
     if (resetPassword.length < 4) {
-      setResetError('Password must be at least 4 characters')
+      setResetError(t('admin.passwordMinLength'))
       return
     }
     resetPasswordMutation.mutate({
@@ -137,10 +139,10 @@ export default function AdminPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Shield size={24} style={{ color: 'var(--color-primary)' }} /> User Management
+            <Shield size={24} style={{ color: 'var(--color-primary)' }} /> {t('admin.title')}
           </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-            Manage registered users. Admin accounts cannot analyze videos.
+            {t('admin.description')}
           </p>
         </div>
         <button
@@ -148,20 +150,20 @@ export default function AdminPage() {
           className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white transition-colors"
           style={{ background: 'var(--color-primary)' }}
         >
-          <UserPlus size={16} /> Add User
+          <UserPlus size={16} /> {t('admin.addUser')}
         </button>
       </div>
 
       {/* Create User Form */}
       {showForm && (
         <div className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <h3 className="text-sm font-semibold">Create New User</h3>
+          <h3 className="text-sm font-semibold">{t('admin.createNewUser')}</h3>
           <div className="flex gap-3">
             <input
               type="text"
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
-              placeholder="Username"
+              placeholder={t('admin.usernamePlaceholder')}
               className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
               style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
             />
@@ -169,7 +171,7 @@ export default function AdminPage() {
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Password"
+              placeholder={t('admin.passwordPlaceholder')}
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
               className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
               style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
@@ -180,8 +182,8 @@ export default function AdminPage() {
               className="px-3 py-2 rounded-lg text-sm outline-none"
               style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
             >
-              <option value="user">User</option>
-              <option value="viewer">Viewer</option>
+              <option value="user">{t('admin.user')}</option>
+              <option value="viewer">{t('admin.viewer')}</option>
             </select>
             <button
               onClick={handleCreate}
@@ -189,14 +191,14 @@ export default function AdminPage() {
               className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
               style={{ background: 'var(--color-primary)' }}
             >
-              {createMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : 'Create'}
+              {createMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : t('admin.create')}
             </button>
             <button
               onClick={() => { setShowForm(false); setFormError('') }}
               className="px-4 py-2 rounded-lg text-sm"
               style={{ border: '1px solid var(--color-border)' }}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
           {formError && (
@@ -221,12 +223,12 @@ export default function AdminPage() {
         <table className="w-full min-w-[980px] text-sm">
           <thead>
             <tr style={{ background: 'var(--color-bg-secondary)' }}>
-              <th className="text-left px-4 py-3 font-medium">Username</th>
-              <th className="text-left px-4 py-3 font-medium">Role</th>
-              <th className="text-left px-4 py-3 font-medium">Videos</th>
-              <th className="text-left px-4 py-3 font-medium">Created</th>
-              <th className="text-left px-4 py-3 font-medium">Status</th>
-              <th className="text-right px-4 py-3 font-medium min-w-[320px]">Actions</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.username')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.role')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.videoCount')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.created')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.status')}</th>
+              <th className="text-right px-4 py-3 font-medium min-w-[320px]">{t('admin.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -249,12 +251,12 @@ export default function AdminPage() {
                   {user.is_active ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
                       style={{ background: 'var(--color-success)' + '20', color: 'var(--color-success)' }}>
-                      <UserCheck size={12} /> Active
+                      <UserCheck size={12} /> {t('admin.active')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
                       style={{ background: 'var(--color-warning, #f59e0b)' + '20', color: 'var(--color-warning, #f59e0b)' }}>
-                      <Clock size={12} /> Pending
+                      <Clock size={12} /> {t('admin.pending')}
                     </span>
                   )}
                 </td>
@@ -265,7 +267,7 @@ export default function AdminPage() {
                       className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded text-xs whitespace-nowrap"
                       style={{ border: '1px solid var(--color-border)' }}
                     >
-                      <KeyRound size={12} /> Reset Password
+                      <KeyRound size={12} /> {t('admin.resetPassword')}
                     </button>
                     {user.is_active ? (
                       <button
@@ -273,7 +275,7 @@ export default function AdminPage() {
                         className="px-3 py-1.5 rounded text-xs whitespace-nowrap"
                         style={{ border: '1px solid var(--color-border)' }}
                       >
-                        Disable
+                        {t('admin.disable')}
                       </button>
                     ) : (
                       <button
@@ -281,7 +283,7 @@ export default function AdminPage() {
                         className="px-3 py-1.5 rounded text-xs font-medium text-white whitespace-nowrap"
                         style={{ background: 'var(--color-success, #10b981)' }}
                       >
-                        Approve
+                        {t('admin.approve')}
                       </button>
                     )}
                     <button
@@ -289,7 +291,7 @@ export default function AdminPage() {
                       className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded text-xs whitespace-nowrap"
                       style={{ color: 'var(--color-danger)', border: '1px solid var(--color-border)' }}
                     >
-                      <Trash2 size={12} /> Delete
+                      <Trash2 size={12} /> {t('admin.deleteUser')}
                     </button>
                   </div>
                 </td>
@@ -298,7 +300,7 @@ export default function AdminPage() {
             {usersQuery.data?.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>
-                  No registered users yet. Click "Add User" to create one.
+                  {t('admin.noUsers')}
                 </td>
               </tr>
             )}
@@ -320,33 +322,33 @@ export default function AdminPage() {
 
             {previewMutation.isPending ? (
               <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                <Loader2 size={16} className="animate-spin" /> Loading delete impact...
+                <Loader2 size={16} className="animate-spin" /> {t('admin.loadingDeleteImpact')}
               </div>
             ) : deletePreview ? (
               <>
                 <div className="flex items-start gap-3">
                   <AlertTriangle size={20} style={{ color: 'var(--color-danger)' }} />
                   <div className="space-y-1">
-                    <h3 className="font-semibold">Delete user "{deletePreview.username}"?</h3>
+                    <h3 className="font-semibold">{t('admin.deleteUserConfirm', { username: deletePreview.username })}</h3>
                     <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                      This will remove the account and permanently delete its related files.
+                      {t('admin.deleteUserDesc')}
                     </p>
                   </div>
                 </div>
 
                 <div className="p-3 rounded-lg text-sm space-y-1" style={{ background: 'var(--color-bg-tertiary)' }}>
-                  <p>Library: <strong>{deletePreview.library_videos}</strong></p>
-                  <p>Public: <strong>{deletePreview.public_videos}</strong></p>
-                  <p>Private: <strong>{deletePreview.private_videos}</strong></p>
-                  <p>Tasks: <strong>{deletePreview.task_count}</strong></p>
-                  <p>API tokens: <strong>{deletePreview.api_token_count}</strong></p>
+                  <p>{t('admin.library')}: <strong>{deletePreview.library_videos}</strong></p>
+                  <p>{t('admin.publicVideos')}: <strong>{deletePreview.public_videos}</strong></p>
+                  <p>{t('admin.privateVideos')}: <strong>{deletePreview.private_videos}</strong></p>
+                  <p>{t('admin.tasks')}: <strong>{deletePreview.task_count}</strong></p>
+                  <p>{t('admin.apiTokens')}: <strong>{deletePreview.api_token_count}</strong></p>
                 </div>
 
                 <div className="text-sm space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  <p>Files to delete: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.total_items}</strong></p>
-                  <p>Export files: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.export_files}</strong></p>
-                  <p>Thumbnails: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.thumbnail_files}</strong></p>
-                  <p>Task temp dirs: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.temp_dirs}</strong></p>
+                  <p>{t('admin.filesToDelete')}: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.total_items}</strong></p>
+                  <p>{t('admin.exportFiles')}: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.export_files}</strong></p>
+                  <p>{t('admin.thumbnails')}: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.thumbnail_files}</strong></p>
+                  <p>{t('admin.taskTempDirs')}: <strong style={{ color: 'var(--color-text)' }}>{deletePreview.temp_dirs}</strong></p>
                 </div>
 
                 {deleteError && (
@@ -362,7 +364,7 @@ export default function AdminPage() {
                     className="px-4 py-2 rounded-lg text-sm"
                     style={{ border: '1px solid var(--color-border)' }}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                   <button
                     onClick={() => deleteMutation.mutate(deletePreview.user_id)}
@@ -371,7 +373,7 @@ export default function AdminPage() {
                     style={{ background: 'var(--color-danger)' }}
                   >
                     {deleteMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                    Delete user and files
+                    {t('admin.deleteUserAndFiles')}
                   </button>
                 </div>
               </>
@@ -399,22 +401,22 @@ export default function AdminPage() {
             <div className="flex items-start gap-3">
               <KeyRound size={20} style={{ color: 'var(--color-primary)' }} />
               <div className="space-y-1">
-                <h3 className="font-semibold">Reset password for "{passwordResetTarget.username}"</h3>
+                <h3 className="font-semibold">{t('admin.resetPasswordFor', { username: passwordResetTarget.username })}</h3>
                 <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                  Set a new password for this account. The old password will stop working immediately.
+                  {t('admin.resetPasswordDesc')}
                 </p>
               </div>
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium">New password</label>
+              <label className="block text-sm font-medium">{t('admin.newPassword')}</label>
               <input
                 type="password"
                 value={resetPassword}
                 onChange={(e) => setResetPassword(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && submitPasswordReset()}
                 autoFocus
-                placeholder="At least 4 characters"
+                placeholder={t('admin.atLeast4Chars')}
                 className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                 style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
               />
@@ -437,7 +439,7 @@ export default function AdminPage() {
                 className="px-4 py-2 rounded-lg text-sm"
                 style={{ border: '1px solid var(--color-border)' }}
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 onClick={submitPasswordReset}
@@ -446,7 +448,7 @@ export default function AdminPage() {
                 style={{ background: 'var(--color-primary)' }}
               >
                 {resetPasswordMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-                Save new password
+                {t('admin.saveNewPassword')}
               </button>
             </div>
           </div>

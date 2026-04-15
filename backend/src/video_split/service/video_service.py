@@ -15,13 +15,16 @@ from video_split.models import BilibiliCredential, Segment, Tag, Task, User, Vid
 from video_split.schemas import ProgressEvent
 from video_split.service.analyzer import analyze_transcript
 from video_split.service.downloader import (
+    MIN_AUDIO_BYTES,
     SubtitleEntry,
+    detect_platform,
     download_audio,
     download_thumbnail,
     extract_metadata,
     fetch_bilibili_subtitles,
     fetch_youtube_subtitles,
 )
+from video_split.service.xiaoyuzhou import download_xiaoyuzhou_audio, extract_xiaoyuzhou_metadata
 from video_split.service.task_manager import (
     cleanup_task_files,
     get_task_temp_dir,
@@ -34,6 +37,7 @@ logger = logging.getLogger(__name__)
 _PLATFORM_TAG_MAP = {
     "youtube": ("YouTube", "#ff0000"),
     "bilibili": ("Bilibili", "#00a1d6"),
+    "xiaoyuzhou": ("小宇宙", "#7c3aed"),
 }
 
 
@@ -125,6 +129,54 @@ async def accumulate_usage(db: AsyncSession, user_id: int, usage_data: dict) -> 
     await db.commit()
 
 
+async def _save_analysis_results(
+    db: AsyncSession,
+    task: Task,
+    meta: "VideoMeta",
+    analysis: "AnalysisResult",
+    subtitles: list[SubtitleEntry],
+    asr_usage: "ASRUsage",
+) -> tuple[Video, dict]:
+    """Persist analysis results to DB and return (video, usage_data)."""
+    llm_u = analysis.llm_usage
+    usage_data = {
+        "asr_duration_seconds": asr_usage.duration_seconds,
+        "asr_model": asr_usage.model,
+        "llm_prompt_tokens": llm_u.prompt_tokens,
+        "llm_completion_tokens": llm_u.completion_tokens,
+        "llm_total_tokens": llm_u.total_tokens,
+        "llm_model": llm_u.model,
+    }
+    transcript_text = "\n".join(
+        f"[{int(s.start) // 60:02d}:{int(s.start) % 60:02d}] {s.text}" for s in subtitles
+    )
+    subtitle_data = json.dumps(
+        [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles],
+        ensure_ascii=False,
+    )
+    video = Video(
+        user_id=task.user_id, url=meta.url, platform=meta.platform, video_id=meta.video_id,
+        title=meta.title, thumbnail_url=meta.thumbnail_url, upload_date=meta.upload_date,
+        duration_seconds=meta.duration_seconds, summary=analysis.summary, summary_en=analysis.summary_en,
+        raw_transcript=transcript_text, subtitle_json=subtitle_data,
+        usage_json=json.dumps(usage_data, ensure_ascii=False),
+    )
+    db.add(video)
+    await db.flush()
+    await _attach_platform_tag(db, video)
+    for seg in analysis.segments:
+        db.add(Segment(
+            video_id=video.id, segment_index=seg.index, title=seg.title, title_en=seg.title_en,
+            summary=seg.summary, summary_en=seg.summary_en,
+            start_seconds=seg.start_seconds, end_seconds=seg.end_seconds,
+        ))
+    await update_task_status(db, task, "completed")
+    await cleanup_task_files(task)
+    await db.commit()
+    await accumulate_usage(db, task.user_id, usage_data)
+    return video, usage_data
+
+
 async def run_analysis(
     db: AsyncSession,
     task: Task,
@@ -147,7 +199,12 @@ async def run_analysis(
         # Stage 1: Extract metadata
         yield ProgressEvent(stage="metadata", progress=5, message="Extracting video metadata...")
         logger.info("[analysis] Task #%d — extracting metadata for %s", task.id, task.url)
-        meta = await extract_metadata(task.url, **cred_kw)
+        platform_hint, _ = detect_platform(task.url)
+        if platform_hint == "xiaoyuzhou":
+            meta, audio_url = await extract_xiaoyuzhou_metadata(task.url)
+        else:
+            meta = await extract_metadata(task.url, **cred_kw)
+            audio_url = ""
         _check_cancelled()
 
         local_thumb = await download_thumbnail(meta)
@@ -222,6 +279,12 @@ async def run_analysis(
                 message="Bilibili account not connected, will use audio transcription.",
                 detail={"hint": "bilibili_not_connected"},
             )
+        elif meta.platform == "xiaoyuzhou":
+            yield ProgressEvent(
+                stage="subtitle_check", progress=14,
+                message="Podcast — no subtitles available, will use audio transcription.",
+                detail={"method": "whisper", "reason": "Podcast platform (no subtitles)"},
+            )
 
         _check_cancelled()
 
@@ -238,16 +301,19 @@ async def run_analysis(
                 no_sub_reason = "No subtitles available for this YouTube video."
             elif meta.platform == "bilibili" and not bilibili_cred:
                 no_sub_reason = "Bilibili account not connected, cannot fetch subtitles."
+            elif meta.platform == "xiaoyuzhou":
+                no_sub_reason = "Podcast platform (no subtitles)."
             else:
                 no_sub_reason = "No subtitles found."
 
             transcript_method = "whisper"
             logger.info("[analysis] Task #%d — no subtitles, using audio transcription", task.id)
-            yield ProgressEvent(
-                stage="subtitle_check", progress=14,
-                message=f"{no_sub_reason} Will download audio and use Whisper API.",
-                detail={"method": "whisper", "reason": no_sub_reason},
-            )
+            if meta.platform != "xiaoyuzhou":
+                yield ProgressEvent(
+                    stage="subtitle_check", progress=14,
+                    message=f"{no_sub_reason} Will download audio and use Whisper API.",
+                    detail={"method": "whisper", "reason": no_sub_reason},
+                )
 
             # Stage 3: Download audio
             yield ProgressEvent(
@@ -257,9 +323,12 @@ async def run_analysis(
             await update_task_status(db, task, "downloading")
 
             task_dir = get_task_temp_dir(task)
-            audio_path = task_dir / "audio.mp3"
+            if meta.platform == "xiaoyuzhou":
+                audio_path = task_dir / "audio.m4a"
+            else:
+                audio_path = task_dir / "audio.mp3"
 
-            if audio_path.exists():
+            if audio_path.exists() and audio_path.stat().st_size >= MIN_AUDIO_BYTES:
                 file_size_mb = audio_path.stat().st_size / (1024 * 1024)
                 logger.info("[analysis] Task #%d — using cached audio (%.1f MB)", task.id, file_size_mb)
                 yield ProgressEvent(
@@ -268,16 +337,26 @@ async def run_analysis(
                     detail={"cached": True, "size_mb": round(file_size_mb, 1)},
                 )
             else:
+                if audio_path.exists():
+                    logger.warning("[analysis] Task #%d — cached audio too small (%d bytes), re-downloading",
+                                   task.id, audio_path.stat().st_size)
+                    audio_path.unlink(missing_ok=True)
                 try:
-                    audio_path = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: asyncio.run(
-                            _download_audio_wrapper(task.url, task_dir, **cred_kw)
+                    if meta.platform == "xiaoyuzhou":
+                        if not audio_url:
+                            raise RuntimeError("Missing 小宇宙 episode audio URL")
+                        audio_path = await download_xiaoyuzhou_audio(
+                            audio_url, task_dir, progress_callback=None,
                         )
-                    )
+                    else:
+                        audio_path = await asyncio.get_event_loop().run_in_executor(
+                            None, lambda: asyncio.run(
+                                _download_audio_wrapper(task.url, task_dir, **cred_kw)
+                            )
+                        )
                 except Exception as e:
                     logger.error("[analysis] Task #%d — audio download failed: %s", task.id, e)
                     await update_task_status(db, task, "failed_download", str(e))
-                    await cleanup_task_files(task)
                     raise
 
                 file_size_mb = audio_path.stat().st_size / (1024 * 1024)
@@ -385,67 +464,10 @@ async def run_analysis(
         )
 
         # Stage 6: Save results
-        transcript_text = "\n".join(
-            f"[{int(s.start) // 60:02d}:{int(s.start) % 60:02d}] {s.text}" for s in subtitles
-        )
-        subtitle_data = json.dumps(
-            [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles],
-            ensure_ascii=False,
-        )
-
-        llm_u = analysis.llm_usage
-        usage_data = {
-            "asr_duration_seconds": asr_usage.duration_seconds,
-            "asr_model": asr_usage.model,
-            "llm_prompt_tokens": llm_u.prompt_tokens,
-            "llm_completion_tokens": llm_u.completion_tokens,
-            "llm_total_tokens": llm_u.total_tokens,
-            "llm_model": llm_u.model,
-        }
-
-        video = Video(
-            user_id=task.user_id,
-            url=meta.url,
-            platform=meta.platform,
-            video_id=meta.video_id,
-            title=meta.title,
-            thumbnail_url=meta.thumbnail_url,
-            upload_date=meta.upload_date,
-            duration_seconds=meta.duration_seconds,
-            summary=analysis.summary,
-            summary_en=analysis.summary_en,
-            raw_transcript=transcript_text,
-            subtitle_json=subtitle_data,
-            usage_json=json.dumps(usage_data, ensure_ascii=False),
-        )
-        db.add(video)
-        await db.flush()
-        await _attach_platform_tag(db, video)
-
-        for seg in analysis.segments:
-            db.add(
-                Segment(
-                    video_id=video.id,
-                    segment_index=seg.index,
-                    title=seg.title,
-                    title_en=seg.title_en,
-                    summary=seg.summary,
-                    summary_en=seg.summary_en,
-                    start_seconds=seg.start_seconds,
-                    end_seconds=seg.end_seconds,
-                )
-            )
-
-        await update_task_status(db, task, "completed")
-        await cleanup_task_files(task)
-        await db.commit()
-        await accumulate_usage(db, task.user_id, usage_data)
-
+        video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
         logger.info("[analysis] Task #%d — complete, video_id=%d", task.id, video.id)
         yield ProgressEvent(
-            stage="complete",
-            progress=100,
-            message="Analysis complete!",
+            stage="complete", progress=100, message="Analysis complete!",
             detail={"video_id": video.id, "usage": usage_data},
         )
 
@@ -460,7 +482,6 @@ async def run_analysis(
         try:
             if task.status == "downloading":
                 await update_task_status(db, task, "failed_download", str(e))
-                await cleanup_task_files(task)
             elif task.status == "analyzing":
                 if subtitles:
                     task.progress_data = json.dumps(
@@ -501,7 +522,12 @@ async def resume_analysis(
     task_dir = get_task_temp_dir(task)
     logger.info("[analysis] Resuming task #%d (status=%s)", task.id, task.status)
 
-    meta = await extract_metadata(task.url, **cred_kw)
+    platform_hint, _ = detect_platform(task.url)
+    xy_audio_url = ""
+    if platform_hint == "xiaoyuzhou":
+        meta, xy_audio_url = await extract_xiaoyuzhou_metadata(task.url)
+    else:
+        meta = await extract_metadata(task.url, **cred_kw)
     local_thumb = await download_thumbnail(meta)
     if local_thumb:
         meta.thumbnail_url = local_thumb
@@ -519,11 +545,95 @@ async def resume_analysis(
         },
     )
 
-    if task.status in ("failed_transcribe", "downloaded"):
+    if task.status == "failed_download":
+        logger.info("[analysis] Task #%d — retrying from download stage", task.id)
+        yield ProgressEvent(stage="audio_download", progress=15, message="Retrying audio download...")
+        await update_task_status(db, task, "downloading")
+
+        task_dir_dl = get_task_temp_dir(task)
+        if platform_hint == "xiaoyuzhou":
+            audio_path_dl = task_dir_dl / "audio.m4a"
+        else:
+            audio_path_dl = task_dir_dl / "audio.mp3"
+
+        try:
+            if platform_hint == "xiaoyuzhou":
+                if not xy_audio_url:
+                    raise RuntimeError("Missing 小宇宙 episode audio URL")
+                audio_path_dl = await download_xiaoyuzhou_audio(xy_audio_url, task_dir_dl)
+            else:
+                audio_path_dl = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: asyncio.run(
+                        _download_audio_wrapper(task.url, task_dir_dl, **cred_kw)
+                    )
+                )
+        except Exception as e:
+            logger.error("[analysis] Task #%d — download retry failed: %s", task.id, e)
+            await update_task_status(db, task, "failed_download", str(e))
+            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            return
+
+        file_size_mb = audio_path_dl.stat().st_size / (1024 * 1024)
+        yield ProgressEvent(stage="audio_download", progress=55,
+                            message=f"Audio downloaded ({file_size_mb:.1f} MB).")
+
+        yield ProgressEvent(stage="transcription", progress=56, message="Starting transcription...")
+        await update_task_status(db, task, "transcribing")
+
+        progress_queue_dl: asyncio.Queue[TranscriptionProgress] = asyncio.Queue()
+        transcription_task_dl = asyncio.create_task(
+            transcribe_audio(audio_path_dl, progress_callback=lambda p: progress_queue_dl.put_nowait(p))
+        )
+        try:
+            while not transcription_task_dl.done():
+                try:
+                    tp = await asyncio.wait_for(progress_queue_dl.get(), timeout=1.0)
+                    yield ProgressEvent(
+                        stage="transcription", progress=_transcription_progress_pct(tp),
+                        message=tp.message,
+                        detail={"sub_step": tp.step, "chunk_index": tp.chunk_index, "total_chunks": tp.total_chunks},
+                    )
+                except asyncio.TimeoutError:
+                    continue
+            subtitles_dl, asr_usage_dl = transcription_task_dl.result()
+        except Exception as e:
+            if not transcription_task_dl.done():
+                transcription_task_dl.cancel()
+            logger.error("[analysis] Task #%d — transcription failed on download-retry: %s", task.id, e)
+            await update_task_status(db, task, "failed_transcribe", str(e))
+            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            return
+
+        yield ProgressEvent(stage="transcription", progress=85, message="Transcription complete.")
+        yield ProgressEvent(stage="analysis", progress=87, message="Analyzing with LLM...")
+        await update_task_status(db, task, "analyzing")
+
+        try:
+            analysis_dl = await analyze_transcript(subtitles_dl, meta.duration_seconds)
+        except Exception as e:
+            logger.error("[analysis] Task #%d — LLM failed on download-retry: %s", task.id, e)
+            task.progress_data = json.dumps(
+                [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles_dl]
+            )
+            await update_task_status(db, task, "failed_analyze", str(e))
+            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            return
+
+        video_dl, usage_data_dl = await _save_analysis_results(
+            db, task, meta, analysis_dl, subtitles_dl, asr_usage_dl,
+        )
+        logger.info("[analysis] Task #%d — download-retry complete, video_id=%d", task.id, video_dl.id)
+        yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!",
+                            detail={"video_id": video_dl.id, "usage": usage_data_dl})
+
+    elif task.status in ("failed_transcribe", "downloaded"):
         audio_files = list(task_dir.glob("audio.*"))
-        if not audio_files:
-            await update_task_status(db, task, "failed_download", "Cached audio file not found")
-            yield ProgressEvent(stage="error", progress=0, message="Cached audio file not found. Please start over.")
+        if not audio_files or audio_files[0].stat().st_size < MIN_AUDIO_BYTES:
+            reason = "Cached audio file not found" if not audio_files else (
+                f"Cached audio file too small ({audio_files[0].stat().st_size} bytes)"
+            )
+            await update_task_status(db, task, "failed_download", reason)
+            yield ProgressEvent(stage="error", progress=0, message=f"{reason}. Please retry to re-download.")
             return
 
         yield ProgressEvent(stage="transcription", progress=56, message="Resuming transcription...")
@@ -562,48 +672,17 @@ async def resume_analysis(
             analysis = await analyze_transcript(subtitles, meta.duration_seconds)
         except Exception as e:
             logger.error("[analysis] Task #%d — LLM analysis failed on resume: %s", task.id, e)
+            task.progress_data = json.dumps(
+                [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles]
+            )
             await update_task_status(db, task, "failed_analyze", str(e))
             yield ProgressEvent(stage="error", progress=0, message=str(e))
             return
 
-        llm_u = analysis.llm_usage
-        usage_data = {
-            "asr_duration_seconds": asr_usage.duration_seconds,
-            "asr_model": asr_usage.model,
-            "llm_prompt_tokens": llm_u.prompt_tokens,
-            "llm_completion_tokens": llm_u.completion_tokens,
-            "llm_total_tokens": llm_u.total_tokens,
-            "llm_model": llm_u.model,
-        }
-        transcript_text = "\n".join(
-            f"[{int(s.start) // 60:02d}:{int(s.start) % 60:02d}] {s.text}" for s in subtitles
-        )
-        subtitle_data = json.dumps(
-            [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles],
-            ensure_ascii=False,
-        )
-        video = Video(
-            user_id=task.user_id, url=meta.url, platform=meta.platform, video_id=meta.video_id,
-            title=meta.title, thumbnail_url=meta.thumbnail_url, upload_date=meta.upload_date,
-            duration_seconds=meta.duration_seconds, summary=analysis.summary, summary_en=analysis.summary_en,
-            raw_transcript=transcript_text, subtitle_json=subtitle_data,
-            usage_json=json.dumps(usage_data, ensure_ascii=False),
-        )
-        db.add(video)
-        await db.flush()
-        await _attach_platform_tag(db, video)
-        for seg in analysis.segments:
-            db.add(Segment(
-                video_id=video.id, segment_index=seg.index, title=seg.title, title_en=seg.title_en,
-                summary=seg.summary, summary_en=seg.summary_en,
-                start_seconds=seg.start_seconds, end_seconds=seg.end_seconds,
-            ))
-        await update_task_status(db, task, "completed")
-        await cleanup_task_files(task)
-        await db.commit()
-        await accumulate_usage(db, task.user_id, usage_data)
+        video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
         logger.info("[analysis] Task #%d — resume complete, video_id=%d", task.id, video.id)
-        yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!", detail={"video_id": video.id, "usage": usage_data})
+        yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!",
+                            detail={"video_id": video.id, "usage": usage_data})
 
     elif task.status == "failed_analyze":
         yield ProgressEvent(stage="analysis", progress=87, message="Resuming LLM analysis...")
@@ -611,7 +690,11 @@ async def resume_analysis(
 
         asr_usage = ASRUsage()
         saved_transcript = task.progress_data
-        parsed = json.loads(saved_transcript) if saved_transcript else None
+        try:
+            parsed = json.loads(saved_transcript) if saved_transcript else None
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("[analysis] Task #%d — corrupted progress_data, will re-transcribe", task.id)
+            parsed = None
         if isinstance(parsed, list) and len(parsed) > 0:
             from video_split.service.downloader import SubtitleEntry as SE
             subtitles = [SE(start=s["start"], duration=s["duration"], text=s["text"]) for s in parsed]
@@ -632,41 +715,7 @@ async def resume_analysis(
             yield ProgressEvent(stage="error", progress=0, message=str(e))
             return
 
-        llm_u = analysis.llm_usage
-        usage_data = {
-            "asr_duration_seconds": asr_usage.duration_seconds,
-            "asr_model": asr_usage.model,
-            "llm_prompt_tokens": llm_u.prompt_tokens,
-            "llm_completion_tokens": llm_u.completion_tokens,
-            "llm_total_tokens": llm_u.total_tokens,
-            "llm_model": llm_u.model,
-        }
-        transcript_text = "\n".join(
-            f"[{int(s.start) // 60:02d}:{int(s.start) % 60:02d}] {s.text}" for s in subtitles
-        )
-        subtitle_data = json.dumps(
-            [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles],
-            ensure_ascii=False,
-        )
-        video = Video(
-            user_id=task.user_id, url=meta.url, platform=meta.platform, video_id=meta.video_id,
-            title=meta.title, thumbnail_url=meta.thumbnail_url, upload_date=meta.upload_date,
-            duration_seconds=meta.duration_seconds, summary=analysis.summary, summary_en=analysis.summary_en,
-            raw_transcript=transcript_text, subtitle_json=subtitle_data,
-            usage_json=json.dumps(usage_data, ensure_ascii=False),
-        )
-        db.add(video)
-        await db.flush()
-        await _attach_platform_tag(db, video)
-        for seg in analysis.segments:
-            db.add(Segment(
-                video_id=video.id, segment_index=seg.index, title=seg.title, title_en=seg.title_en,
-                summary=seg.summary, summary_en=seg.summary_en,
-                start_seconds=seg.start_seconds, end_seconds=seg.end_seconds,
-            ))
-        await update_task_status(db, task, "completed")
-        await cleanup_task_files(task)
-        await db.commit()
-        await accumulate_usage(db, task.user_id, usage_data)
+        video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
         logger.info("[analysis] Task #%d — resume complete, video_id=%d", task.id, video.id)
-        yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!", detail={"video_id": video.id, "usage": usage_data})
+        yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!",
+                            detail={"video_id": video.id, "usage": usage_data})

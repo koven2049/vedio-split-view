@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Video } from 'lucide-react'
 import { useLogin } from '../hooks/useAuth'
+import { useT } from '../i18n'
 
 export default function LoginPage() {
+  const t = useT()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
 
@@ -32,7 +34,7 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-              Username
+              {t('login.username')}
             </label>
             <input
               type="text"
@@ -45,13 +47,13 @@ export default function LoginPage() {
                 border: '1px solid var(--color-border)',
                 color: 'var(--color-text)',
               }}
-              placeholder="Enter username"
+              placeholder={t('login.usernamePlaceholder')}
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-              Password
+              {t('login.password')}
             </label>
             <input
               type="password"
@@ -64,7 +66,7 @@ export default function LoginPage() {
                 border: '1px solid var(--color-border)',
                 color: 'var(--color-text)',
               }}
-              placeholder="Enter password"
+              placeholder={t('login.passwordPlaceholder')}
             />
           </div>
 
@@ -78,12 +80,12 @@ export default function LoginPage() {
             className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
             style={{ background: 'var(--color-primary)' }}
           >
-            {login.isPending ? 'Loading...' : 'Login'}
+            {login.isPending ? t('login.loading') : t('login.submit')}
           </button>
         </form>
 
         <p className="text-center text-xs mt-6" style={{ color: 'var(--color-text-secondary)' }}>
-          Contact admin for account creation.
+          {t('login.contactAdmin')}
         </p>
       </div>
     </div>

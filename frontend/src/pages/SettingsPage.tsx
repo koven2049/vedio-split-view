@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { User, Link2, Loader2, CheckCircle, RefreshCw, X, Key, Copy, Check, Plus, Trash2, Shield, AlertTriangle, Cookie, SlidersHorizontal, Save, BarChart3, type LucideIcon } from 'lucide-react'
 import { ApiError, api } from '../lib/api'
 import { useAuthStore } from '../stores/authStore'
+import { useT } from '../i18n'
 
 interface BiliStatus { connected: boolean; bilibili_username: string; expired: boolean }
 interface QRData { qr_key: string; qr_url: string; qr_image_base64: string }
@@ -41,6 +42,7 @@ async function withTokenEndpoint<T>(request: (path: string) => Promise<T>): Prom
 }
 
 export default function SettingsPage() {
+  const t = useT()
   const { username, role } = useAuthStore()
   const queryClient = useQueryClient()
 
@@ -103,13 +105,13 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-8 max-w-4xl">
-      <h1 className="text-2xl font-bold">Settings</h1>
+      <h1 className="text-2xl font-bold">{t('settings.title')}</h1>
 
       {/* Profile */}
       <section className="p-5 rounded-xl space-y-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-        <h2 className="font-semibold flex items-center gap-2"><User size={18} /> Profile</h2>
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Username: <strong>{username}</strong></p>
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Role: <strong>{role}</strong></p>
+        <h2 className="font-semibold flex items-center gap-2"><User size={18} /> {t('settings.profile')}</h2>
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.username')}: <strong>{username}</strong></p>
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.role')}: <strong>{role}</strong></p>
       </section>
 
       <YoutubeCookiesSection
@@ -128,9 +130,9 @@ export default function SettingsPage() {
       <section className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1 flex-1 min-w-0">
-            <h2 className="font-semibold flex items-center gap-2"><Link2 size={18} /> Bilibili Account</h2>
+            <h2 className="font-semibold flex items-center gap-2"><Link2 size={18} /> {t('settings.bilibiliAccount')}</h2>
             <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              Connect your Bilibili account to directly fetch subtitles (faster analysis, no audio download needed).
+              {t('settings.bilibiliDesc')}
             </p>
           </div>
           {biliStatus?.connected ? (
@@ -140,7 +142,7 @@ export default function SettingsPage() {
               disabled={disconnectMutation.isPending}
               icon={disconnectMutation.isPending ? Loader2 : Link2}
               spinning={disconnectMutation.isPending}
-              label={disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect'}
+              label={disconnectMutation.isPending ? t('settings.disconnecting') : t('settings.disconnect')}
               variant="outline"
               danger
             />
@@ -151,7 +153,7 @@ export default function SettingsPage() {
               disabled={generateQR.isPending}
               icon={generateQR.isPending ? Loader2 : Link2}
               spinning={generateQR.isPending}
-              label={generateQR.isPending ? 'Connecting...' : 'Connect Bilibili'}
+              label={generateQR.isPending ? t('settings.connecting') : t('settings.connectBilibili')}
               variant="primary"
             />
           )}
@@ -160,11 +162,15 @@ export default function SettingsPage() {
         {biliStatus?.connected ? (
           <div className="flex items-center gap-2 p-3 rounded-lg text-sm" style={{ background: 'var(--color-bg-tertiary)' }}>
             <CheckCircle size={16} style={{ color: 'var(--color-success)' }} />
-            <span className="font-medium">Connected{biliStatus.bilibili_username ? ` — @${biliStatus.bilibili_username}` : ''}</span>
+            <span className="font-medium">
+              {biliStatus.bilibili_username
+                ? t('settings.connectedWithUser', { username: biliStatus.bilibili_username })
+                : t('settings.connected')}
+            </span>
           </div>
         ) : (
           <div className="p-3 rounded-lg text-sm" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)' }}>
-            Not connected yet. Connect your Bilibili account before importing videos that rely on subtitle access.
+            {t('settings.notConnected')}
           </div>
         )}
 
@@ -175,17 +181,17 @@ export default function SettingsPage() {
               <button onClick={() => { setShowQR(false); setPolling(false) }} className="absolute top-3 right-3 opacity-50 hover:opacity-100">
                 <X size={18} />
               </button>
-              <h3 className="font-semibold">Scan with Bilibili App</h3>
-              <img src={`data:image/png;base64,${qrData.qr_image_base64}`} alt="QR Code" className="w-48 h-48 mx-auto" />
+              <h3 className="font-semibold">{t('settings.scanWithApp')}</h3>
+              <img src={`data:image/png;base64,${qrData.qr_image_base64}`} alt={t('settings.qrCodeAlt')} className="w-48 h-48 mx-auto" />
               {polling ? (
                 <p className="text-sm flex items-center justify-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-                  <Loader2 size={14} className="animate-spin" /> Waiting for scan...
+                  <Loader2 size={14} className="animate-spin" /> {t('settings.waitingForScan')}
                 </p>
               ) : (
                 <div className="space-y-2">
-                  <p className="text-sm" style={{ color: 'var(--color-danger)' }}>QR code expired</p>
+                  <p className="text-sm" style={{ color: 'var(--color-danger)' }}>{t('settings.qrExpired')}</p>
                   <button onClick={() => generateQR.mutate()} className="text-sm underline" style={{ color: 'var(--color-primary)' }}>
-                    Generate new QR code
+                    {t('settings.generateNewQR')}
                   </button>
                 </div>
               )}
@@ -205,19 +211,19 @@ export default function SettingsPage() {
 
       {/* Pending Tasks */}
       <section className="p-5 rounded-xl space-y-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-        <h2 className="font-semibold flex items-center gap-2"><RefreshCw size={18} /> Unfinished Tasks</h2>
+        <h2 className="font-semibold flex items-center gap-2"><RefreshCw size={18} /> {t('settings.unfinishedTasks')}</h2>
         {tasks.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No unfinished tasks.</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.noUnfinishedTasks')}</p>
         ) : (
           <div className="space-y-2">
-            {tasks.map((t) => (
-              <div key={t.id} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
+            {tasks.map((task) => (
+              <div key={task.id} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm truncate">{t.video_title || t.url}</p>
-                  <p className="text-xs" style={{ color: 'var(--color-danger)' }}>{t.status}: {t.error_message}</p>
+                  <p className="text-sm truncate">{task.video_title || task.url}</p>
+                  <p className="text-xs" style={{ color: 'var(--color-danger)' }}>{task.status}: {task.error_message}</p>
                 </div>
-                <button onClick={() => discardTaskMutation.mutate(t.id)} className="text-xs px-2 py-1 ml-2 shrink-0" style={{ color: 'var(--color-danger)' }}>
-                  Delete
+                <button onClick={() => discardTaskMutation.mutate(task.id)} className="text-xs px-2 py-1 ml-2 shrink-0" style={{ color: 'var(--color-danger)' }}>
+                  {t('common.delete')}
                 </button>
               </div>
             ))}
@@ -283,6 +289,7 @@ function YoutubeCookiesSection({
   error: Error | null
   onRefresh: () => void
 }) {
+  const t = useT()
   const expiryText = status?.earliest_expiry
     ? new Date(status.earliest_expiry).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
     : ''
@@ -294,39 +301,39 @@ function YoutubeCookiesSection({
     : null
 
   let tone: string = 'var(--color-text-secondary)'
-  let message = 'YouTube cookies status unavailable.'
+  let message = t('settings.youtubeCookiesUnavailable')
   if (!status?.configured) {
     tone = 'var(--color-danger)'
-    message = 'YouTube cookies 未配置，部分视频可能会被要求登录验证。'
+    message = t('settings.youtubeCookiesNotConfiguredDetail')
   } else if (!status.file_exists) {
     tone = 'var(--color-danger)'
-    message = 'YouTube cookies 文件不存在，请检查 config 目录。'
+    message = t('settings.youtubeCookiesFileMissingDetail')
   } else if (status.expired) {
     tone = 'var(--color-danger)'
     message = expiryText
-      ? `YouTube cookies 已过期（${expiryText}）。`
-      : 'YouTube cookies 已过期。'
+      ? t('settings.youtubeCookiesExpiredWithDateDetail', { date: expiryText })
+      : t('settings.youtubeCookiesExpiredShort')
   } else if (status.usability_checked && status.usable === false) {
     tone = 'var(--color-danger)'
-    message = status.usability_message || 'Cookies 已配置，但当前不可用。'
+    message = status.usability_message || t('settings.cookiesConfiguredButUnavailable')
   } else if (status.usability_checked && status.usable === true) {
     tone = 'var(--color-success)'
-    message = status.usability_message || 'Cookies 可用于当前 YouTube 元数据请求。'
+    message = status.usability_message || t('settings.cookiesUsableDefaultMsg')
   } else if (status.usability_checked && status.usable === null) {
     tone = 'var(--color-warning, #f59e0b)'
-    message = status.usability_message || 'Cookies 探测未得到确定结果。'
+    message = status.usability_message || t('settings.cookiesProbeInconclusiveMsg')
   } else if (status?.file_exists) {
     tone = 'var(--color-text-secondary)'
-    message = 'Cookies 文件已配置。'
+    message = t('settings.cookiesFileConfiguredMsg')
   }
 
   return (
     <section className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1 flex-1 min-w-0">
-          <h2 className="font-semibold flex items-center gap-2"><Cookie size={18} /> YouTube Cookies</h2>
+          <h2 className="font-semibold flex items-center gap-2"><Cookie size={18} /> {t('settings.youtubeCookies')}</h2>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            Checks whether the configured cookies are present, unexpired, and still accepted by YouTube.
+            {t('settings.youtubeCookiesDesc')}
           </p>
         </div>
         <SectionActionButton
@@ -335,14 +342,14 @@ function YoutubeCookiesSection({
           disabled={isRefreshing}
           icon={isRefreshing ? Loader2 : RefreshCw}
           spinning={isRefreshing}
-          label={isRefreshing ? 'Testing...' : 'Connection Test'}
+          label={isRefreshing ? t('settings.testing') : t('settings.connectionTest')}
           variant="primary"
         />
       </div>
 
       {isLoading ? (
         <p className="text-sm flex items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-          <Loader2 size={14} className="animate-spin" /> Checking YouTube cookies...
+          <Loader2 size={14} className="animate-spin" /> {t('settings.checkingCookies')}
         </p>
       ) : error ? (
         <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', color: 'var(--color-danger)' }}>
@@ -355,32 +362,32 @@ function YoutubeCookiesSection({
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
-              <p style={{ color: 'var(--color-text-secondary)' }}>Configured</p>
-              <p className="font-semibold">{status.configured ? 'Yes' : 'No'}</p>
+              <p style={{ color: 'var(--color-text-secondary)' }}>{t('settings.configured')}</p>
+              <p className="font-semibold">{status.configured ? t('settings.yes') : t('settings.no')}</p>
             </div>
             <div className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
-              <p style={{ color: 'var(--color-text-secondary)' }}>Cookie file</p>
-              <p className="font-semibold">{status.file_exists ? 'Found' : 'Missing'}</p>
+              <p style={{ color: 'var(--color-text-secondary)' }}>{t('settings.cookieFile')}</p>
+              <p className="font-semibold">{status.file_exists ? t('settings.found') : t('settings.missing')}</p>
             </div>
             <div className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
-              <p style={{ color: 'var(--color-text-secondary)' }}>Expiry</p>
-              <p className="font-semibold">{expiryText || 'Unknown'}</p>
+              <p style={{ color: 'var(--color-text-secondary)' }}>{t('settings.expiry')}</p>
+              <p className="font-semibold">{expiryText || t('settings.unknown')}</p>
               {daysLeft !== null && !status.expired && (
-                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Remaining {daysLeft} days</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.remaining', { days: daysLeft })}</p>
               )}
             </div>
             <div className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
-              <p style={{ color: 'var(--color-text-secondary)' }}>Usability probe</p>
+              <p style={{ color: 'var(--color-text-secondary)' }}>{t('settings.usabilityProbe')}</p>
               <p className="font-semibold">
                 {status.usability_checked
-                  ? status.usable === true ? 'Usable' : status.usable === false ? 'Rejected' : 'Inconclusive'
-                  : 'Skipped'}
+                  ? status.usable === true ? t('settings.usable') : status.usable === false ? t('settings.rejected') : t('settings.inconclusive')
+                  : t('settings.skipped')}
               </p>
             </div>
           </div>
           <div className="text-xs space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
-            <p>{status.domain_summary || `${status.cookie_count} cookies loaded`}</p>
-            {checkedText && <p>Last checked: {checkedText}</p>}
+            <p>{status.domain_summary || t('settings.cookiesLoadedSummary', { count: status.cookie_count })}</p>
+            {checkedText && <p>{t('settings.lastChecked')}: {checkedText}</p>}
           </div>
         </>
       ) : null}
@@ -390,6 +397,7 @@ function YoutubeCookiesSection({
 
 
 function ApiTokensSection() {
+  const t = useT()
   const queryClient = useQueryClient()
   const [newName, setNewName] = useState('')
   const [createdKey, setCreatedKey] = useState<string | null>(null)
@@ -436,14 +444,14 @@ function ApiTokensSection() {
 
   return (
     <section className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-      <h2 className="font-semibold flex items-center gap-2"><Key size={18} /> API Tokens</h2>
+      <h2 className="font-semibold flex items-center gap-2"><Key size={18} /> {t('settings.apiTokens')}</h2>
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-        Your browser login uses a session JWT. For scripts and external tools, issue a long-lived API token here.
+        {t('settings.apiTokensDesc')}
       </p>
 
       <div className="p-3 rounded-lg space-y-2" style={{ background: 'var(--color-bg-tertiary)' }}>
         <p className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
-          Request Header
+          {t('settings.requestHeader')}
         </p>
         <div className="flex items-center gap-2">
           <code className="text-xs flex-1 font-mono px-2 py-1.5 rounded" style={{ background: 'var(--color-bg)' }}>
@@ -465,7 +473,7 @@ function ApiTokensSection() {
       {createdKey && (
         <div className="p-3 rounded-lg space-y-2" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-success)' }}>
           <p className="text-sm font-medium" style={{ color: 'var(--color-success)' }}>
-            API token created! Copy it now — it won't be shown again.
+            {t('settings.tokenCreated')}
           </p>
           <div className="flex items-center gap-2">
             <code className="text-xs flex-1 font-mono px-2 py-1.5 rounded" style={{ background: 'var(--color-bg)' }}>
@@ -476,7 +484,7 @@ function ApiTokensSection() {
             </button>
           </div>
           <button onClick={() => setCreatedKey(null)} className="text-xs underline" style={{ color: 'var(--color-text-secondary)' }}>
-            Dismiss
+            {t('common.dismiss')}
           </button>
         </div>
       )}
@@ -486,7 +494,7 @@ function ApiTokensSection() {
         <input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          placeholder="Token name (e.g. automation-bot)"
+          placeholder={t('settings.tokenNamePlaceholder')}
           className="flex-1 text-sm px-3 py-2 rounded-lg"
           style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
           onKeyDown={(e) => { if (e.key === 'Enter' && newName.trim()) createMutation.mutate(newName.trim()) }}
@@ -498,17 +506,17 @@ function ApiTokensSection() {
           style={{ background: 'var(--color-primary)' }}
         >
           {createMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-          Issue token
+          {t('settings.issueToken')}
         </button>
       </div>
 
       {/* Keys list */}
       {keysQuery.isPending ? (
         <p className="text-sm flex items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-          <Loader2 size={14} className="animate-spin" /> Loading tokens...
+          <Loader2 size={14} className="animate-spin" /> {t('settings.loadingTokens')}
         </p>
       ) : keys.length === 0 ? (
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No API tokens yet.</p>
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.noTokens')}</p>
       ) : (
         <div className="space-y-2">
           {keys.map((k) => (
@@ -517,7 +525,7 @@ function ApiTokensSection() {
                 <p className="text-sm font-medium">{k.name}</p>
                 <p className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                   {k.key_prefix}
-                  {k.last_used_at && <span className="ml-2">· Last used: {new Date(k.last_used_at).toLocaleDateString()}</span>}
+                  {k.last_used_at && <span className="ml-2">· {t('settings.lastUsed')}: {new Date(k.last_used_at).toLocaleDateString()}</span>}
                 </p>
               </div>
               <button
@@ -525,7 +533,7 @@ function ApiTokensSection() {
                 disabled={deleteMutation.isPending}
                 className="p-1.5 rounded hover:opacity-70"
                 style={{ color: 'var(--color-danger)' }}
-                title="Delete token"
+                title={t('settings.deleteToken')}
               >
                 <Trash2 size={14} />
               </button>
@@ -556,6 +564,7 @@ function secondsToMinutes(seconds: number) {
 }
 
 function AnalysisLimitsSection() {
+  const t = useT()
   const queryClient = useQueryClient()
   const { data: prefs, isPending } = useQuery({
     queryKey: ['user-preferences'],
@@ -600,9 +609,9 @@ function AnalysisLimitsSection() {
     <section className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
       <div className="flex items-start justify-between">
         <div className="space-y-1">
-          <h2 className="font-semibold flex items-center gap-2"><SlidersHorizontal size={18} /> Video Limits</h2>
+          <h2 className="font-semibold flex items-center gap-2"><SlidersHorizontal size={18} /> {t('settings.videoLimits')}</h2>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            Adjust the per-account limits used by analysis. The max duration here controls errors like "exceeding the 1h0m limit".
+            {t('settings.videoLimitsDesc')}
           </p>
         </div>
         <SectionActionButton
@@ -611,7 +620,7 @@ function AnalysisLimitsSection() {
           disabled={mutation.isPending}
           icon={saved ? Check : (mutation.isPending ? Loader2 : Save)}
           spinning={mutation.isPending}
-          label={saved ? 'Saved' : 'Save'}
+          label={saved ? t('settings.saved') : t('settings.save')}
           variant="primary"
         />
       </div>
@@ -619,7 +628,7 @@ function AnalysisLimitsSection() {
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-1">
           <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            Max Video Duration
+            {t('settings.maxDuration')}
           </label>
           <div className="flex items-center gap-2">
             <input
@@ -632,18 +641,18 @@ function AnalysisLimitsSection() {
               className="w-full px-3 py-2 rounded-lg text-sm"
               style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
             />
-            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>min</span>
+            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.unitMinutes')}</span>
           </div>
           {defs && (
             <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              Default: {formatMinutes(defs.max_duration_seconds)} ({defs.max_duration_seconds}s)
+              {t('settings.defaultValue', { duration: formatMinutes(defs.max_duration_seconds), seconds: defs.max_duration_seconds })}
             </p>
           )}
         </div>
 
         <div className="space-y-1">
           <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            Confirmation Threshold
+            {t('settings.confirmThreshold')}
           </label>
           <div className="flex items-center gap-2">
             <input
@@ -656,18 +665,18 @@ function AnalysisLimitsSection() {
               className="w-full px-3 py-2 rounded-lg text-sm"
               style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
             />
-            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>min</span>
+            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.unitMinutes')}</span>
           </div>
           {defs && (
             <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              Default: {formatMinutes(defs.confirm_threshold_seconds)} ({defs.confirm_threshold_seconds}s)
+              {t('settings.defaultValue', { duration: formatMinutes(defs.confirm_threshold_seconds), seconds: defs.confirm_threshold_seconds })}
             </p>
           )}
         </div>
 
         <div className="space-y-1">
           <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            Max Concurrent Analyses
+            {t('settings.maxConcurrent')}
           </label>
           <div className="flex items-center gap-2">
             <input
@@ -679,11 +688,11 @@ function AnalysisLimitsSection() {
               className="w-full px-3 py-2 rounded-lg text-sm"
               style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
             />
-            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>slots</span>
+            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.unitSlots')}</span>
           </div>
           {defs && (
             <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              Default: {defs.max_concurrent_analyses}
+              {t('settings.default')}: {defs.max_concurrent_analyses}
             </p>
           )}
         </div>
@@ -691,7 +700,7 @@ function AnalysisLimitsSection() {
 
       {mutation.isError && (
         <p className="text-xs" style={{ color: 'var(--color-danger)' }}>
-          Failed to save. Please try again.
+          {t('settings.saveFailed')}
         </p>
       )}
     </section>
@@ -705,6 +714,7 @@ interface UsageStats {
 }
 
 function CumulativeUsageSection() {
+  const t = useT()
   const { data: stats, isPending } = useQuery({
     queryKey: ['usage-stats'],
     queryFn: () => api.get<UsageStats>('/auth/usage-stats'),
@@ -717,42 +727,42 @@ function CumulativeUsageSection() {
   return (
     <section className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
       <div className="space-y-1">
-        <h2 className="font-semibold flex items-center gap-2"><BarChart3 size={18} /> Cumulative Usage</h2>
+        <h2 className="font-semibold flex items-center gap-2"><BarChart3 size={18} /> {t('settings.cumulativeUsage')}</h2>
         <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          Total API consumption across all your analyses. This data persists even after videos are deleted.
+          {t('settings.cumulativeUsageDesc')}
         </p>
       </div>
 
       {isPending ? (
         <p className="text-sm flex items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-          <Loader2 size={14} className="animate-spin" /> Loading usage...
+          <Loader2 size={14} className="animate-spin" /> {t('settings.loadingUsage')}
         </p>
       ) : !hasData ? (
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No usage data yet. Complete an analysis to start tracking.</p>
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.noUsageData')}</p>
       ) : (
         <div className="space-y-4">
           {llmModels.length > 0 && (
             <div className="space-y-2">
-              <h3 className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>LLM Models</h3>
+              <h3 className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.llmModels')}</h3>
               <div className="grid gap-3 sm:grid-cols-2">
                 {llmModels.map(([model, data]) => (
                   <div key={model} className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
                     <p className="text-sm font-medium mb-2">{model}</p>
                     <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       <div>
-                        <p className="opacity-60">Prompt</p>
+                        <p className="opacity-60">{t('settings.prompt')}</p>
                         <p className="font-medium tabular-nums" style={{ color: 'var(--color-text)' }}>{data.prompt_tokens.toLocaleString()}</p>
                       </div>
                       <div>
-                        <p className="opacity-60">Completion</p>
+                        <p className="opacity-60">{t('settings.completion')}</p>
                         <p className="font-medium tabular-nums" style={{ color: 'var(--color-text)' }}>{data.completion_tokens.toLocaleString()}</p>
                       </div>
                       <div>
-                        <p className="opacity-60">Total Tokens</p>
+                        <p className="opacity-60">{t('settings.totalTokens')}</p>
                         <p className="font-medium tabular-nums" style={{ color: 'var(--color-primary)' }}>{data.total_tokens.toLocaleString()}</p>
                       </div>
                       <div>
-                        <p className="opacity-60">Requests</p>
+                        <p className="opacity-60">{t('settings.requests')}</p>
                         <p className="font-medium tabular-nums" style={{ color: 'var(--color-text)' }}>{data.requests}</p>
                       </div>
                     </div>
@@ -764,18 +774,18 @@ function CumulativeUsageSection() {
 
           {asrModels.length > 0 && (
             <div className="space-y-2">
-              <h3 className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>ASR Models</h3>
+              <h3 className="text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{t('settings.asrModels')}</h3>
               <div className="grid gap-3 sm:grid-cols-2">
                 {asrModels.map(([model, data]) => (
                   <div key={model} className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
                     <p className="text-sm font-medium mb-2">{model}</p>
                     <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       <div>
-                        <p className="opacity-60">Total Duration</p>
+                        <p className="opacity-60">{t('settings.totalDuration')}</p>
                         <p className="font-medium tabular-nums" style={{ color: 'var(--color-text)' }}>{Math.round(data.total_seconds).toLocaleString()}s</p>
                       </div>
                       <div>
-                        <p className="opacity-60">Requests</p>
+                        <p className="opacity-60">{t('settings.requests')}</p>
                         <p className="font-medium tabular-nums" style={{ color: 'var(--color-text)' }}>{data.requests}</p>
                       </div>
                     </div>
@@ -792,6 +802,7 @@ function CumulativeUsageSection() {
 
 
 function AdminCleanupSection() {
+  const t = useT()
   const queryClient = useQueryClient()
   const [showConfirm, setShowConfirm] = useState(false)
   const [lastResult, setLastResult] = useState<AdminCleanupResult | null>(null)
@@ -816,32 +827,32 @@ function AdminCleanupSection() {
   return (
     <section className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
       <div className="space-y-1">
-        <h2 className="font-semibold flex items-center gap-2"><Shield size={18} /> Admin Cleanup</h2>
+        <h2 className="font-semibold flex items-center gap-2"><Shield size={18} /> {t('settings.adminCleanup')}</h2>
         <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          Scan and remove orphaned exports, thumbnails, and task temp directories left behind on disk.
+          {t('settings.adminCleanupDesc')}
         </p>
       </div>
 
       {summaryQuery.isPending ? (
         <p className="text-sm flex items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-          <Loader2 size={14} className="animate-spin" /> Scanning storage...
+          <Loader2 size={14} className="animate-spin" /> {t('settings.scanningStorage')}
         </p>
       ) : summary ? (
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
-            <p style={{ color: 'var(--color-text-secondary)' }}>Orphan exports</p>
+            <p style={{ color: 'var(--color-text-secondary)' }}>{t('settings.orphanExports')}</p>
             <p className="text-xl font-semibold">{summary.orphan_exports}</p>
           </div>
           <div className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
-            <p style={{ color: 'var(--color-text-secondary)' }}>Orphan thumbnails</p>
+            <p style={{ color: 'var(--color-text-secondary)' }}>{t('settings.orphanThumbnails')}</p>
             <p className="text-xl font-semibold">{summary.orphan_thumbnails}</p>
           </div>
           <div className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
-            <p style={{ color: 'var(--color-text-secondary)' }}>Orphan task dirs</p>
+            <p style={{ color: 'var(--color-text-secondary)' }}>{t('settings.orphanTaskDirs')}</p>
             <p className="text-xl font-semibold">{summary.orphan_task_dirs}</p>
           </div>
           <div className="p-3 rounded-lg" style={{ background: 'var(--color-bg-tertiary)' }}>
-            <p style={{ color: 'var(--color-text-secondary)' }}>Total removable items</p>
+            <p style={{ color: 'var(--color-text-secondary)' }}>{t('settings.totalRemovable')}</p>
             <p className="text-xl font-semibold">{summary.total_items}</p>
           </div>
         </div>
@@ -855,14 +866,18 @@ function AdminCleanupSection() {
 
       {lastResult && (
         <div className="p-3 rounded-lg space-y-1 text-sm" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
-          <p className="font-medium">Last cleanup result</p>
+          <p className="font-medium">{t('settings.lastCleanupResult')}</p>
           <p style={{ color: 'var(--color-text-secondary)' }}>
-            Removed {lastResult.removed_total} items
-            {' '}({lastResult.removed_exports} exports, {lastResult.removed_thumbnails} thumbnails, {lastResult.removed_task_dirs} task dirs).
+            {t('settings.cleanupRemovedDetail', {
+              total: lastResult.removed_total,
+              exports: lastResult.removed_exports,
+              thumbnails: lastResult.removed_thumbnails,
+              tasks: lastResult.removed_task_dirs,
+            })}
           </p>
           {lastResult.errors.length > 0 && (
             <p style={{ color: 'var(--color-danger)' }}>
-              {lastResult.errors.length} item(s) could not be removed.
+              {t('settings.cleanupErrors', { count: lastResult.errors.length })}
             </p>
           )}
         </div>
@@ -874,7 +889,7 @@ function AdminCleanupSection() {
           className="px-4 py-2 rounded-lg text-sm"
           style={{ border: '1px solid var(--color-border)' }}
         >
-          Refresh
+          {t('settings.refresh')}
         </button>
         <button
           onClick={() => setShowConfirm(true)}
@@ -883,7 +898,7 @@ function AdminCleanupSection() {
           style={{ background: 'var(--color-danger)' }}
         >
           {cleanupMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-          Clean residual files
+          {t('settings.cleanResidual')}
         </button>
       </div>
 
@@ -893,17 +908,17 @@ function AdminCleanupSection() {
             <div className="flex items-start gap-3">
               <AlertTriangle size={20} style={{ color: 'var(--color-danger)' }} />
               <div className="space-y-1">
-                <h3 className="font-semibold">Clean residual files?</h3>
+                <h3 className="font-semibold">{t('settings.cleanConfirm')}</h3>
                 <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                  This will remove orphaned files that are no longer referenced by the database.
+                  {t('settings.cleanConfirmDesc')}
                 </p>
               </div>
             </div>
             <div className="text-sm space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
-              <p>Total removable items: <strong style={{ color: 'var(--color-text)' }}>{summary.total_items}</strong></p>
-              <p>Exports: <strong style={{ color: 'var(--color-text)' }}>{summary.orphan_exports}</strong></p>
-              <p>Thumbnails: <strong style={{ color: 'var(--color-text)' }}>{summary.orphan_thumbnails}</strong></p>
-              <p>Task temp dirs: <strong style={{ color: 'var(--color-text)' }}>{summary.orphan_task_dirs}</strong></p>
+              <p>{t('settings.modalTotalRemovable', { count: summary.total_items })}</p>
+              <p>{t('settings.modalExports', { count: summary.orphan_exports })}</p>
+              <p>{t('settings.modalThumbnails', { count: summary.orphan_thumbnails })}</p>
+              <p>{t('settings.modalTaskDirs', { count: summary.orphan_task_dirs })}</p>
             </div>
             <div className="flex justify-end gap-2">
               <button
@@ -911,7 +926,7 @@ function AdminCleanupSection() {
                 className="px-4 py-2 rounded-lg text-sm"
                 style={{ border: '1px solid var(--color-border)' }}
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 onClick={() => cleanupMutation.mutate()}
@@ -920,7 +935,7 @@ function AdminCleanupSection() {
                 style={{ background: 'var(--color-danger)' }}
               >
                 {cleanupMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                Confirm cleanup
+                {t('settings.confirmCleanup')}
               </button>
             </div>
           </div>

@@ -46,6 +46,7 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("segments", "title_en", "VARCHAR(256) DEFAULT ''"),
     ("segments", "summary_en", "TEXT DEFAULT ''"),
     ("videos", "usage_json", "TEXT DEFAULT ''"),
+    ("videos", "mindmap_json", "TEXT DEFAULT ''"),
     ("videos", "upload_date", "VARCHAR(16) DEFAULT ''"),
     ("users", "lang_preference", "VARCHAR(4) DEFAULT 'zh'"),
     ("users", "preferences_json", "TEXT DEFAULT '{}'"),
@@ -94,7 +95,11 @@ async def _recover_orphan_tasks(conn) -> None:  # type: ignore[no-untyped-def]
 
 async def _ensure_platform_tags(conn) -> None:  # type: ignore[no-untyped-def]
     """Ensure every video has a platform tag (YouTube / Bilibili)."""
-    for platform, name, color in [("youtube", "YouTube", "#ff0000"), ("bilibili", "Bilibili", "#00a1d6")]:
+    for platform, name, color in [
+        ("youtube", "YouTube", "#ff0000"),
+        ("bilibili", "Bilibili", "#00a1d6"),
+        ("xiaoyuzhou", "小宇宙", "#7c3aed"),
+    ]:
         await conn.execute(
             text("INSERT OR IGNORE INTO tags (name, color) VALUES (:name, :color)"),
             {"name": name, "color": color},

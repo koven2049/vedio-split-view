@@ -264,3 +264,197 @@ class TestOfflineParsing:
     def test_parse_llm_no_json_raises(self):
         with pytest.raises(ValueError, match="does not contain valid JSON"):
             _parse_llm_response("This is plain text without JSON")
+
+
+# ---------------------------------------------------------------------------
+# Platform detection tests
+# ---------------------------------------------------------------------------
+
+class TestPlatformDetection:
+    """Verify URL → (platform, video_id) mapping for all supported platforms."""
+
+    def test_youtube_watch(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        assert p == "youtube"
+        assert vid == "dQw4w9WgXcQ"
+
+    def test_youtube_shorts(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://www.youtube.com/shorts/E9-dkgVnVO0")
+        assert p == "youtube"
+        assert vid == "E9-dkgVnVO0"
+
+    def test_youtube_live(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://www.youtube.com/live/dQw4w9WgXcQ")
+        assert p == "youtube"
+        assert vid == "dQw4w9WgXcQ"
+
+    def test_youtu_be(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://youtu.be/dQw4w9WgXcQ")
+        assert p == "youtube"
+        assert vid == "dQw4w9WgXcQ"
+
+    def test_bilibili_bv(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://www.bilibili.com/video/BV1N7A9zHE6a")
+        assert p == "bilibili"
+        assert vid == "BV1N7A9zHE6a"
+
+    def test_bilibili_b23(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://b23.tv/abc123")
+        assert p == "bilibili"
+        assert vid == "abc123"
+
+    def test_xiaoyuzhou(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://www.xiaoyuzhoufm.com/episode/69bbb17a3c625cc5ae1cf27a")
+        assert p == "xiaoyuzhou"
+        assert vid == "69bbb17a3c625cc5ae1cf27a"
+
+    def test_xiaoyuzhou_no_www(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://xiaoyuzhoufm.com/episode/69bbb17a3c625cc5ae1cf27a")
+        assert p == "xiaoyuzhou"
+        assert vid == "69bbb17a3c625cc5ae1cf27a"
+
+    def test_unknown_url(self):
+        from video_split.service.downloader import detect_platform
+        p, vid = detect_platform("https://example.com/video/123")
+        assert p == "unknown"
+        assert vid == ""
+
+    def test_platforms_are_isolated(self):
+        """Cross-platform URLs must never match the wrong platform."""
+        from video_split.service.downloader import detect_platform
+        urls = {
+            "youtube": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "bilibili": "https://www.bilibili.com/video/BV1N7A9zHE6a",
+            "xiaoyuzhou": "https://www.xiaoyuzhoufm.com/episode/69bbb17a3c625cc5ae1cf27a",
+        }
+        for expected_platform, url in urls.items():
+            p, _ = detect_platform(url)
+            assert p == expected_platform, f"{url} detected as {p}, expected {expected_platform}"
+
+
+# ---------------------------------------------------------------------------
+# LLM retry tests (mock-based, no real API calls)
+# ---------------------------------------------------------------------------
+
+class TestLLMRetry:
+    """Verify that analyze_transcript retries on transient errors."""
+
+    @pytest.mark.asyncio
+    async def test_retry_on_read_timeout(self):
+        """LLM call retries on ReadTimeout and succeeds on 2nd attempt."""
+        import httpx
+        from unittest.mock import AsyncMock, patch, MagicMock
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": json.dumps({
+                "summary": "test summary",
+                "summary_en": "test summary en",
+                "segments": [{"index": 0, "title": "Part 1", "title_en": "Part 1 en",
+                              "summary": "s", "summary_en": "s en",
+                              "start_seconds": 0, "end_seconds": 120}],
+            })}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        }
+
+        call_count = 0
+        original_post = httpx.AsyncClient.post
+
+        async def mock_post(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.ReadTimeout("Read timed out")
+            return mock_response
+
+        entries = [SubtitleEntry(start=0.0, duration=5.0, text="Hello world")]
+
+        with patch.object(httpx.AsyncClient, "post", mock_post):
+            result = await analyze_transcript(entries, 120)
+
+        assert call_count == 2
+        assert result.summary == "test summary"
+        assert len(result.segments) == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_exhausted_raises(self):
+        """LLM call raises after max retries exhausted."""
+        import httpx
+        from unittest.mock import patch
+
+        call_count = 0
+
+        async def mock_post(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise httpx.ReadTimeout("Read timed out")
+
+        entries = [SubtitleEntry(start=0.0, duration=5.0, text="Hello world")]
+
+        with patch.object(httpx.AsyncClient, "post", mock_post):
+            with pytest.raises(httpx.ReadTimeout):
+                await analyze_transcript(entries, 120)
+
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_client_error(self):
+        """4xx errors should not be retried."""
+        import httpx
+        from unittest.mock import patch, MagicMock
+
+        call_count = 0
+
+        async def mock_post(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            response = MagicMock()
+            response.status_code = 400
+            response.text = "Bad request"
+            response.json.return_value = {"error": "bad request"}
+            raise httpx.HTTPStatusError("400", request=MagicMock(), response=response)
+
+        entries = [SubtitleEntry(start=0.0, duration=5.0, text="Hello world")]
+
+        with patch.object(httpx.AsyncClient, "post", mock_post):
+            with pytest.raises(httpx.HTTPStatusError):
+                await analyze_transcript(entries, 120)
+
+        assert call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Retryable status tests
+# ---------------------------------------------------------------------------
+
+class TestRetryableStatuses:
+
+    def test_failed_download_is_retryable(self):
+        from video_split.service.task_manager import RETRYABLE_STATUSES
+        assert "failed_download" in RETRYABLE_STATUSES
+
+    def test_failed_transcribe_is_retryable(self):
+        from video_split.service.task_manager import RETRYABLE_STATUSES
+        assert "failed_transcribe" in RETRYABLE_STATUSES
+
+    def test_failed_analyze_is_retryable(self):
+        from video_split.service.task_manager import RETRYABLE_STATUSES
+        assert "failed_analyze" in RETRYABLE_STATUSES
+
+    def test_completed_is_not_retryable(self):
+        from video_split.service.task_manager import RETRYABLE_STATUSES
+        assert "completed" not in RETRYABLE_STATUSES
+
+    def test_cancelled_is_not_retryable(self):
+        from video_split.service.task_manager import RETRYABLE_STATUSES
+        assert "cancelled" not in RETRYABLE_STATUSES

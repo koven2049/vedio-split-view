@@ -116,7 +116,7 @@ async def analyze_video(
         return {"task_id": retryable_task.id, "platform": platform, "resumed": True}
 
     try:
-        await check_task_quota(db, user.id, max_override=limits["max_concurrent"])
+        await check_task_quota(db, user.id, max_override=limits["max_concurrent"], platform=platform)
     except QuotaExceededError as e:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(e))
 

@@ -49,6 +49,7 @@ class NetworkConfig(BaseModel):
     http_proxy: str = ""
     https_proxy: str = ""
     youtube_cookies_file: str = ""
+    download_timeout_seconds: int = 120
 
     @property
     def proxy_url(self) -> str | None:

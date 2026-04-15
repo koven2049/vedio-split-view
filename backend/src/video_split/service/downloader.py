@@ -10,6 +10,8 @@ from video_split.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+MIN_AUDIO_BYTES = 10_240  # 10 KB — reject audio files smaller than this
+
 
 @dataclass
 class VideoMeta:
@@ -41,6 +43,7 @@ def normalize_url(url: str) -> str:
     """Normalize video URL to the canonical form expected by yt-dlp."""
     url = url.strip()
     url = re.sub(r"https?://bilibili\.com/", "https://www.bilibili.com/", url)
+    url = re.sub(r"https?://xiaoyuzhoufm\.com/", "https://www.xiaoyuzhoufm.com/", url)
     return url
 
 
@@ -62,6 +65,14 @@ def detect_platform(url: str) -> tuple[str, str]:
         m = re.search(pat, url)
         if m:
             return "bilibili", m.group(1)
+
+    xiaoyuzhou_patterns = [
+        r"xiaoyuzhoufm\.com/episode/([a-f0-9]{24})",
+    ]
+    for pat in xiaoyuzhou_patterns:
+        m = re.search(pat, url)
+        if m:
+            return "xiaoyuzhou", m.group(1)
 
     return "unknown", ""
 
@@ -302,7 +313,8 @@ async def fetch_bilibili_subtitles(
                         import httpx
 
                         logger.info("[subtitle] Downloading subtitle: lang=%s ext=%s", lang, fmt.get("ext"))
-                        async with httpx.AsyncClient() as client:
+                        sub_proxy = settings.network.http_proxy if settings.network.proxy_enabled else None
+                        async with httpx.AsyncClient(proxy=sub_proxy, timeout=30.0) as client:
                             resp = await client.get(fmt["url"])
                             data = resp.json()
                             events = data.get("events", data.get("body", []))
@@ -387,6 +399,12 @@ async def download_audio(
         raise RuntimeError("Audio download failed: no output file found")
 
     result = audio_files[0]
+    if result.stat().st_size < MIN_AUDIO_BYTES:
+        actual = result.stat().st_size
+        raise RuntimeError(
+            f"Audio download produced an invalid file ({actual} bytes). "
+            "The source may be unavailable or region-restricted."
+        )
     size_mb = result.stat().st_size / (1024 * 1024)
     logger.info("[download] Audio saved: %s (%.1f MB)", result, size_mb)
     return result
@@ -398,4 +416,6 @@ def generate_playback_url(platform: str, video_id: str, start_seconds: int) -> s
         return f"https://www.youtube.com/watch?v={video_id}&t={start_seconds}"
     elif platform == "bilibili":
         return f"https://www.bilibili.com/video/{video_id}?t={start_seconds}"
+    elif platform == "xiaoyuzhou":
+        return f"https://www.xiaoyuzhoufm.com/episode/{video_id}?t={start_seconds}"
     return ""

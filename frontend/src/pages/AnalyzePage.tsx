@@ -1,26 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, Download, Play, Save, Share2, Loader2, AlertCircle, Trash2, Copy, CheckCircle2, FileAudio, TriangleAlert, Cookie, X, RefreshCw } from 'lucide-react'
-import { createSSE, api } from '../lib/api'
+import { Search, Play, Save, Share2, Loader2, AlertCircle, Cookie, X, RefreshCw, Headphones } from 'lucide-react'
+import { api } from '../lib/api'
 import { formatDuration, formatTimeRange, generatePlaybackUrl, platformLabel, cn } from '../lib/utils'
-import { useAnalysisStore, type SlotState } from '../stores/analysisStore'
+import { useAnalysisStore, type AnalysisPlatform, type SlotState } from '../stores/analysisStore'
 import LangToggle from '../components/LangToggle'
 import UsageDisplay from '../components/UsageDisplay'
 import { useLangPreference } from '../hooks/useLangPreference'
-
-interface ChunkInfo {
-  index: number; filename: string; path: string
-  size_bytes: number; duration_seconds: number
-}
-
-interface DownloadResult {
-  task_id: number; platform: string; title: string
-  duration_seconds: number; audio_path: string
-  audio_size_bytes: number; chunks: ChunkInfo[]
-  chunk_duration_config: number
-  quota_used: number; quota_max: number
-}
+import { useT, type TranslationKey } from '../i18n'
 
 interface CookiesStatus {
   configured: boolean
@@ -45,19 +33,20 @@ interface PreferencesData {
 
 const STAGES = ['metadata', 'subtitle_check', 'audio_download', 'transcription', 'analysis', 'complete']
 
-const STAGE_LABELS: Record<string, string> = {
-  metadata: 'Video Info',
-  confirm_required: 'Confirmation',
-  subtitle_check: 'Subtitle Check',
-  audio_download: 'Audio Download',
-  transcription: 'Transcription',
-  analysis: 'AI Analysis',
-  complete: 'Done',
+const STAGE_LABELS_KEYS: Record<string, TranslationKey> = {
+  metadata: 'analyze.videoInfo',
+  confirm_required: 'analyze.confirmation',
+  subtitle_check: 'analyze.subtitleCheck',
+  audio_download: 'analyze.audioDownload',
+  transcription: 'analyze.transcription',
+  analysis: 'analyze.aiAnalysis',
+  complete: 'analyze.done',
 }
 
-function detectPlatform(url: string): 'youtube' | 'bilibili' | null {
+function detectPlatform(url: string): AnalysisPlatform | null {
   if (/youtube\.com|youtu\.be/.test(url)) return 'youtube'
   if (/bilibili\.com|b23\.tv/.test(url)) return 'bilibili'
+  if (/xiaoyuzhoufm\.com/.test(url)) return 'xiaoyuzhou'
   return null
 }
 
@@ -76,9 +65,23 @@ function AnalysisSlotCard({
   onRetry?: () => void
   canRetry: boolean
 }) {
+  const t = useT()
   const store = useAnalysisStore()
   const queryClient = useQueryClient()
   const { analyzing, progress, stepLog, result, error, completedVideoId, pendingConfirm, slotId } = slot
+
+  const stageLabel = (stage: string) => {
+    const key = STAGE_LABELS_KEYS[stage]
+    return key ? t(key) : stage
+  }
+
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!analyzing) return
+    setElapsed(0)
+    const tick = setInterval(() => setElapsed((e) => e + 1), 1000)
+    return () => clearInterval(tick)
+  }, [analyzing])
 
   useEffect(() => {
     if (completedVideoId) {
@@ -118,12 +121,12 @@ function AnalysisSlotCard({
               )}
               {slot.reconnected && (
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(59,130,246,0.1)', color: 'rgb(59,130,246)' }}>
-                  Reconnected
+                  {t('analyze.reconnected')}
                 </span>
               )}
               <div className="flex-1" />
               {!analyzing && (
-                <button onClick={() => store.removeSlot(slotId)} className="p-1 rounded hover:opacity-70 shrink-0" title="Dismiss">
+                <button onClick={() => store.removeSlot(slotId)} className="p-1 rounded hover:opacity-70 shrink-0" title={t('analyze.dismiss')}>
                   <X size={14} />
                 </button>
               )}
@@ -151,11 +154,18 @@ function AnalysisSlotCard({
                 {analyzing && <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-primary)' }} />}
                 <span className="text-sm font-medium">{progress.message}</span>
               </div>
-              {analyzing && (
-                <button onClick={() => store.cancelAnalysis(slotId)} className="px-3 py-1 rounded-lg text-xs font-medium transition-opacity hover:opacity-70" style={{ border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}>
-                  Cancel
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {analyzing && elapsed > 0 && (
+                  <span className="text-xs tabular-nums font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                    {elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${(elapsed % 60).toString().padStart(2, '0')}s` : `${elapsed}s`}
+                  </span>
+                )}
+                {analyzing && (
+                  <button onClick={() => store.cancelAnalysis(slotId)} className="px-3 py-1 rounded-lg text-xs font-medium transition-opacity hover:opacity-70" style={{ border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}>
+                    {t('analyze.cancel')}
+                  </button>
+                )}
+              </div>
             </div>
             <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
               <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress.progress}%`, background: 'var(--color-primary)' }} />
@@ -176,7 +186,7 @@ function AnalysisSlotCard({
                         opacity: (isSkipped || isSkippedTranscript) ? 0.4 : 1,
                       }} />
                     <span className="text-[10px] pr-2" style={{ color: isCurrent ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontWeight: isCurrent ? 600 : 400 }}>
-                      {(isSkipped || isSkippedTranscript) ? <s>{STAGE_LABELS[stage]}</s> : STAGE_LABELS[stage]}
+                      {(isSkipped || isSkippedTranscript) ? <s>{stageLabel(stage)}</s> : stageLabel(stage)}
                     </span>
                   </div>
                 )
@@ -192,7 +202,7 @@ function AnalysisSlotCard({
                     background: s.detail?.method === 'subtitle' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)',
                     color: s.detail?.method === 'subtitle' ? 'rgb(16, 185, 129)' : 'rgb(59, 130, 246)',
                   }}>
-                  {s.detail?.method === 'subtitle' ? '📝 Using subtitles (fast, free)' : '🎤 Using Whisper transcription (slower, costs API credits)'}
+                  {s.detail?.method === 'subtitle' ? t('analyze.usingSubtitles') : t('analyze.usingWhisper')}
                 </span>
               ))}
             </div>
@@ -207,7 +217,7 @@ function AnalysisSlotCard({
                       {new Date(entry.timestamp).toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
                     <span className="shrink-0 font-medium uppercase tracking-wider" style={{ minWidth: '90px', color: entry.stage === 'error' ? 'var(--color-danger)' : 'var(--color-primary)', fontSize: '10px', lineHeight: '16px' }}>
-                      {STAGE_LABELS[entry.stage] ?? entry.stage}
+                      {stageLabel(entry.stage)}
                     </span>
                     <span style={{ color: entry.stage === 'error' ? 'var(--color-danger)' : 'var(--color-text)' }}>
                       {entry.message}
@@ -232,7 +242,7 @@ function AnalysisSlotCard({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40 shrink-0"
               style={{ background: 'var(--color-primary)' }}
             >
-              <RefreshCw size={13} /> Retry
+              <RefreshCw size={13} /> {t('analyze.retry')}
             </button>
           )}
         </div>
@@ -247,18 +257,20 @@ function AnalysisSlotCard({
               <div className="p-2.5 rounded-full" style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
                 <AlertCircle size={20} style={{ color: 'var(--color-warning, #f59e0b)' }} />
               </div>
-              <h3 className="text-base font-semibold">Video Duration Warning</h3>
+              <h3 className="text-base font-semibold">{t('analyze.durationWarning')}</h3>
             </div>
             <div className="space-y-2">
               {pendingConfirm.title && <p className="text-sm font-medium">{pendingConfirm.title}</p>}
               <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                Video duration is <strong>{formatDuration(pendingConfirm.durationSeconds)}</strong>.
-                Processing may take a while and consume API credits. Continue?
+                {t('analyze.videoDuration')}{' '}
+                <strong>{formatDuration(pendingConfirm.durationSeconds)}</strong>.
+                {' '}
+                {t('analyze.durationConfirm')}
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => store.declineTask(slotId)} className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>Cancel</button>
-              <button onClick={() => store.confirmTask(slotId)} className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90" style={{ background: 'var(--color-primary)' }}>Continue</button>
+              <button onClick={() => store.declineTask(slotId)} className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>{t('common.cancel')}</button>
+              <button onClick={() => store.confirmTask(slotId)} className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90" style={{ background: 'var(--color-primary)' }}>{t('analyze.continue')}</button>
             </div>
           </div>
         </div>
@@ -276,7 +288,7 @@ function AnalysisSlotCard({
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2 min-w-0">
                     <h2 className="text-lg font-semibold truncate">{result.title}</h2>
-                    <a href={generatePlaybackUrl(result.platform, result.videoId, 0)} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-lg hover:opacity-70 transition-opacity shrink-0" style={{ color: 'var(--color-primary)' }} title="Play from beginning">
+                    <a href={generatePlaybackUrl(result.platform, result.videoId, 0)} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-lg hover:opacity-70 transition-opacity shrink-0" style={{ color: 'var(--color-primary)' }} title={t('detail.playFromBeginning')}>
                       <Play size={16} />
                     </a>
                   </div>
@@ -299,16 +311,16 @@ function AnalysisSlotCard({
             )}
             <div className="flex gap-2 mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
               <button onClick={() => result.video_id && onNavigateVideo(result.video_id)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white" style={{ background: 'var(--color-primary)' }}>
-                <Save size={14} /> View Details
+                <Save size={14} /> {t('analyze.viewDetails')}
               </button>
               <button onClick={() => result.video_id && api.post(`/videos/${result.video_id}/share`)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm" style={{ border: '1px solid var(--color-border)' }}>
-                <Share2 size={14} /> Share
+                <Share2 size={14} /> {t('analyze.share')}
               </button>
             </div>
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-lg font-semibold">Segments ({result.segments.length})</h3>
+            <h3 className="text-lg font-semibold">{t('analyze.segments')} ({result.segments.length})</h3>
             {result.segments.map((seg) => (
               <div key={seg.index} className="p-4 rounded-xl flex items-start gap-4 hover:shadow-sm transition-shadow" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                 <span className="text-xs font-mono px-2 py-1 rounded shrink-0" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)' }}>
@@ -318,7 +330,7 @@ function AnalysisSlotCard({
                   <h4 className="font-medium text-sm mb-1">{lang === 'en' && seg.title_en ? seg.title_en : seg.title}</h4>
                   <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{lang === 'en' && seg.summary_en ? seg.summary_en : seg.summary}</p>
                 </div>
-                <a href={generatePlaybackUrl(result.platform, result.videoId, seg.start_seconds)} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:opacity-70 transition-opacity shrink-0" style={{ color: 'var(--color-primary)' }} title="Play from here">
+                <a href={generatePlaybackUrl(result.platform, result.videoId, seg.start_seconds)} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:opacity-70 transition-opacity shrink-0" style={{ color: 'var(--color-primary)' }} title={t('detail.playFromHere')}>
                   <Play size={18} />
                 </a>
               </div>
@@ -332,27 +344,17 @@ function AnalysisSlotCard({
 
 
 export default function AnalyzePage() {
+  const t = useT()
   const store = useAnalysisStore()
 
-  const [activeTab, setActiveTab] = useState<'youtube' | 'bilibili'>('youtube')
+  const [activeTab, setActiveTab] = useState<AnalysisPlatform>('youtube')
   const [draftUrls, setDraftUrls] = useState<string[]>([''])
   const { lang, setLang } = useLangPreference()
 
-  const [downloading, setDownloading] = useState(false)
-  const [downloadStatus, setDownloadStatus] = useState('')
-  const [downloadProgress, setDownloadProgress] = useState(0)
-  const [downloadElapsed, setDownloadElapsed] = useState(0)
-  const [downloadEta, setDownloadEta] = useState('')
-  const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null)
-  const [, setDownloadSse] = useState<{ cancel: () => void } | null>(null)
-  const [cleaning, setCleaning] = useState(false)
-  const [confirmCleanup, setConfirmCleanup] = useState<number | null>(null)
-  const [copiedPath, setCopiedPath] = useState('')
-  const [downloadError, setDownloadError] = useState('')
-  const [dlConfirm, setDlConfirm] = useState<{ taskId: number; title: string; durationSeconds: number; message: string } | null>(null)
+
+  const [validationError, setValidationError] = useState('')
 
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
 
   const { data: cookiesStatus } = useQuery({
     queryKey: ['youtube-cookies-status'],
@@ -369,8 +371,9 @@ export default function AnalyzePage() {
   })
 
   const maxConcurrent = prefs?.max_concurrent_analyses ?? 3
-  const analyzingCount = store.countAnalyzing()
-  const activeSlots = store.getActiveSlots()
+  const allActiveSlots = store.getActiveSlots()
+  const activeSlots = allActiveSlots.filter((s) => s.platform === activeTab)
+  const analyzingCount = activeSlots.filter((s) => s.analyzing).length
   const availableSlotCount = Math.max(0, maxConcurrent - analyzingCount)
 
   const MAX_FAILED_DISPLAY = 3
@@ -391,52 +394,37 @@ export default function AnalyzePage() {
     store.reconnectActiveTasks()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    api.get<Array<{
-      task_id: number; url: string; platform: string; status: string
-      title: string | null; audio_path: string | null; audio_size_mb: number | null
-      chunks: ChunkInfo[] | null
-    }>>('/debug/tasks').then((tasks) => {
-      const downloaded = tasks.find((t) => t.status === 'downloaded')
-      if (downloaded && downloaded.audio_path) {
-        setDownloadResult({
-          task_id: downloaded.task_id,
-          platform: downloaded.platform,
-          title: downloaded.title ?? 'Unknown',
-          duration_seconds: 0,
-          audio_path: downloaded.audio_path,
-          audio_size_bytes: (downloaded.audio_size_mb ?? 0) * 1024 * 1024,
-          chunks: downloaded.chunks ?? [],
-          chunk_duration_config: 0,
-          quota_used: tasks.length,
-          quota_max: maxConcurrent,
-        })
-      }
-    }).catch(() => {})
-  }, [maxConcurrent])
-
   const handleUrlChange = (index: number, value: string) => {
     setDraftUrls((prev) => prev.map((item, itemIndex) => (itemIndex === index ? value : item)))
-    if (downloadError) setDownloadError('')
+    if (validationError) setValidationError('')
     const detected = detectPlatform(value)
     if (detected) setActiveTab(detected)
   }
 
   const validatePlatformMatch = (inputUrl: string): boolean => {
     const trimmed = inputUrl.trim()
+    if (activeTab === 'xiaoyuzhou' && !trimmed.includes('xiaoyuzhoufm.com')) {
+      setValidationError(t('analyze.invalidXiaoyuzhou'))
+      return false
+    }
     const detected = detectPlatform(trimmed)
     if (!detected) {
-      setDownloadError(activeTab === 'youtube'
-        ? '请输入有效的 YouTube 链接 (youtube.com / youtu.be)'
-        : '请输入有效的 Bilibili 链接 (bilibili.com / b23.tv)')
+      const msg =
+        activeTab === 'youtube'
+          ? t('analyze.invalidYoutube')
+          : activeTab === 'bilibili'
+            ? t('analyze.invalidBilibili')
+            : t('analyze.invalidXiaoyuzhou')
+      setValidationError(msg)
       return false
     }
     if (detected !== activeTab) {
-      const hint = detected === 'youtube' ? 'YouTube' : 'Bilibili'
-      setDownloadError(`当前在 ${platformLabel(activeTab)} 标签页，但链接属于 ${hint}，请切换到对应标签页`)
+      setValidationError(
+        t('analyze.wrongPlatform', { current: platformLabel(activeTab), detected: platformLabel(detected) }),
+      )
       return false
     }
-    setDownloadError('')
+    setValidationError('')
     return true
   }
 
@@ -444,152 +432,22 @@ export default function AnalyzePage() {
     const inputUrl = draftUrls[index]?.trim() || ''
     if (!validatePlatformMatch(inputUrl)) return
     if (analyzingCount >= maxConcurrent) {
-      setDownloadError(`已达到并发上限 (${maxConcurrent})，请等待当前分析完成`)
+      setValidationError(t('analyze.concurrentLimitFull', { limit: maxConcurrent }))
       return
     }
     await store.startAnalysis(activeTab, inputUrl)
     setDraftUrls((prev) => prev.map((item, itemIndex) => (itemIndex === index ? '' : item)))
   }
 
-  const handleAnalyzeDownloaded = () => {
-    if (!downloadResult) return
-    const platform = downloadResult.platform as 'youtube' | 'bilibili'
-    const taskId = downloadResult.task_id
-    setDownloadResult(null)
-    void store.retryTask(platform, taskId)
-  }
-
-  const handleDownloadOnly = (index: number) => {
-    const inputUrl = draftUrls[index]?.trim() || ''
-    if (!validatePlatformMatch(inputUrl)) return
-    setDownloading(true)
-    setDownloadResult(null)
-    setDownloadProgress(0)
-    setDownloadEta('')
-    setDownloadStatus('Fetching video metadata...')
-    setDownloadElapsed(0)
-
-    const startTime = Date.now()
-    const timer = setInterval(() => setDownloadElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000)
-
-    const samples: Array<{ time: number; pct: number }> = []
-
-    const sse = createSSE('/debug/download', { url: inputUrl }, (_event, raw) => {
-      const d = raw as { stage: string; progress: number; message: string; detail?: Record<string, unknown> }
-
-      if (d.stage === 'error') {
-        clearInterval(timer)
-        setDownloading(false)
-        setDownloadStatus('')
-        setDownloadError(d.message)
-        return
-      }
-
-      if (d.stage === 'confirm_required') {
-        setDlConfirm({
-          taskId: d.detail?.task_id as number,
-          title: (d.detail?.title as string) ?? '',
-          durationSeconds: (d.detail?.duration_seconds as number) ?? 0,
-          message: d.message,
-        })
-        setDownloadStatus('Waiting for confirmation...')
-        return
-      }
-
-      setDownloadProgress(d.progress)
-      setDownloadStatus(d.message)
-
-      if (d.stage === 'downloading' && d.detail?.download_percent != null) {
-        const pct = d.detail.download_percent as number
-        const now = Date.now()
-        samples.push({ time: now, pct })
-        if (samples.length >= 3) {
-          const recent = samples.slice(-6)
-          const dt = (recent[recent.length - 1].time - recent[0].time) / 1000
-          const dp = recent[recent.length - 1].pct - recent[0].pct
-          if (dt > 0 && dp > 0) {
-            const speed = dp / dt
-            const remaining = (100 - pct) / speed
-            if (remaining < 60) {
-              setDownloadEta(`~${Math.ceil(remaining)}s remaining`)
-            } else {
-              setDownloadEta(`~${Math.ceil(remaining / 60)}min remaining`)
-            }
-          }
-        }
-      }
-
-      if (d.stage === 'splitting') {
-        setDownloadEta('')
-      }
-
-      if (d.stage === 'complete' && d.detail) {
-        clearInterval(timer)
-        setDownloading(false)
-        setDownloadStatus('')
-        setDownloadEta('')
-        setDownloadResult({
-          task_id: d.detail.task_id as number,
-          platform: d.detail.platform as string,
-          title: d.detail.title as string,
-          duration_seconds: d.detail.duration_seconds as number,
-          audio_path: d.detail.audio_path as string,
-          audio_size_bytes: d.detail.audio_size_bytes as number,
-          chunks: d.detail.chunks as ChunkInfo[],
-          chunk_duration_config: d.detail.chunk_duration_config as number,
-          quota_used: d.detail.quota_used as number,
-          quota_max: d.detail.quota_max as number,
-        })
-        queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      }
-    })
-    setDownloadSse(sse)
-  }
-
-  const handleCleanup = async (taskId: number) => {
-    setCleaning(true)
-    setConfirmCleanup(null)
-    try {
-      await api.delete(`/debug/tasks/${taskId}`)
-      setDownloadResult(null)
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    } catch (e: unknown) {
-      setDownloadError(e instanceof Error ? e.message : 'Cleanup failed')
-    } finally {
-      setCleaning(false)
-    }
-  }
-
-  const handleDlConfirm = () => {
-    if (!dlConfirm) return
-    api.post(`/videos/tasks/${dlConfirm.taskId}/confirm`).catch(() => {})
-    setDlConfirm(null)
-  }
-
-  const handleDlDecline = () => {
-    if (!dlConfirm) return
-    api.delete(`/videos/tasks/${dlConfirm.taskId}/cancel`).catch(() => {})
-    setDlConfirm(null)
-    setDownloading(false)
-    setDownloadStatus('')
-    setDownloadProgress(0)
-  }
-
-  const copyPath = (path: string) => {
-    navigator.clipboard.writeText(path)
-    setCopiedPath(path)
-    setTimeout(() => setCopiedPath(''), 2000)
-  }
-
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold mb-1">Analyze Video</h1>
+        <h1 className="text-2xl font-bold mb-1">{t('analyze.title')}</h1>
         <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          Paste a video URL to extract topics and segments
+          {t('analyze.subtitle')}
           {maxConcurrent > 1 && (
             <span className="ml-2 opacity-60">
-              (running: {analyzingCount}/{maxConcurrent}, available: {availableSlotCount})
+              ({t('analyze.running')}: {analyzingCount}/{maxConcurrent}, {t('analyze.available')}: {availableSlotCount})
             </span>
           )}
         </p>
@@ -597,8 +455,8 @@ export default function AnalyzePage() {
 
       {/* Platform Tabs */}
       <div className="flex gap-1 p-1 rounded-lg w-fit" style={{ background: 'var(--color-bg-tertiary)' }}>
-        {(['youtube', 'bilibili'] as const).map((tab) => {
-          const tabAnalyzing = activeSlots.some((s) => s.platform === tab && s.analyzing)
+        {(['youtube', 'bilibili', 'xiaoyuzhou'] as const).map((tab) => {
+          const tabAnalyzing = allActiveSlots.some((s) => s.platform === tab && s.analyzing)
           return (
             <button
               key={tab}
@@ -606,6 +464,9 @@ export default function AnalyzePage() {
               className={cn('px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2', activeTab === tab ? 'shadow-sm' : 'opacity-60 hover:opacity-100')}
               style={activeTab === tab ? { background: 'var(--color-bg)', color: 'var(--color-primary)' } : {}}
             >
+              {tab === 'xiaoyuzhou' && (
+                <Headphones size={16} className="shrink-0 opacity-90" aria-hidden />
+              )}
               {platformLabel(tab)}
               {tabAnalyzing && activeTab !== tab && (
                 <Loader2 size={12} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
@@ -621,18 +482,17 @@ export default function AnalyzePage() {
         if (!cs.configured || !cs.file_exists) return (
           <div className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--color-danger)' }}>
             <Cookie size={13} />
-            <span>{!cs.configured
-              ? 'YouTube cookies 未配置 — 部分视频可能无法下载'
-              : 'Cookies 文件不存在: 请检查 config/youtube_cookies.txt'}
-            </span>
+            <span>{!cs.configured ? t('analyze.cookiesNotConfigured') : t('analyze.cookiesFileMissing')}</span>
           </div>
         )
         if (cs.expired) {
-          const expiryDate = cs.earliest_expiry ? new Date(cs.earliest_expiry).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '?'
+          const expiryDate = cs.earliest_expiry
+            ? new Date(cs.earliest_expiry).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', lang === 'zh' ? { timeZone: 'Asia/Shanghai' } : undefined)
+            : '?'
           return (
             <div className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--color-danger)' }}>
               <Cookie size={13} />
-              <span>YouTube cookies 已过期 ({expiryDate}) — 请重新导出</span>
+              <span>{t('analyze.cookiesExpiredWithDate', { date: expiryDate })}</span>
             </div>
           )
         }
@@ -640,7 +500,7 @@ export default function AnalyzePage() {
           return (
             <div className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--color-danger)' }}>
               <Cookie size={13} />
-              <span>{cs.usability_message || 'YouTube cookies 已配置，但当前不可用'}</span>
+              <span>{cs.usability_message || t('analyze.cookiesNotUsable')}</span>
             </div>
           )
         }
@@ -648,12 +508,12 @@ export default function AnalyzePage() {
           return (
             <div className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--color-warning, #f59e0b)' }}>
               <Cookie size={13} />
-              <span>{cs.usability_message || 'YouTube cookies 探测未得到确定结果'}</span>
+              <span>{cs.usability_message || t('analyze.cookiesInconclusive')}</span>
             </div>
           )
         }
         if (cs.earliest_expiry) {
-          const expiryDate = new Date(cs.earliest_expiry).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+          const expiryDate = new Date(cs.earliest_expiry).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', lang === 'zh' ? { timeZone: 'Asia/Shanghai' } : undefined)
           const daysLeft = cs.earliest_expiry_ts
             ? Math.floor((cs.earliest_expiry_ts - Date.now() / 1000) / 86400)
             : null
@@ -662,9 +522,9 @@ export default function AnalyzePage() {
             <div className="flex items-center gap-2 text-xs" style={{ color: isExpiringSoon ? 'var(--color-warning, #f59e0b)' : 'var(--color-text-secondary)' }}>
               <Cookie size={13} />
               <span>
-                Cookies 有效 · 过期时间 {expiryDate}
-                {daysLeft !== null && <span className="ml-1">（剩余 {daysLeft} 天）</span>}
-                {cs.cookie_count > 0 && <span className="ml-1 opacity-60">· {cs.cookie_count} cookies</span>}
+                {t('analyze.cookiesValid')} {expiryDate}
+                {daysLeft !== null && <span className="ml-1">（{t('analyze.cookiesRemaining', { days: daysLeft })}）</span>}
+                {cs.cookie_count > 0 && <span className="ml-1 opacity-60">{t('analyze.cookieCount', { count: cs.cookie_count })}</span>}
               </span>
             </div>
           )
@@ -682,80 +542,33 @@ export default function AnalyzePage() {
                 type="text"
                 value={draftUrl}
                 onChange={(e) => handleUrlChange(index, e.target.value)}
-                placeholder={activeTab === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'https://www.bilibili.com/video/BV...'}
-                disabled={downloading}
+                placeholder={
+                  activeTab === 'youtube'
+                    ? t('analyze.placeholderYoutube')
+                    : activeTab === 'bilibili'
+                      ? t('analyze.placeholderBilibili')
+                      : t('analyze.placeholderXiaoyuzhou')
+                }
                 className="w-full pl-10 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
                 style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
               />
             </div>
             <button
               onClick={() => void handleAnalyze(index)}
-              disabled={downloading || !draftUrl.trim() || analyzingCount >= maxConcurrent}
+              disabled={!draftUrl.trim() || analyzingCount >= maxConcurrent}
               className="px-6 py-3 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-40"
               style={{ background: 'var(--color-primary)' }}
             >
-              Analyze
-            </button>
-            <button
-              onClick={() => handleDownloadOnly(index)}
-              disabled={downloading || !draftUrl.trim()}
-              className="px-4 py-3 rounded-xl text-sm font-medium transition-colors disabled:opacity-40 flex items-center gap-2"
-              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
-              title="Download audio only (for testing)"
-            >
-              {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-              <span className="hidden sm:inline">Download Only</span>
+              {t('analyze.analyze')}
             </button>
           </div>
         ))}
       </div>
 
-      {/* Download Progress */}
-      {downloading && (
-        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <div className="px-5 py-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
-                <span className="text-sm font-medium">{downloadStatus}</span>
-              </div>
-              <div className="flex items-center gap-3 text-xs tabular-nums font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                {downloadEta && <span style={{ color: 'var(--color-primary)' }}>{downloadEta}</span>}
-                <span>{downloadElapsed}s</span>
-              </div>
-            </div>
-            <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
-              <div
-                className="h-full rounded-full transition-all duration-500 ease-out"
-                style={{ background: 'var(--color-primary)', width: `${downloadProgress}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex gap-1.5 items-center">
-                {([
-                  { label: 'Metadata', active: downloadProgress >= 5 },
-                  { label: 'Download', active: downloadProgress >= 12 },
-                  { label: 'Split', active: downloadProgress >= 85 },
-                ]).map(({ label, active }) => (
-                  <div key={label} className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full" style={{
-                      background: active ? 'var(--color-primary)' : 'var(--color-bg-tertiary)',
-                      transition: 'background 0.3s',
-                    }} />
-                    <span className="text-[10px] pr-2" style={{
-                      color: active ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                      fontWeight: active ? 600 : 400,
-                    }}>{label}</span>
-                  </div>
-                ))}
-              </div>
-              {downloadProgress > 0 && (
-                <span className="text-[11px] font-medium tabular-nums" style={{ color: 'var(--color-primary)' }}>
-                  {downloadProgress}%
-                </span>
-              )}
-            </div>
-          </div>
+      {validationError && (
+        <div className="p-4 rounded-xl flex items-start gap-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-danger)' }}>
+          <AlertCircle size={18} style={{ color: 'var(--color-danger)' }} className="mt-0.5 shrink-0" />
+          <p className="text-sm" style={{ color: 'var(--color-danger)' }}>{validationError}</p>
         </div>
       )}
 
@@ -771,198 +584,19 @@ export default function AnalyzePage() {
               onNavigateVideo={(id) => navigate(`/video/${id}`)}
               canRetry={analyzingCount < maxConcurrent}
               onRetry={slot.taskId ? () => {
-                store.removeSlot(slot.slotId)
-                void store.retryTask(slot.platform, slot.taskId!, slot.url)
+                store.dismissSlot(slot.slotId)
+                void store.retryTask(slot.platform, slot.taskId!, slot.url, slot.status)
               } : undefined}
             />
           ))}
           {failedSlots.length > MAX_FAILED_DISPLAY && (
             <p className="text-xs text-center" style={{ color: 'var(--color-text-secondary)' }}>
-              {failedSlots.length - MAX_FAILED_DISPLAY} more failed task(s) hidden — check Library for full list
+              {t('analyze.moreFailed', { count: failedSlots.length - MAX_FAILED_DISPLAY })}
             </p>
           )}
         </div>
       )}
 
-      {/* Download Only Result */}
-      {downloadResult && (
-        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--color-border)' }}>
-            <div className="flex items-center gap-3">
-              <FileAudio size={20} style={{ color: 'var(--color-primary)' }} />
-              <div>
-                <h3 className="text-sm font-semibold">{downloadResult.title}</h3>
-                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {platformLabel(downloadResult.platform)} · {formatDuration(downloadResult.duration_seconds)} · {(downloadResult.audio_size_bytes / 1024 / 1024).toFixed(1)} MB · Quota {downloadResult.quota_used}/{downloadResult.quota_max}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleAnalyzeDownloaded}
-                disabled={analyzingCount >= maxConcurrent || cleaning}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                style={{ background: 'var(--color-primary)' }}
-              >
-                <Play size={13} /> Analyze
-              </button>
-              <button
-                onClick={() => setConfirmCleanup(downloadResult.task_id)}
-                disabled={cleaning}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity hover:opacity-70 disabled:opacity-40"
-                style={{ border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}
-              >
-                {cleaning ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                {cleaning ? 'Deleting...' : 'Cleanup'}
-              </button>
-            </div>
-          </div>
-
-          <div className="px-5 py-3 space-y-2">
-            <div className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Audio File</div>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 text-xs px-3 py-2 rounded-lg overflow-x-auto" style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text)' }}>
-                {downloadResult.audio_path}
-              </code>
-              <button onClick={() => copyPath(downloadResult.audio_path)} className="p-1.5 rounded-lg hover:opacity-70 transition-opacity shrink-0" title="Copy path">
-                {copiedPath === downloadResult.audio_path ? <CheckCircle2 size={14} style={{ color: 'rgb(16, 185, 129)' }} /> : <Copy size={14} style={{ color: 'var(--color-text-secondary)' }} />}
-              </button>
-            </div>
-          </div>
-
-          {downloadResult.chunks.length > 0 && (
-            <div className="px-5 pb-4 space-y-2">
-              <div className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                Chunks ({downloadResult.chunks.length}){downloadResult.chunk_duration_config > 0 && ` · ${downloadResult.chunk_duration_config}s each`}
-              </div>
-              <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr style={{ background: 'var(--color-bg-tertiary)' }}>
-                      <th className="text-left px-3 py-2 font-medium" style={{ color: 'var(--color-text-secondary)' }}>#</th>
-                      <th className="text-left px-3 py-2 font-medium" style={{ color: 'var(--color-text-secondary)' }}>File</th>
-                      <th className="text-right px-3 py-2 font-medium" style={{ color: 'var(--color-text-secondary)' }}>Duration</th>
-                      <th className="text-right px-3 py-2 font-medium" style={{ color: 'var(--color-text-secondary)' }}>Size</th>
-                      <th className="px-3 py-2 w-8"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {downloadResult.chunks.map((chunk) => (
-                      <tr key={chunk.index} className="hover:opacity-80" style={{ borderTop: '1px solid var(--color-border)' }}>
-                        <td className="px-3 py-2 font-mono" style={{ color: 'var(--color-text-secondary)' }}>{chunk.index}</td>
-                        <td className="px-3 py-2">
-                          <code style={{ color: 'var(--color-text)' }}>{chunk.filename}</code>
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>
-                          {chunk.duration_seconds.toFixed(1)}s
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>
-                          {(chunk.size_bytes / 1024 / 1024).toFixed(2)} MB
-                        </td>
-                        <td className="px-3 py-2">
-                          <button onClick={() => copyPath(chunk.path)} className="p-1 rounded hover:opacity-70 transition-opacity" title="Copy path">
-                            {copiedPath === chunk.path ? <CheckCircle2 size={12} style={{ color: 'rgb(16, 185, 129)' }} /> : <Copy size={12} style={{ color: 'var(--color-text-secondary)' }} />}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Error */}
-      {downloadError && (
-        <div className="p-4 rounded-xl flex items-start gap-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-danger)' }}>
-          <AlertCircle size={18} style={{ color: 'var(--color-danger)' }} className="mt-0.5 shrink-0" />
-          <p className="text-sm">{downloadError}</p>
-        </div>
-      )}
-
-      {/* Download Duration Confirm Modal */}
-      {dlConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          <div
-            className="relative w-full max-w-sm mx-4 rounded-2xl shadow-2xl p-6 space-y-4"
-            style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-full" style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
-                <AlertCircle size={20} style={{ color: 'var(--color-warning, #f59e0b)' }} />
-              </div>
-              <h3 className="text-base font-semibold">Video Duration Warning</h3>
-            </div>
-            <div className="space-y-2">
-              {dlConfirm.title && (
-                <p className="text-sm font-medium">{dlConfirm.title}</p>
-              )}
-              <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                Video duration is <strong>{formatDuration(dlConfirm.durationSeconds)}</strong>.
-                Downloading may take a while. Continue?
-              </p>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={handleDlDecline}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
-                style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDlConfirm}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
-                style={{ background: 'var(--color-primary)' }}
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirm Cleanup Modal */}
-      {confirmCleanup !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setConfirmCleanup(null)}>
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          <div
-            className="relative w-full max-w-sm mx-4 rounded-2xl shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95"
-            style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-full" style={{ background: 'rgba(239, 68, 68, 0.1)' }}>
-                <TriangleAlert size={20} style={{ color: 'var(--color-danger)' }} />
-              </div>
-              <h3 className="text-base font-semibold">Confirm Cleanup</h3>
-            </div>
-            <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-              This will permanently delete the task and all associated audio files. This action cannot be undone.
-            </p>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setConfirmCleanup(null)}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
-                style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleCleanup(confirmCleanup)}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
-                style={{ background: 'var(--color-danger)' }}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

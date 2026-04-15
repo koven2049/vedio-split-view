@@ -29,7 +29,6 @@ def _video_to_dict(video: Video, tags: list[str]) -> dict:
         "url": video.url,
         "platform": video.platform,
         "video_id": video.video_id,
-        "status": video.status,
         "title": video.title,
         "thumbnail_url": video.thumbnail_url,
         "upload_date": video.upload_date,
@@ -39,6 +38,7 @@ def _video_to_dict(video: Video, tags: list[str]) -> dict:
         "raw_transcript": video.raw_transcript,
         "subtitle_json": video.subtitle_json,
         "usage_json": video.usage_json,
+        "mindmap_json": video.mindmap_json,
         "is_public": video.is_public,
         "created_at": video.created_at.isoformat() if video.created_at else "",
         "tags": tags,
@@ -152,7 +152,6 @@ async def import_videos(db: AsyncSession, target_user_id: int) -> dict:
             url=data.get("url", ""),
             platform=platform,
             video_id=vid,
-            status=data.get("status", "done"),
             title=data.get("title", ""),
             thumbnail_url=data.get("thumbnail_url", ""),
             upload_date=data.get("upload_date", ""),
@@ -162,6 +161,7 @@ async def import_videos(db: AsyncSession, target_user_id: int) -> dict:
             raw_transcript=data.get("raw_transcript", ""),
             subtitle_json=data.get("subtitle_json", ""),
             usage_json=data.get("usage_json", ""),
+            mindmap_json=data.get("mindmap_json", ""),
             is_public=data.get("is_public", False),
         )
         if created_at:
@@ -191,9 +191,9 @@ async def import_videos(db: AsyncSession, target_user_id: int) -> dict:
                 await db.flush()
             await db.execute(video_tags.insert().values(video_id=video.id, tag_id=tag.id))
 
+        await db.commit()
         imported += 1
         logger.info("[import] Imported %s (%s/%s)", json_file.name, platform, vid)
 
-    await db.commit()
     logger.info("[import] Done: imported=%d skipped=%d errors=%d", imported, skipped, len(errors))
     return {"imported": imported, "skipped": skipped, "errors": errors}

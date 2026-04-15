@@ -134,6 +134,7 @@ class VideoOut(BaseModel):
     summary: str
     summary_en: str = ""
     usage_json: str = ""
+    mindmap_json: str = ""
     is_public: bool
     created_at: datetime
     updated_at: datetime

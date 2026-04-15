@@ -63,6 +63,7 @@ class Video(Base):
     raw_transcript: Mapped[str] = mapped_column(Text, default="")
     subtitle_json: Mapped[str] = mapped_column(Text, default="")
     usage_json: Mapped[str] = mapped_column(Text, default="")
+    mindmap_json: Mapped[str] = mapped_column(Text, default="")
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

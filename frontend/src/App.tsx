@@ -33,8 +33,7 @@ function UserOrAdminRoute({ children }: { children: React.ReactNode }) {
 function HomeRedirect() {
   const { role } = useAuthStore()
   if (role === 'admin') return <Navigate to="/admin" replace />
-  if (role === 'viewer') return <Navigate to="/library" replace />
-  return <AnalyzePage />
+  return <Navigate to="/library" replace />
 }
 
 export default function App() {
@@ -45,6 +44,7 @@ export default function App() {
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/" element={<HomeRedirect />} />
+        <Route path="/analyze" element={<UserOnlyRoute><AnalyzePage /></UserOnlyRoute>} />
         <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
         <Route path="/video/:id" element={<ProtectedRoute><VideoDetailPage /></ProtectedRoute>} />
         <Route path="/api-docs" element={<UserOnlyRoute><ApiDocsPage /></UserOnlyRoute>} />

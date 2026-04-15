@@ -36,6 +36,7 @@ def _video_to_out(v: Video) -> VideoOut:
         title=v.title, thumbnail_url=v.thumbnail_url, upload_date=v.upload_date,
         duration_seconds=v.duration_seconds, summary=v.summary, summary_en=v.summary_en,
         usage_json=v.usage_json,
+        mindmap_json=v.mindmap_json,
         is_public=v.is_public, created_at=v.created_at, updated_at=v.updated_at,
         segments=[SegmentOut.model_validate(s) for s in v.segments],
         tags=[TagOut.model_validate(t) for t in v.tags],
@@ -192,6 +193,31 @@ async def delete_video(
             export_path.unlink()
         except OSError:
             logger.warning("[delete] Failed to remove export file %s", export_path)
+
+
+@router.post("/bulk-share")
+async def bulk_share_videos(
+    body: dict,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set is_public for multiple videos at once. Body: { ids: [1,2,3], share: true }"""
+    video_ids: list[int] = body.get("ids", [])
+    share: bool = body.get("share", True)
+    if not video_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ids list required")
+    result = await db.execute(
+        select(Video).where(Video.id.in_(video_ids), Video.user_id == user.id)
+    )
+    videos = result.scalars().all()
+    count = 0
+    for v in videos:
+        if v.is_public != share:
+            v.is_public = share
+            count += 1
+    await db.commit()
+    action = "shared" if share else "unshared"
+    return {"message": f"{count} video(s) {action}", "affected": count}
 
 
 @router.post("/{video_id}/share")

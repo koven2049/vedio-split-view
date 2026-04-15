@@ -24,11 +24,18 @@ export function generatePlaybackUrl(platform: string, videoId: string, startSeco
   if (platform === 'bilibili') {
     return `https://www.bilibili.com/video/${videoId}?t=${startSeconds}`
   }
+  if (platform === 'xiaoyuzhou') {
+    return `https://www.xiaoyuzhoufm.com/episode/${videoId}?t=${startSeconds}`
+  }
   return ''
 }
 
 export function platformLabel(platform: string): string {
-  const labels: Record<string, string> = { youtube: 'YouTube', bilibili: 'Bilibili' }
+  const labels: Record<string, string> = {
+    youtube: 'YouTube',
+    bilibili: 'Bilibili',
+    xiaoyuzhou: '小宇宙',
+  }
   return labels[platform] || platform
 }
 

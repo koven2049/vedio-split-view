@@ -86,6 +86,7 @@ export function createSSE(path: string, body: unknown, onEvent: (event: string, 
         }
       }
     }
+    onEvent('done', {})
   }).catch((err) => {
     if (err.name !== 'AbortError') {
       onEvent('error', { message: err.message })

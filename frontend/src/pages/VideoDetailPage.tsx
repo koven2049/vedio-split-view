@@ -3,12 +3,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Play, ExternalLink, Share2, Lock, Trash2, Plus, X, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { api } from '../lib/api'
-import { formatDuration, formatTimeRange, generatePlaybackUrl, platformLabel } from '../lib/utils'
+import { formatDuration, formatTimeRange, generatePlaybackUrl, platformLabel, cn } from '../lib/utils'
 import LangToggle from '../components/LangToggle'
+import MindmapView from '../components/MindmapView'
 import UsageDisplay from '../components/UsageDisplay'
 import type { UsageInfo } from '../stores/analysisStore'
 import { useAuthStore } from '../stores/authStore'
 import { useLangPreference } from '../hooks/useLangPreference'
+import { useT } from '../i18n'
 
 interface SubtitleEntry {
   start: number
@@ -30,12 +32,110 @@ interface VideoDetail {
   tags: TagInfo[]; owner_name: string
 }
 
+function SegmentCard({ seg, videoId, platform, platformVideoId, lang: cardLang }: {
+  seg: SegmentInfo; videoId: number; platform: string; platformVideoId: string; lang: 'zh' | 'en'
+}) {
+  const t = useT()
+  const [expanded, setExpanded] = useState(false)
+  const [subs, setSubs] = useState<SubtitleEntry[] | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const toggleExpand = async () => {
+    if (expanded) { setExpanded(false); return }
+    setExpanded(true)
+    if (subs !== null) return
+    setLoading(true)
+    try {
+      const data = await api.get<SubtitleEntry[]>(
+        `/videos/${videoId}/subtitles?start=${seg.start_seconds}&end=${seg.end_seconds}`
+      )
+      setSubs(data)
+    } catch { setSubs([]) }
+    finally { setLoading(false) }
+  }
+
+  const fmtTs = (s: number) => {
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${sec.toString().padStart(2, '0')}`
+  }
+
+  return (
+    <div className="rounded-xl overflow-hidden transition-shadow hover:shadow-sm"
+      style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+      <div className="p-4 flex items-start gap-4 group">
+        <div className="shrink-0 text-center">
+          <span className="text-xs font-bold block" style={{ color: 'var(--color-primary)' }}>#{seg.segment_index + 1}</span>
+          <span className="text-[11px] font-mono block mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            {formatTimeRange(seg.start_seconds, seg.end_seconds)}
+          </span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-medium text-sm mb-1">
+            {cardLang === 'en' && seg.title_en ? seg.title_en : seg.title}
+          </h3>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            {cardLang === 'en' && seg.summary_en ? seg.summary_en : seg.summary}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={toggleExpand}
+            className="p-2 rounded-lg opacity-50 hover:opacity-100 transition-opacity"
+            style={{ color: 'var(--color-text-secondary)' }}
+            title={expanded ? t('detail.hideSubtitles') : t('detail.showSubtitles')}
+          >
+            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+          <a
+            href={generatePlaybackUrl(platform, platformVideoId, seg.start_seconds)}
+            target="_blank" rel="noopener noreferrer"
+            className="p-2 rounded-lg opacity-50 group-hover:opacity-100 transition-opacity"
+            style={{ color: 'var(--color-primary)' }}
+            title={t('detail.playFromHere')}
+          >
+            <Play size={18} />
+          </a>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-4 pb-4">
+          <div className="rounded-lg p-3 max-h-64 overflow-y-auto space-y-0.5"
+            style={{ background: 'var(--color-bg-tertiary)' }}>
+            {loading && (
+              <div className="flex items-center gap-2 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                <Loader2 size={14} className="animate-spin" /> {t('detail.loadingSubtitles')}
+              </div>
+            )}
+            {subs && subs.length === 0 && !loading && (
+              <div className="text-xs py-2" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('detail.noSubtitles')}
+              </div>
+            )}
+            {subs?.map((entry, i) => (
+              <div key={i} className="flex gap-3 py-1 text-xs hover:opacity-80">
+                <span className="shrink-0 font-mono tabular-nums" style={{ color: 'var(--color-primary)', minWidth: '40px' }}>
+                  {fmtTs(entry.start)}
+                </span>
+                <span style={{ color: 'var(--color-text)' }}>{entry.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function VideoDetailPage() {
+  const t = useT()
   const { id } = useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [newTag, setNewTag] = useState('')
   const [showTagInput, setShowTagInput] = useState(false)
+  const [activeView, setActiveView] = useState<'segments' | 'mindmap'>('segments')
   const isViewer = useAuthStore((s) => s.isViewer)()
   const { lang, setLang } = useLangPreference()
 
@@ -65,109 +165,14 @@ export default function VideoDetailPage() {
     onSuccess: () => navigate('/library'),
   })
 
-  if (isLoading) return <div className="flex justify-center py-20 opacity-50">Loading...</div>
-  if (!video) return <div className="text-center py-20 opacity-50">Video not found</div>
-
-  function SegmentCard({ seg, videoId, platform, platformVideoId, lang: cardLang }: {
-    seg: SegmentInfo; videoId: number; platform: string; platformVideoId: string; lang: 'zh' | 'en'
-  }) {
-    const [expanded, setExpanded] = useState(false)
-    const [subs, setSubs] = useState<SubtitleEntry[] | null>(null)
-    const [loading, setLoading] = useState(false)
-
-    const toggleExpand = async () => {
-      if (expanded) { setExpanded(false); return }
-      setExpanded(true)
-      if (subs !== null) return
-      setLoading(true)
-      try {
-        const data = await api.get<SubtitleEntry[]>(
-          `/videos/${videoId}/subtitles?start=${seg.start_seconds}&end=${seg.end_seconds}`
-        )
-        setSubs(data)
-      } catch { setSubs([]) }
-      finally { setLoading(false) }
-    }
-
-    const fmtTs = (s: number) => {
-      const m = Math.floor(s / 60)
-      const sec = Math.floor(s % 60)
-      return `${m}:${sec.toString().padStart(2, '0')}`
-    }
-
-    return (
-      <div className="rounded-xl overflow-hidden transition-shadow hover:shadow-sm"
-        style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-        <div className="p-4 flex items-start gap-4 group">
-          <div className="shrink-0 text-center">
-            <span className="text-xs font-bold block" style={{ color: 'var(--color-primary)' }}>#{seg.segment_index + 1}</span>
-            <span className="text-[11px] font-mono block mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-              {formatTimeRange(seg.start_seconds, seg.end_seconds)}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-medium text-sm mb-1">
-              {cardLang === 'en' && seg.title_en ? seg.title_en : seg.title}
-            </h3>
-            <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              {cardLang === 'en' && seg.summary_en ? seg.summary_en : seg.summary}
-            </p>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={toggleExpand}
-              className="p-2 rounded-lg opacity-50 hover:opacity-100 transition-opacity"
-              style={{ color: 'var(--color-text-secondary)' }}
-              title={expanded ? 'Hide subtitles' : 'Show subtitles'}
-            >
-              {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-            </button>
-            <a
-              href={generatePlaybackUrl(platform, platformVideoId, seg.start_seconds)}
-              target="_blank" rel="noopener noreferrer"
-              className="p-2 rounded-lg opacity-50 group-hover:opacity-100 transition-opacity"
-              style={{ color: 'var(--color-primary)' }}
-              title="Play from here"
-            >
-              <Play size={18} />
-            </a>
-          </div>
-        </div>
-
-        {expanded && (
-          <div className="px-4 pb-4">
-            <div className="rounded-lg p-3 max-h-64 overflow-y-auto space-y-0.5"
-              style={{ background: 'var(--color-bg-tertiary)' }}>
-              {loading && (
-                <div className="flex items-center gap-2 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  <Loader2 size={14} className="animate-spin" /> Loading subtitles...
-                </div>
-              )}
-              {subs && subs.length === 0 && !loading && (
-                <div className="text-xs py-2" style={{ color: 'var(--color-text-secondary)' }}>
-                  No subtitles available for this segment.
-                </div>
-              )}
-              {subs?.map((entry, i) => (
-                <div key={i} className="flex gap-3 py-1 text-xs hover:opacity-80">
-                  <span className="shrink-0 font-mono tabular-nums" style={{ color: 'var(--color-primary)', minWidth: '40px' }}>
-                    {fmtTs(entry.start)}
-                  </span>
-                  <span style={{ color: 'var(--color-text)' }}>{entry.text}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
+  if (isLoading) return <div className="flex justify-center py-20 opacity-50">{t('detail.loading')}</div>
+  if (!video) return <div className="text-center py-20 opacity-50">{t('detail.notFound')}</div>
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <button onClick={() => navigate(-1)} className="flex items-center gap-1.5 text-sm opacity-60 hover:opacity-100 transition-opacity">
-        <ArrowLeft size={16} /> Back
+        <ArrowLeft size={16} /> {t('detail.back')}
       </button>
 
       {/* Video Info */}
@@ -182,7 +187,7 @@ export default function VideoDetailPage() {
             <span>{formatDuration(video.duration_seconds)}</span>
             {video.upload_date && <span>{video.upload_date}</span>}
             <a href={video.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:underline" style={{ color: 'var(--color-primary)' }}>
-              <ExternalLink size={14} /> Open original
+              <ExternalLink size={14} /> {t('detail.openOriginal')}
             </a>
           </div>
 
@@ -203,14 +208,14 @@ export default function VideoDetailPage() {
                     type="text" value={newTag} onChange={(e) => setNewTag(e.target.value)}
                     className="px-2 py-1 rounded text-xs w-24 outline-none"
                     style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
-                    placeholder="Tag name"
+                    placeholder={t('detail.tagPlaceholder')}
                     autoFocus
                   />
                   <button type="button" onClick={() => setShowTagInput(false)} className="text-xs opacity-50"><X size={14} /></button>
                 </form>
               ) : (
                 <button onClick={() => setShowTagInput(true)} className="flex items-center gap-0.5 px-2 py-1 rounded-full text-xs" style={{ border: '1px dashed var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                  <Plus size={12} /> Add tag
+                  <Plus size={12} /> {t('detail.addTag')}
                 </button>
               )
             )}
@@ -221,11 +226,11 @@ export default function VideoDetailPage() {
             <div className="flex gap-2">
               <button onClick={() => shareMutation.mutate(!video.is_public)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
                 style={{ border: '1px solid var(--color-border)' }}>
-                {video.is_public ? <><Lock size={13} /> Make Private</> : <><Share2 size={13} /> Share</>}
+                {video.is_public ? <><Lock size={13} /> {t('detail.makePrivate')}</> : <><Share2 size={13} /> {t('detail.shareToPublic')}</>}
               </button>
-              <button onClick={() => { if (confirm('Delete?')) deleteMutation.mutate() }}
+              <button onClick={() => { if (window.confirm(t('detail.confirmDeleteVideo'))) deleteMutation.mutate() }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs" style={{ color: 'var(--color-danger)', border: '1px solid var(--color-border)' }}>
-                <Trash2 size={13} /> Delete
+                <Trash2 size={13} /> {t('common.delete')}
               </button>
             </div>
           )}
@@ -236,14 +241,14 @@ export default function VideoDetailPage() {
       <div className="p-5 rounded-xl relative" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <h2 className="font-semibold">Summary</h2>
+            <h2 className="font-semibold">{t('detail.summary')}</h2>
             <a
               href={generatePlaybackUrl(video.platform, video.video_id, 0)}
               target="_blank"
               rel="noopener noreferrer"
               className="p-1.5 rounded-lg hover:opacity-70 transition-opacity"
               style={{ color: 'var(--color-primary)' }}
-              title="Play from beginning"
+              title={t('detail.playFromBeginning')}
             >
               <Play size={16} />
             </a>
@@ -266,21 +271,49 @@ export default function VideoDetailPage() {
         })()}
       </div>
 
-      {/* Segments */}
+      {/* Segments / Mind map */}
       <div>
-        <h2 className="font-semibold mb-3">Segments ({video.segments.length})</h2>
-        <div className="space-y-2">
-          {video.segments.map((seg) => (
-            <SegmentCard
-              key={seg.id}
-              seg={seg}
-              videoId={video.id}
-              platform={video.platform}
-              platformVideoId={video.video_id}
-              lang={lang}
-            />
-          ))}
+        <div className="flex gap-1 p-1 rounded-lg w-fit mb-4" style={{ background: 'var(--color-bg-tertiary)' }}>
+          <button
+            type="button"
+            onClick={() => setActiveView('segments')}
+            className={cn(
+              'px-4 py-2 rounded-md text-sm font-medium transition-colors',
+              activeView === 'segments' ? 'shadow-sm' : 'opacity-60 hover:opacity-100',
+            )}
+            style={activeView === 'segments' ? { background: 'var(--color-bg)', color: 'var(--color-primary)' } : {}}
+          >
+            {t('detail.segmentsCount', { count: video.segments.length })}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView('mindmap')}
+            className={cn(
+              'px-4 py-2 rounded-md text-sm font-medium transition-colors',
+              activeView === 'mindmap' ? 'shadow-sm' : 'opacity-60 hover:opacity-100',
+            )}
+            style={activeView === 'mindmap' ? { background: 'var(--color-bg)', color: 'var(--color-primary)' } : {}}
+          >
+            {t('detail.mindMap')}
+          </button>
         </div>
+
+        {activeView === 'segments' ? (
+          <div className="space-y-2">
+            {video.segments.map((seg) => (
+              <SegmentCard
+                key={seg.id}
+                seg={seg}
+                videoId={video.id}
+                platform={video.platform}
+                platformVideoId={video.video_id}
+                lang={lang}
+              />
+            ))}
+          </div>
+        ) : (
+          <MindmapView videoId={video.id} platform={video.platform} videoVideoId={video.video_id} />
+        )}
       </div>
     </div>
   )

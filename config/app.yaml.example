@@ -11,7 +11,7 @@ llm:
   base_url: ""   # REQUIRED — e.g. "https://open.bigmodel.cn/api/paas/v4"
   model: ""      # REQUIRED — e.g. "glm-4-plus", "gpt-4o"
   api_key: ""    # REQUIRED
-  timeout_ms: 120000
+  timeout_ms: 120000           # LLM response timeout in ms; increase for long podcasts (e.g. 180000)
   max_tokens: 8192
 
 transcription:
@@ -41,6 +41,7 @@ network:
   http_proxy: ""               # e.g. "http://127.0.0.1:7890" — used only for video download & subtitle fetch
   https_proxy: ""
   youtube_cookies_file: ""     # cookie file name in config/ dir, e.g. "www.youtube.com_cookies.txt"
+  download_timeout_seconds: 120  # HTTP timeout for audio downloads (xiaoyuzhou etc.)
 
 storage:
   db_path: "data/video_split.db"

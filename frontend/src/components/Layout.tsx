@@ -2,17 +2,25 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { BookOpen, LayoutDashboard, Library, Settings, Shield, LogOut, Video } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { cn } from '../lib/utils'
+import { useLocale, type TranslationKey } from '../i18n'
+import LangToggle from './LangToggle'
 
-const navItems = [
-  { path: '/', label: 'Analyze', icon: Video, roles: ['user'] },
-  { path: '/library', label: 'Library', icon: Library, roles: ['user', 'admin', 'viewer'] },
-  { path: '/api-docs', label: 'API Docs', icon: BookOpen, roles: ['user'] },
-  { path: '/settings', label: 'Settings', icon: Settings, roles: ['user', 'admin'] },
-  { path: '/admin', label: 'Users', icon: Shield, roles: ['admin'] },
+const NAV_ITEMS: {
+  path: string
+  label: TranslationKey
+  icon: typeof Video
+  roles: ('user' | 'admin' | 'viewer')[]
+}[] = [
+  { path: '/analyze', label: 'nav.analyze', icon: Video, roles: ['user'] },
+  { path: '/library', label: 'nav.library', icon: Library, roles: ['user', 'admin', 'viewer'] },
+  { path: '/api-docs', label: 'nav.apiDocs', icon: BookOpen, roles: ['user'] },
+  { path: '/settings', label: 'nav.settings', icon: Settings, roles: ['user', 'admin'] },
+  { path: '/admin', label: 'nav.users', icon: Shield, roles: ['admin'] },
 ]
 
 export default function Layout() {
   const { username, role, logout } = useAuthStore()
+  const { locale, setLocale, t } = useLocale()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -21,7 +29,7 @@ export default function Layout() {
     navigate('/login')
   }
 
-  const visibleNav = navItems.filter((item) => item.roles.includes(role || ''))
+  const visibleNav = NAV_ITEMS.filter((item) => role != null && (item.roles as string[]).includes(role))
 
   return (
     <div className="flex h-screen" style={{ background: 'var(--color-bg)' }}>
@@ -48,7 +56,7 @@ export default function Layout() {
                 style={active ? { background: 'var(--color-bg-tertiary)', color: 'var(--color-primary)' } : {}}
               >
                 <item.icon size={18} />
-                {item.label}
+                {t(item.label)}
               </Link>
             )
           })}
@@ -59,14 +67,17 @@ export default function Layout() {
             <span className="text-sm truncate" style={{ color: 'var(--color-text-secondary)' }}>
               {username} ({role})
             </span>
-            <button onClick={handleLogout} className="p-1.5 rounded hover:opacity-70 transition-opacity" title="Logout">
+            <button onClick={handleLogout} className="p-1.5 rounded hover:opacity-70 transition-opacity" title={t('nav.logout')}>
               <LogOut size={16} />
             </button>
           </div>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto relative">
+        <div className="absolute top-4 right-6 z-10">
+          <LangToggle lang={locale} onChange={setLocale} />
+        </div>
         <div className="max-w-6xl mx-auto p-6">
           <Outlet />
         </div>

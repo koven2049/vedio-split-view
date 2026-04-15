@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Copy, Check, ChevronDown, ChevronRight, BookOpen } from 'lucide-react'
 import { api } from '../lib/api'
+import { useT } from '../i18n'
 
 interface Param {
   name: string
@@ -37,6 +38,7 @@ const METHOD_COLORS: Record<string, string> = {
 }
 
 function CopyButton({ text }: { text: string }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -50,7 +52,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={handleCopy}
       className="p-1.5 rounded-md hover:opacity-80 transition-opacity"
       style={{ color: copied ? 'var(--color-success)' : 'var(--color-text-secondary)' }}
-      title="Copy"
+      title={t('common.copy')}
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
     </button>
@@ -83,6 +85,7 @@ function buildCurlExample(ep: Endpoint, authHeader: string): string {
 }
 
 function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
   const curlExample = buildCurlExample(ep, authHeader)
 
@@ -123,7 +126,7 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
           {ep.params.length > 0 && (
             <div>
               <h4 className="text-xs font-semibold uppercase mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                Parameters
+                {t('apiDocs.parameters')}
               </h4>
               <div className="space-y-1">
                 {ep.params.map((p) => (
@@ -144,7 +147,7 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
           <div>
             <div className="flex items-center justify-between mb-1">
               <h4 className="text-xs font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>
-                Example (curl)
+                {t('apiDocs.exampleCurl')}
               </h4>
               <CopyButton text={curlExample} />
             </div>
@@ -158,7 +161,7 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
 
           <div>
             <h4 className="text-xs font-semibold uppercase mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Response
+              {t('apiDocs.response')}
             </h4>
             <pre
               className="text-xs p-3 rounded-lg overflow-x-auto font-mono whitespace-pre-wrap"
@@ -174,13 +177,14 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
 }
 
 export default function ApiDocsPage() {
+  const t = useT()
   const { data, isLoading } = useQuery({
     queryKey: ['api-docs'],
     queryFn: () => api.get<DocsData>('/docs-data'),
   })
 
   if (isLoading || !data) {
-    return <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Loading docs...</div>
+    return <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('apiDocs.loading')}</div>
   }
 
   const allEndpoints = data.groups.flatMap((g) =>
@@ -191,7 +195,7 @@ export default function ApiDocsPage() {
     <div className="space-y-6 max-w-3xl">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <BookOpen size={22} /> API Documentation
+          <BookOpen size={22} /> {t('apiDocs.title')}
         </h1>
         <CopyButton text={allEndpoints} />
       </div>
@@ -200,9 +204,9 @@ export default function ApiDocsPage() {
         className="p-4 rounded-lg text-sm space-y-2"
         style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
       >
-        <p className="font-medium">Authentication</p>
+        <p className="font-medium">{t('apiDocs.authentication')}</p>
         <p style={{ color: 'var(--color-text-secondary)' }}>
-          For scripts and external tools, add your API token with the following header:
+          {t('apiDocs.authDesc')}
         </p>
         <div className="flex items-center gap-2">
           <code
@@ -214,7 +218,7 @@ export default function ApiDocsPage() {
           <CopyButton text={data.auth_header} />
         </div>
         <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          Create tokens in <strong>Settings → API Tokens</strong>.
+          {t('apiDocs.createTokens')}
         </p>
       </div>
 

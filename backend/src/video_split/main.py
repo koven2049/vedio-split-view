@@ -58,11 +58,13 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     from video_split.api.tasks import router as tasks_router
     from video_split.api.videos import router as videos_router
     from video_split.api.youtube import router as youtube_router
+    from video_split.api.mindmap import router as mindmap_router
 
     app.include_router(auth_router)
     app.include_router(tasks_router)
     app.include_router(analysis_router)
     app.include_router(videos_router)
+    app.include_router(mindmap_router)
     app.include_router(tags_router)
     app.include_router(bilibili_router)
     app.include_router(youtube_router)

@@ -16,28 +16,32 @@ logger = logging.getLogger(__name__)
 STUCK_TIMEOUT = timedelta(minutes=10)
 
 
-RETRYABLE_STATUSES = {"failed_transcribe", "failed_analyze", "downloaded"}
+RETRYABLE_STATUSES = {"failed_transcribe", "failed_analyze", "failed_download", "downloaded"}
 ACTIVE_STATUSES = {"downloading", "transcribing", "analyzing"}
-TERMINAL_STATUSES = {"completed", "cancelled", "failed_download"}
-QUOTA_STATUSES = {"failed_transcribe", "failed_analyze", "downloaded"}
+TERMINAL_STATUSES = {"completed", "cancelled"}
+QUOTA_STATUSES = ACTIVE_STATUSES | {"failed_transcribe", "failed_analyze", "downloaded"}
 
 
-async def count_pending_tasks(db: AsyncSession, user_id: int) -> int:
+async def count_pending_tasks(db: AsyncSession, user_id: int, platform: str = "") -> int:
+    conditions = [Task.user_id == user_id, Task.status.in_(QUOTA_STATUSES)]
+    if platform:
+        conditions.append(Task.platform == platform)
     result = await db.execute(
-        select(func.count())
-        .select_from(Task)
-        .where(Task.user_id == user_id, Task.status.in_(QUOTA_STATUSES))
+        select(func.count()).select_from(Task).where(*conditions)
     )
     return result.scalar() or 0
 
 
-async def check_task_quota(db: AsyncSession, user_id: int, max_override: int = 0) -> None:
+async def check_task_quota(
+    db: AsyncSession, user_id: int, max_override: int = 0, platform: str = ""
+) -> None:
     settings = get_settings()
     limit = max_override or settings.storage.max_pending_tasks_per_user
-    count = await count_pending_tasks(db, user_id)
+    count = await count_pending_tasks(db, user_id, platform=platform)
     if count >= limit:
+        scope = f" on {platform}" if platform else ""
         raise QuotaExceededError(
-            f"You have {count} unfinished tasks (max {limit}). "
+            f"You have {count} unfinished tasks{scope} (max {limit}). "
             "Please retry or delete them before starting a new analysis."
         )
 

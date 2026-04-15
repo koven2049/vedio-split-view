@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { api } from '../lib/api'
 import { useAuthStore } from './authStore'
 
+export type AnalysisPlatform = 'youtube' | 'bilibili' | 'xiaoyuzhou'
+
 export interface ProgressData {
   stage: string
   progress: number
@@ -100,12 +102,13 @@ interface AnalysisState {
   getSlot: (slotId: string) => SlotState | null
   getActiveSlots: () => SlotState[]
   countAnalyzing: () => number
-  startAnalysis: (platform: string, url: string) => Promise<string>
-  retryTask: (platform: string, taskId: number, taskUrl?: string) => Promise<string>
+  startAnalysis: (platform: AnalysisPlatform | string, url: string) => Promise<string>
+  retryTask: (platform: AnalysisPlatform | string, taskId: number, taskUrl?: string, taskStatus?: string) => Promise<string>
   cancelAnalysis: (slotId: string) => void
   confirmTask: (slotId: string) => void
   declineTask: (slotId: string) => void
-  removeSlot: (slotId: string) => void
+  removeSlot: (slotId: string) => Promise<void>
+  dismissSlot: (slotId: string) => void
   fetchResultDetails: (slotId: string, videoId: number) => void
   isAnyAnalyzing: () => boolean
   reconnectActiveTasks: () => Promise<void>
@@ -129,6 +132,34 @@ interface RecoverableTask {
 }
 
 const BASE = '/api'
+
+const DISMISSED_TASKS_KEY = 'vsplit_dismissed_tasks'
+
+function getDismissedTaskIds(): Set<number> {
+  try {
+    const raw = localStorage.getItem(DISMISSED_TASKS_KEY)
+    if (!raw) return new Set()
+    return new Set(JSON.parse(raw) as number[])
+  } catch {
+    return new Set()
+  }
+}
+
+function addDismissedTaskId(taskId: number): void {
+  const ids = getDismissedTaskIds()
+  ids.add(taskId)
+  localStorage.setItem(DISMISSED_TASKS_KEY, JSON.stringify([...ids]))
+}
+
+function removeDismissedTaskId(taskId: number): void {
+  const ids = getDismissedTaskIds()
+  ids.delete(taskId)
+  if (ids.size === 0) {
+    localStorage.removeItem(DISMISSED_TASKS_KEY)
+  } else {
+    localStorage.setItem(DISMISSED_TASKS_KEY, JSON.stringify([...ids]))
+  }
+}
 
 function progressFromTaskStatus(task: RecoverableTask): ProgressData | null {
   switch (task.status) {
@@ -333,7 +364,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     return Object.values(get().slots).filter((s) => s.analyzing).length
   },
 
-  startAnalysis: async (platform: string, url: string): Promise<string> => {
+  startAnalysis: async (platform: AnalysisPlatform | string, url: string): Promise<string> => {
     const id = get()._nextId
     const slotId = `slot-${id}`
 
@@ -367,9 +398,15 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     return slotId
   },
 
-  retryTask: async (platform: string, taskId: number, taskUrl?: string): Promise<string> => {
+  retryTask: async (platform: AnalysisPlatform | string, taskId: number, taskUrl?: string, taskStatus?: string): Promise<string> => {
     const id = get()._nextId
     const slotId = `slot-${id}`
+
+    const initialProgress: ProgressData = taskStatus === 'failed_download'
+      ? { stage: 'audio_download', progress: 15, message: 'Resuming download...' }
+      : taskStatus === 'failed_analyze'
+        ? { stage: 'analysis', progress: 87, message: 'Resuming analysis...' }
+        : { stage: 'transcription', progress: 56, message: 'Resuming...' }
 
     set((s) => ({
       _nextId: s._nextId + 1,
@@ -384,7 +421,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
           analyzing: true,
           url: taskUrl ?? '',
           taskId,
-          progress: { stage: 'transcription', progress: 56, message: 'Resuming...' },
+          progress: initialProgress,
         },
       },
     }))
@@ -430,11 +467,28 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     }))
   },
 
-  removeSlot: (slotId: string) => {
+  removeSlot: async (slotId: string) => {
+    const slot = get().slots[slotId]
+    slot?._sseAbort?.abort()
+    const taskId = slot?.taskId
+    set((s) => {
+      const { [slotId]: _, ...rest } = s.slots
+      return { slots: rest }
+    })
+    if (taskId) {
+      addDismissedTaskId(taskId)
+      try {
+        await api.delete(`/videos/tasks/${taskId}`)
+        removeDismissedTaskId(taskId)
+      } catch { /* kept in dismissed list for next reconnect retry */ }
+    }
+  },
+
+  dismissSlot: (slotId: string) => {
     const slot = get().slots[slotId]
     slot?._sseAbort?.abort()
     if (slot?.taskId) {
-      api.delete(`/videos/tasks/${slot.taskId}`).catch(() => {})
+      addDismissedTaskId(slot.taskId)
     }
     set((s) => {
       const { [slotId]: _, ...rest } = s.slots
@@ -468,12 +522,14 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     set(() => ({ _initialized: true }))
 
     try {
+      const dismissed = getDismissedTaskIds()
       const [activeTasks, recoverableTasks] = await Promise.all([
         api.get<ActiveTask[]>('/videos/tasks/active').catch(() => []),
         api.get<RecoverableTask[]>('/videos/tasks/recoverable').catch(() => []),
       ])
 
       for (const task of activeTasks) {
+        if (dismissed.has(task.task_id)) continue
         const existingSlot = Object.values(get().slots).find(
           (s) => s.taskId === task.task_id
         )
@@ -505,10 +561,15 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
         updateSlot(set, slotId, () => ({ _sseAbort: ctrl }))
       }
 
+      for (const id of dismissed) {
+        api.delete(`/videos/tasks/${id}`).then(() => removeDismissedTaskId(id)).catch(() => {})
+      }
+
       const MAX_RECOVERABLE_DISPLAY = 3
       let recoverableCount = 0
       for (const task of recoverableTasks) {
         if (recoverableCount >= MAX_RECOVERABLE_DISPLAY) break
+        if (dismissed.has(task.id)) continue
         const existingSlot = Object.values(get().slots).find(
           (s) => s.taskId === task.id
         )
