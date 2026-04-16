@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from video_split.database import get_db
-from video_split.dependencies import get_current_user, require_user
+from video_split.dependencies import get_current_user, require_user, require_user_or_admin
 from video_split.models import Tag, User, Video, video_tags
 from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut
 from video_split.service.data_sync import EXPORTS_DIR, _export_filename
@@ -50,14 +50,15 @@ async def list_my_videos(
     tag: str = Query("", max_length=64),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    user: User = Depends(require_user),
+    user: User = Depends(require_user_or_admin),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = (
         select(Video)
         .options(selectinload(Video.tags), selectinload(Video.owner))
-        .where(Video.user_id == user.id)
     )
+    if user.role != "admin":
+        stmt = stmt.where(Video.user_id == user.id)
     if q:
         stmt = stmt.where(Video.title.ilike(f"%{q}%"))
     if tag:

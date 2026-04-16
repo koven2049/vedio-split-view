@@ -139,7 +139,7 @@ export default function VideoDetailPage() {
   const isViewer = useAuthStore((s) => s.isViewer)()
   const { lang, setLang } = useLangPreference()
 
-  const { data: video, isLoading } = useQuery({
+  const { data: video, isLoading, isError, error } = useQuery({
     queryKey: ['video', id],
     queryFn: () => api.get<VideoDetail>(`/videos/${id}`),
     enabled: !!id,
@@ -166,6 +166,16 @@ export default function VideoDetailPage() {
   })
 
   if (isLoading) return <div className="flex justify-center py-20 opacity-50">{t('detail.loading')}</div>
+  if (isError) return (
+    <div className="flex flex-col items-center py-20 gap-4">
+      <p className="text-sm" style={{ color: 'var(--color-danger)' }}>
+        {error instanceof Error ? error.message : t('detail.notFound')}
+      </p>
+      <button onClick={() => navigate('/library')} className="text-sm opacity-60 hover:opacity-100">
+        {t('detail.back')}
+      </button>
+    </div>
+  )
   if (!video) return <div className="text-center py-20 opacity-50">{t('detail.notFound')}</div>
 
   return (
