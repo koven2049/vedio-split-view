@@ -26,7 +26,6 @@ PODMAN_CMD="${PODMAN_CMD:-podman}"
 PODMAN_DNS="${PODMAN_DNS:-223.5.5.5}"
 
 DEPLOY_EXCLUDE_FILE=".rsync-exclude"
-DEPLOY_DEFAULT_REMOTE_DIR="ai/vedio-split-view"
 NETWORK_NAME="vsplit-net"
 BACKEND_CONTAINER="vsplit-backend"
 FRONTEND_CONTAINER="vsplit-frontend"
@@ -380,49 +379,39 @@ run_import() {
 }
 
 run_deploy() {
-    _ensure_deploy_config
-    _load_deploy_config
-
-    local dry_run=false remote="${DEPLOY_REMOTE:-}" remote_dir="${DEPLOY_REMOTE_DIR:-$DEPLOY_DEFAULT_REMOTE_DIR}"
+    local dry_run=false
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -d|--dry-run) dry_run=true ;;
-            *)
-                if [[ -z "$remote" ]]; then remote="$1"
-                else remote_dir="$1"; fi
-                ;;
+            *) log_error "Unknown option: $1"; exit 1 ;;
         esac
         shift
     done
 
-    if [[ -z "$remote" ]]; then
-        cat <<EOF
-Usage: $0 deploy [-d] <user@host> [remote_dir]
+    local cfg="${SCRIPT_DIR}/config/deploy.cfg"
+    if [[ ! -f "${cfg}" ]]; then
+        log_error "config/deploy.cfg 不存在，请从 deploy.cfg.example 复制并配置"
+        exit 1
+    fi
 
-  Sync source code to remote (no data, no secrets).
-  Config file:        $DEPLOY_CONFIG_FILE
-  Default remote:     DEPLOY_REMOTE=${DEPLOY_REMOTE:-}
-  Default remote dir: ~/$remote_dir
-  Exclusion rules:    $DEPLOY_EXCLUDE_FILE (edit freely)
+    local ssh_target remote_path rsync_opts
+    ssh_target="$(grep '^ssh_target' "${cfg}" | head -1 | cut -d '=' -f2 | xargs || true)"
+    remote_path="$(grep '^remote_path' "${cfg}" | head -1 | cut -d '=' -f2 | xargs || true)"
+    rsync_opts="$(grep '^rsync_opts' "${cfg}" | head -1 | cut -d '=' -f2- | xargs || true)"
 
-Options:
-  -d, --dry-run   Show what would be transferred without actually doing it
-
-After deploy, on the remote:
-  1. cp config/app.yaml.example config/app.yaml   # first time
-  2. ./manage.sh rebuild
-EOF
+    if [[ -z "${ssh_target}" || -z "${remote_path}" ]]; then
+        log_error "deploy.cfg 中 ssh_target 或 remote_path 未配置"
         exit 1
     fi
 
     _ensure_deploy_exclude
 
-    local rsync_opts=(-avz --progress --delete --exclude-from="$DEPLOY_EXCLUDE_FILE")
+    local rsync_args=(-avz --progress --delete --exclude-from="$DEPLOY_EXCLUDE_FILE")
     if [[ "$dry_run" == true ]]; then
-        rsync_opts+=(--dry-run)
-        log_step "[DRY RUN] Deploying code → ${remote}:${remote_dir} …"
+        rsync_args+=(--dry-run)
+        log_step "[DRY RUN] Deploying code → ${ssh_target}:${remote_path} …"
     else
-        log_step "Deploying code → ${remote}:${remote_dir} …"
+        log_step "Deploying code → ${ssh_target}:${remote_path} …"
     fi
     log_info "Exclusion rules: $DEPLOY_EXCLUDE_FILE"
     log_info "Config file: $DEPLOY_CONFIG_FILE"
@@ -431,7 +420,7 @@ EOF
         ssh "$remote" "mkdir -p '$remote_dir'"
     fi
 
-    rsync "${rsync_opts[@]}" ./ "${remote}:${remote_dir}/"
+    rsync "${rsync_args[@]}" ${rsync_opts} ./ "${ssh_target}:${remote_path}/"
 
     if [[ "$dry_run" == true ]]; then
         echo
@@ -440,43 +429,32 @@ EOF
         log_ok "Deploy complete."
         echo
         echo "On the remote:"
-        echo "  cd ~/$remote_dir && ./manage.sh rebuild"
+        echo "  cd ${remote_path} && ./manage.sh rebuild"
     fi
 }
 
 run_deploy_data() {
-    _ensure_deploy_config
-    _load_deploy_config
-
-    local dry_run=false remote="${DEPLOY_REMOTE:-}" remote_dir="${DEPLOY_REMOTE_DIR:-$DEPLOY_DEFAULT_REMOTE_DIR}"
+    local dry_run=false
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -d|--dry-run) dry_run=true ;;
-            *)
-                if [[ -z "$remote" ]]; then remote="$1"
-                else remote_dir="$1"; fi
-                ;;
+            *) log_error "Unknown option: $1"; exit 1 ;;
         esac
         shift
     done
 
-    if [[ -z "$remote" ]]; then
-        cat <<EOF
-Usage: $0 deploy-data [-d] <user@host> [remote_dir]
+    local cfg="${SCRIPT_DIR}/config/deploy.cfg"
+    if [[ ! -f "${cfg}" ]]; then
+        log_error "config/deploy.cfg 不存在，请从 deploy.cfg.example 复制并配置"
+        exit 1
+    fi
 
-  Append-only sync of exports (JSON) + thumbnails (JPG) to remote.
-  Only adds files that don't exist on the remote (no overwrite).
-  Config file:        $DEPLOY_CONFIG_FILE
-  Default remote:     DEPLOY_REMOTE=${DEPLOY_REMOTE:-}
-  Default remote dir: ~/$remote_dir
+    local ssh_target remote_path
+    ssh_target="$(grep '^ssh_target' "${cfg}" | head -1 | cut -d '=' -f2 | xargs || true)"
+    remote_path="$(grep '^remote_path' "${cfg}" | head -1 | cut -d '=' -f2 | xargs || true)"
 
-Options:
-  -d, --dry-run   Show what would be transferred without actually doing it
-
-Typical workflow:
-  Local:   $0 export && $0 deploy-data user@host
-  Remote:  $0 import <username>
-EOF
+    if [[ -z "${ssh_target}" || -z "${remote_path}" ]]; then
+        log_error "deploy.cfg 中 ssh_target 或 remote_path 未配置"
         exit 1
     fi
 
@@ -489,12 +467,12 @@ EOF
         exit 1
     fi
 
-    local rsync_opts=(-avz --progress --ignore-existing)
+    local rsync_args=(-avz --progress --ignore-existing)
     if [[ "$dry_run" == true ]]; then
-        rsync_opts+=(--dry-run)
-        log_step "[DRY RUN] Syncing data → ${remote}:${remote_dir}/data/ (append-only) …"
+        rsync_args+=(--dry-run)
+        log_step "[DRY RUN] Syncing data → ${ssh_target}:${remote_path}/data/ (append-only) …"
     else
-        log_step "Syncing data → ${remote}:${remote_dir}/data/ (append-only) …"
+        log_step "Syncing data → ${ssh_target}:${remote_path}/data/ (append-only) …"
     fi
     echo
 
@@ -503,12 +481,12 @@ EOF
     fi
 
     log_info "exports (JSON) …"
-    rsync "${rsync_opts[@]}" "$exports_dir/" "${remote}:${remote_dir}/data/exports/"
+    rsync "${rsync_args[@]}" "$exports_dir/" "${ssh_target}:${remote_path}/data/exports/"
 
     if [[ -d "$thumbs_dir" ]] && [[ -n "$(ls -A "$thumbs_dir" 2>/dev/null)" ]]; then
         echo
         log_info "thumbnails (JPG) …"
-        rsync "${rsync_opts[@]}" "$thumbs_dir/" "${remote}:${remote_dir}/data/thumbnails/"
+        rsync "${rsync_args[@]}" "$thumbs_dir/" "${ssh_target}:${remote_path}/data/thumbnails/"
     fi
 
     echo
@@ -516,7 +494,7 @@ EOF
         log_ok "Dry run complete — no files were transferred."
     else
         log_ok "Data synced."
-        echo "On the remote: cd ~/$remote_dir && ./manage.sh import <username>"
+        echo "On the remote: cd ${remote_path} && ./manage.sh import <username>"
     fi
 }
 
@@ -580,11 +558,9 @@ Data:
   clean-exports [youtube|bilibili] Delete exported JSON files (all or by platform)
 
 Deploy (between machines):
-  deploy [-d] [user@host] [dir]        Sync source code to remote (no data/secrets)
-  deploy-data [-d] [user@host] [dir]   Append-only sync of exports + thumbnails
+  deploy [-d]                          Sync source code to remote (config/deploy.cfg)
+  deploy-data [-d]                     Append-only sync of exports + thumbnails
     -d, --dry-run                        Preview what would be transferred
-                                         Config file:        $DEPLOY_CONFIG_FILE
-                                         Default remote dir: ~/$DEPLOY_DEFAULT_REMOTE_DIR
                                          Exclusion rules:    $DEPLOY_EXCLUDE_FILE
 
 Examples:
@@ -592,9 +568,9 @@ Examples:
   $0 rebuild -n                           # no cache
   REGISTRY=docker.io $0 rebuild           # Docker Hub instead of CN mirror
 
-  $0 deploy -d                            # dry run using config/deploy.cfg
-  $0 deploy root@srv                      # override DEPLOY_REMOTE
-  $0 deploy-data -d                       # dry run using config/deploy.cfg
+  $0 deploy -d                            # dry run — preview code sync
+  $0 deploy                               # push code, then rebuild on remote
+  $0 deploy-data -d                       # dry run — preview data sync
   $0 export && $0 deploy-data             # export + push data, then import on remote
 EOF
 }

@@ -1,9 +1,13 @@
-# deploy target for manage.sh deploy / deploy-data
-# Copy to config/deploy.cfg and edit DEPLOY_REMOTE before deploying.
-# Command-line args still override these values.
+# 部署配置 — 用于 manage.sh deploy
+#
+# 用法: cp config/deploy.cfg.example config/deploy.cfg
+#       编辑后执行 ./manage.sh deploy
 
-# Example: root@your-server
-DEPLOY_REMOTE=""
+# SSH 目标（用户@主机 或 ~/.ssh/config 别名）
+ssh_target = root@aliyun-hk
 
-# Remote path relative to the SSH user's home directory.
-DEPLOY_REMOTE_DIR="ai/vedio-split-view"
+# 远程部署路径（源码将同步到此目录）
+remote_path = ai/vedio-split-view
+
+# rsync 额外选项（可选）
+# rsync_opts = -e "ssh -p 22"
