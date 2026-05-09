@@ -1,4 +1,5 @@
 # deploy target for manage.sh deploy / deploy-data
+# Copy to config/deploy.cfg and edit DEPLOY_REMOTE before deploying.
 # Command-line args still override these values.
 
 # Example: root@your-server

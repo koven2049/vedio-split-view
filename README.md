@@ -68,7 +68,14 @@ Docker Compose provider。
 
 ## 部署配置 (config/deploy.cfg)
 
-`manage.sh deploy` 和 `manage.sh deploy-data` 默认读取 `config/deploy.cfg`：
+`manage.sh deploy` 和 `manage.sh deploy-data` 默认读取 `config/deploy.cfg`。首次配置：
+
+```bash
+cp config/deploy.cfg.example config/deploy.cfg
+vim config/deploy.cfg
+```
+
+`config/deploy.cfg` 是本地配置，不进 Git；`config/deploy.cfg.example` 用于提交模板。
 
 ```bash
 DEPLOY_REMOTE="root@your-server"

@@ -19,6 +19,7 @@ CONFIG_DIR="./config"
 CONFIG_FILE="$CONFIG_DIR/app.yaml"
 CONFIG_EXAMPLE="$CONFIG_DIR/app.yaml.example"
 DEPLOY_CONFIG_FILE="$CONFIG_DIR/deploy.cfg"
+DEPLOY_CONFIG_EXAMPLE="$CONFIG_DIR/deploy.cfg.example"
 CERTS_DIR="$CONFIG_DIR/certs"
 REGISTRY="${REGISTRY:-docker.m.daocloud.io}"
 PODMAN_CMD="${PODMAN_CMD:-podman}"
@@ -112,6 +113,7 @@ test_transcribe.py
 
 # ── sensitive config (never overwrite remote secrets) ────────────────────────
 config/app.yaml
+config/deploy.cfg
 config/certs/
 config/*_cookies.txt
 
@@ -129,16 +131,7 @@ EXCLUDE
 _ensure_deploy_config() {
     mkdir -p "$CONFIG_DIR"
     if [[ ! -f "$DEPLOY_CONFIG_FILE" ]]; then
-        cat > "$DEPLOY_CONFIG_FILE" <<'CFG'
-# deploy target for manage.sh deploy / deploy-data
-# Command-line args still override these values.
-
-# Example: root@your-server
-DEPLOY_REMOTE=""
-
-# Remote path relative to the SSH user's home directory.
-DEPLOY_REMOTE_DIR="ai/vedio-split-view"
-CFG
+        cp "$DEPLOY_CONFIG_EXAMPLE" "$DEPLOY_CONFIG_FILE"
         log_info "Created $DEPLOY_CONFIG_FILE (edit DEPLOY_REMOTE before deploying)"
     fi
 }

@@ -13,6 +13,7 @@ frontend/dist/
 
 # Config (contains secrets)
 config/app.yaml
+config/deploy.cfg
 config/certs/
 config/*_cookies.txt
 

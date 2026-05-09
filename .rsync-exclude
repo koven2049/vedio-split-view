@@ -30,6 +30,7 @@ test_transcribe.py
 
 # ── sensitive config (never overwrite remote secrets) ────────────────────────
 config/app.yaml
+config/deploy.cfg
 config/certs/
 config/*_cookies.txt
 
