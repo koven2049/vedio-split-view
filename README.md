@@ -32,6 +32,9 @@
 ## 快速开始
 
 ```bash
+# 0. 确认本机已安装并启动 Podman
+podman info
+
 # 1. 初始化（生成配置 + HTTPS 证书）
 bash manage.sh init
 
@@ -52,16 +55,35 @@ bash manage.sh start                 # 启动
 bash manage.sh stop                  # 停止
 bash manage.sh restart               # 重启
 bash manage.sh rebuild               # 增量构建并重启（最常用）
-bash manage.sh rebuild backend       # 仅重建后端
 bash manage.sh rebuild -n            # 无缓存完全重建
 bash manage.sh rebuild -p            # 重新拉取基础镜像
 bash manage.sh status                # 查看状态 + 健康检查
-bash manage.sh logs                  # 跟踪所有日志
-bash manage.sh logs backend          # 仅跟踪后端日志
-bash manage.sh mirror cn             # 切换国内镜像（默认）
-bash manage.sh mirror default        # 切换 docker.io
 bash manage.sh clean                 # 清理构建缓存
 ```
+
+容器生命周期由 `manage.sh` 直接调用 Podman：构建使用 `podman build`，启动使用
+`podman run` 创建 `vsplit-backend` / `vsplit-frontend` 两个容器，并放入
+`vsplit-net` 网络。脚本不再依赖 `podman compose`，因此不会被 Podman 委托给
+Docker Compose provider。
+
+## 部署配置 (config/deploy.cfg)
+
+`manage.sh deploy` 和 `manage.sh deploy-data` 默认读取 `config/deploy.cfg`：
+
+```bash
+DEPLOY_REMOTE="root@your-server"
+DEPLOY_REMOTE_DIR="ai/vedio-split-view"
+```
+
+常用方式：
+
+```bash
+bash manage.sh deploy -d     # dry run，使用 config/deploy.cfg
+bash manage.sh deploy        # 同步代码到远端，不同步 data/config/app.yaml 等敏感和运行时数据
+bash manage.sh deploy-data   # 同步导出的 JSON 和缩略图
+```
+
+命令行参数仍可覆盖配置，例如 `bash manage.sh deploy root@srv ai/vedio-split-view`。
 
 ## 配置说明 (config/app.yaml)
 

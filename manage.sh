@@ -18,11 +18,18 @@ DATA_DIR="./data"
 CONFIG_DIR="./config"
 CONFIG_FILE="$CONFIG_DIR/app.yaml"
 CONFIG_EXAMPLE="$CONFIG_DIR/app.yaml.example"
+DEPLOY_CONFIG_FILE="$CONFIG_DIR/deploy.cfg"
 CERTS_DIR="$CONFIG_DIR/certs"
 REGISTRY="${REGISTRY:-docker.m.daocloud.io}"
+PODMAN_CMD="${PODMAN_CMD:-podman}"
 
 DEPLOY_EXCLUDE_FILE=".rsync-exclude"
 DEPLOY_DEFAULT_REMOTE_DIR="ai/vedio-split-view"
+NETWORK_NAME="vsplit-net"
+BACKEND_CONTAINER="vsplit-backend"
+FRONTEND_CONTAINER="vsplit-frontend"
+BACKEND_IMAGE="vedio-split-view_backend"
+FRONTEND_IMAGE="vedio-split-view_frontend"
 
 # ── config helpers ────────────────────────────────────────────────────────────
 read_yaml_value() {
@@ -46,6 +53,13 @@ get_frontend_port() { read_yaml_value "app.frontend_port" "5180"; }
 
 ensure_config() {
     [[ -f "$CONFIG_FILE" ]] || { log_error "Config not found. Run: $0 init"; exit 1; }
+}
+
+ensure_podman() {
+    command -v "$PODMAN_CMD" &>/dev/null || {
+        log_error "Podman not found. Install podman or set PODMAN_CMD=/path/to/podman."
+        exit 1
+    }
 }
 
 export_compose_env() {
@@ -112,6 +126,53 @@ EXCLUDE
     fi
 }
 
+_ensure_deploy_config() {
+    mkdir -p "$CONFIG_DIR"
+    if [[ ! -f "$DEPLOY_CONFIG_FILE" ]]; then
+        cat > "$DEPLOY_CONFIG_FILE" <<'CFG'
+# deploy target for manage.sh deploy / deploy-data
+# Command-line args still override these values.
+
+# Example: root@your-server
+DEPLOY_REMOTE=""
+
+# Remote path relative to the SSH user's home directory.
+DEPLOY_REMOTE_DIR="ai/vedio-split-view"
+CFG
+        log_info "Created $DEPLOY_CONFIG_FILE (edit DEPLOY_REMOTE before deploying)"
+    fi
+}
+
+_load_deploy_config() {
+    [[ -f "$DEPLOY_CONFIG_FILE" ]] || return 0
+    # shellcheck source=/dev/null
+    source "$DEPLOY_CONFIG_FILE"
+}
+
+_ensure_podman_network() {
+    ensure_podman
+    "$PODMAN_CMD" network exists "$NETWORK_NAME" 2>/dev/null || "$PODMAN_CMD" network create "$NETWORK_NAME" >/dev/null
+}
+
+_ensure_images_exist() {
+    ensure_podman
+    local missing=()
+    "$PODMAN_CMD" image exists "$BACKEND_IMAGE" 2>/dev/null || missing+=("$BACKEND_IMAGE")
+    "$PODMAN_CMD" image exists "$FRONTEND_IMAGE" 2>/dev/null || missing+=("$FRONTEND_IMAGE")
+    if [[ "${#missing[@]}" -gt 0 ]]; then
+        log_error "Missing image(s): ${missing[*]}"
+        echo "Run: $0 rebuild"
+        exit 1
+    fi
+}
+
+_remove_container_if_exists() {
+    local name="$1"
+    if "$PODMAN_CMD" container exists "$name" 2>/dev/null; then
+        "$PODMAN_CMD" rm -f "$name" >/dev/null
+    fi
+}
+
 # ── generate certs ────────────────────────────────────────────────────────────
 _generate_certs() {
     if [[ -f "$CERTS_DIR/cert.pem" ]] && [[ -f "$CERTS_DIR/key.pem" ]]; then
@@ -133,7 +194,7 @@ _generate_certs() {
 
 run_init() {
     log_step "Initialising project …"
-    mkdir -p "$DATA_DIR/tmp" logs/nginx
+    mkdir -p "$CONFIG_DIR" "$DATA_DIR/tmp" logs/nginx
 
     if [[ ! -f "$CONFIG_FILE" ]]; then
         cp "$CONFIG_EXAMPLE" "$CONFIG_FILE"
@@ -144,21 +205,55 @@ run_init() {
 
     _generate_certs
     _ensure_deploy_exclude
+    _ensure_deploy_config
     log_ok "Init complete."
 }
 
 run_start() {
     ensure_config
     export_compose_env
+    _ensure_images_exist
+    _ensure_podman_network
     mkdir -p logs/nginx
     log_step "Starting services …"
-    podman-compose -f "$COMPOSE_FILE" up -d
+
+    _remove_container_if_exists "$FRONTEND_CONTAINER"
+    _remove_container_if_exists "$BACKEND_CONTAINER"
+
+    "$PODMAN_CMD" run -d \
+        --name "$BACKEND_CONTAINER" \
+        --network "$NETWORK_NAME" \
+        --network-alias backend \
+        -p "$APP_PORT:8080" \
+        -v "$SCRIPT_DIR/config:/app/config:ro" \
+        -v "$SCRIPT_DIR/data:/app/data" \
+        -v "$SCRIPT_DIR/logs:/app/logs" \
+        -e PORT=8080 \
+        -e http_proxy= \
+        -e https_proxy= \
+        -e HTTP_PROXY= \
+        -e HTTPS_PROXY= \
+        --restart unless-stopped \
+        "$BACKEND_IMAGE" >/dev/null
+
+    "$PODMAN_CMD" run -d \
+        --name "$FRONTEND_CONTAINER" \
+        --network "$NETWORK_NAME" \
+        --network-alias frontend \
+        -p "$FRONTEND_PORT:443" \
+        -v "$SCRIPT_DIR/config/certs:/etc/nginx/certs:ro" \
+        -v "$SCRIPT_DIR/logs/nginx:/var/log/nginx" \
+        --restart unless-stopped \
+        "$FRONTEND_IMAGE" >/dev/null
+
     log_ok "Backend: http://localhost:$APP_PORT  Frontend: https://localhost:$FRONTEND_PORT"
 }
 
 run_stop() {
+    ensure_podman
     log_step "Stopping services …"
-    podman-compose -f "$COMPOSE_FILE" down
+    _remove_container_if_exists "$FRONTEND_CONTAINER"
+    _remove_container_if_exists "$BACKEND_CONTAINER"
     log_ok "Stopped."
 }
 
@@ -177,6 +272,7 @@ run_rebuild() {
 
     ensure_config
     export_compose_env
+    ensure_podman
 
     log_step "Building images (registry: $REGISTRY) …"
     [[ -n "$no_cache" ]] && log_info "--no-cache"
@@ -197,15 +293,15 @@ run_rebuild() {
             [[ -n "${http_proxy:-}" ]]  && args="$args --build-arg http_proxy=$http_proxy"
             [[ -n "${https_proxy:-}" ]] && args="$args --build-arg https_proxy=$https_proxy"
             [[ -n "$no_cache" ]] && args="$args --no-cache"
-            podman build $args -t "$image_tag" "./${svc}"
+            "$PODMAN_CMD" build $args -t "$image_tag" "./${svc}"
         else
-            local compose_args="--build-arg REGISTRY=$REGISTRY"
-            [[ -n "$no_cache" ]] && compose_args="$compose_args --no-cache"
-            [[ -n "$pull" ]]     && compose_args="$compose_args $pull"
-            REGISTRY=$REGISTRY podman-compose -f "$COMPOSE_FILE" build $compose_args $svc
+            local build_args=(--build-arg "REGISTRY=$REGISTRY")
+            [[ -n "$no_cache" ]] && build_args+=(--no-cache)
+            [[ -n "$pull" ]]     && build_args+=(--pull=always)
+            "$PODMAN_CMD" build "${build_args[@]}" -t "$image_tag" "./${svc}"
         fi
 
-        if ! podman image exists "$image_tag" 2>/dev/null; then
+        if ! "$PODMAN_CMD" image exists "$image_tag" 2>/dev/null; then
             log_error "$svc image not found after build."
             exit 1
         fi
@@ -213,17 +309,18 @@ run_rebuild() {
     done
 
     log_step "Restarting services …"
-    podman-compose -f "$COMPOSE_FILE" down 2>/dev/null || true
-    mkdir -p logs/nginx
-    podman-compose -f "$COMPOSE_FILE" up -d
+    _remove_container_if_exists "$FRONTEND_CONTAINER"
+    _remove_container_if_exists "$BACKEND_CONTAINER"
+    run_start
 
     log_ok "Done. Backend: http://localhost:$APP_PORT  Frontend: https://localhost:$FRONTEND_PORT"
 }
 
 run_status() {
+    ensure_podman
     export_compose_env
     log_step "Container status:"
-    podman-compose -f "$COMPOSE_FILE" ps
+    "$PODMAN_CMD" ps -a --filter "name=vsplit-"
     echo
 
     log_step "Health check …"
@@ -301,7 +398,10 @@ run_import() {
 }
 
 run_deploy() {
-    local dry_run=false remote="" remote_dir="$DEPLOY_DEFAULT_REMOTE_DIR"
+    _ensure_deploy_config
+    _load_deploy_config
+
+    local dry_run=false remote="${DEPLOY_REMOTE:-}" remote_dir="${DEPLOY_REMOTE_DIR:-$DEPLOY_DEFAULT_REMOTE_DIR}"
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -d|--dry-run) dry_run=true ;;
@@ -318,7 +418,9 @@ run_deploy() {
 Usage: $0 deploy [-d] <user@host> [remote_dir]
 
   Sync source code to remote (no data, no secrets).
-  Default remote dir: ~/$DEPLOY_DEFAULT_REMOTE_DIR
+  Config file:        $DEPLOY_CONFIG_FILE
+  Default remote:     DEPLOY_REMOTE=${DEPLOY_REMOTE:-}
+  Default remote dir: ~/$remote_dir
   Exclusion rules:    $DEPLOY_EXCLUDE_FILE (edit freely)
 
 Options:
@@ -341,6 +443,11 @@ EOF
         log_step "Deploying code → ${remote}:${remote_dir} …"
     fi
     log_info "Exclusion rules: $DEPLOY_EXCLUDE_FILE"
+    log_info "Config file: $DEPLOY_CONFIG_FILE"
+
+    if [[ "$dry_run" != true ]]; then
+        ssh "$remote" "mkdir -p '$remote_dir'"
+    fi
 
     rsync "${rsync_opts[@]}" ./ "${remote}:${remote_dir}/"
 
@@ -356,7 +463,10 @@ EOF
 }
 
 run_deploy_data() {
-    local dry_run=false remote="" remote_dir="$DEPLOY_DEFAULT_REMOTE_DIR"
+    _ensure_deploy_config
+    _load_deploy_config
+
+    local dry_run=false remote="${DEPLOY_REMOTE:-}" remote_dir="${DEPLOY_REMOTE_DIR:-$DEPLOY_DEFAULT_REMOTE_DIR}"
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -d|--dry-run) dry_run=true ;;
@@ -374,7 +484,9 @@ Usage: $0 deploy-data [-d] <user@host> [remote_dir]
 
   Append-only sync of exports (JSON) + thumbnails (JPG) to remote.
   Only adds files that don't exist on the remote (no overwrite).
-  Default remote dir: ~/$DEPLOY_DEFAULT_REMOTE_DIR
+  Config file:        $DEPLOY_CONFIG_FILE
+  Default remote:     DEPLOY_REMOTE=${DEPLOY_REMOTE:-}
+  Default remote dir: ~/$remote_dir
 
 Options:
   -d, --dry-run   Show what would be transferred without actually doing it
@@ -403,6 +515,10 @@ EOF
         log_step "Syncing data → ${remote}:${remote_dir}/data/ (append-only) …"
     fi
     echo
+
+    if [[ "$dry_run" != true ]]; then
+        ssh "$remote" "mkdir -p '$remote_dir/data/exports' '$remote_dir/data/thumbnails'"
+    fi
 
     log_info "exports (JSON) …"
     rsync "${rsync_opts[@]}" "$exports_dir/" "${remote}:${remote_dir}/data/exports/"
@@ -448,14 +564,15 @@ run_clean_exports() {
 }
 
 run_clean() {
+    ensure_podman
     log_warn "This will remove dangling images and build cache."
     read -r -p "Continue? [y/N] " confirm
     [[ "${confirm,,}" == "y" ]] || { log_info "Aborted."; exit 0; }
 
     log_step "Pruning images …"
-    podman image prune -f
+    "$PODMAN_CMD" image prune -f
     log_step "Pruning system …"
-    podman system prune -f
+    "$PODMAN_CMD" system prune -f
     log_ok "Clean complete."
 }
 
@@ -481,9 +598,10 @@ Data:
   clean-exports [youtube|bilibili] Delete exported JSON files (all or by platform)
 
 Deploy (between machines):
-  deploy [-d] <user@host> [dir]        Sync source code to remote (no data/secrets)
-  deploy-data [-d] <user@host> [dir]   Append-only sync of exports + thumbnails
+  deploy [-d] [user@host] [dir]        Sync source code to remote (no data/secrets)
+  deploy-data [-d] [user@host] [dir]   Append-only sync of exports + thumbnails
     -d, --dry-run                        Preview what would be transferred
+                                         Config file:        $DEPLOY_CONFIG_FILE
                                          Default remote dir: ~/$DEPLOY_DEFAULT_REMOTE_DIR
                                          Exclusion rules:    $DEPLOY_EXCLUDE_FILE
 
@@ -492,10 +610,10 @@ Examples:
   $0 rebuild -n                           # no cache
   REGISTRY=docker.io $0 rebuild           # Docker Hub instead of CN mirror
 
-  $0 deploy -d root@srv                   # dry run — preview code sync
-  $0 deploy root@srv                      # push code, then rebuild on remote
-  $0 deploy-data -d root@srv              # dry run — preview data sync
-  $0 export && $0 deploy-data root@srv    # export + push data, then import on remote
+  $0 deploy -d                            # dry run using config/deploy.cfg
+  $0 deploy root@srv                      # override DEPLOY_REMOTE
+  $0 deploy-data -d                       # dry run using config/deploy.cfg
+  $0 export && $0 deploy-data             # export + push data, then import on remote
 EOF
 }
 
