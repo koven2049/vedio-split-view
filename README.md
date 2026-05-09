@@ -94,17 +94,27 @@ bash manage.sh deploy-data   # 同步导出的 JSON 和缩略图
 
 ## 配置说明 (config/app.yaml)
 
+`config/app.yaml` 可以很短。除了下面的必填项，其它参数都有代码默认值，只有需要覆盖默认行为时再写。
+
+必填：
+
 | 节 | 关键字段 | 说明 |
 |---|---------|------|
-| `app` | `port`, `frontend_port`, `secret_key` | 后端端口、前端端口、JWT 密钥 |
-| `admin` | `password` | **必填**，管理员密码，启动时覆盖 DB |
-| `llm` | `base_url`, `model`, `api_key` | OpenAI 兼容 LLM（智谱/OpenAI/DeepSeek 等） |
-| `transcription` | `base_url`, `model`, `api_key` | ASR 模型（Whisper 或 Fun-ASR） |
-| `oss` | `endpoint`, `access_key_id/secret`, `bucket_name` | Fun-ASR 时必填（Whisper 不需要） |
-| `network` | `proxy_enabled`, `http_proxy` | 代理配置 |
-| `storage` | `max_pending_tasks_per_user` | 每用户最大未完成任务数（默认 3） |
-| `video` | `max_duration_seconds`, `confirm_threshold_seconds` | 视频时长限制 / 二次确认阈值 |
-| `logging` | `level`, `dir` | 日志级别和目录（默认 `INFO`, `logs/`） |
+| `app` | `secret_key` | JWT 密钥，生产环境必须换成随机长字符串 |
+| `admin` | `password` | 管理员密码，启动时覆盖 DB |
+| `llm` | `base_url`, `model`, `api_key` | 视频总结和分段使用的 OpenAI 兼容 LLM |
+
+按需填写：
+
+| 节 | 关键字段 | 说明 |
+|---|---------|------|
+| `transcription` | `base_url`, `model`, `api_key` | 只有视频无可用字幕、需要音频转录时才用 |
+| `oss` | `endpoint`, `access_key_id/secret`, `bucket_name` | 只有使用阿里云 Fun-ASR 时才需要；Whisper 不需要 |
+| `app` | `port`, `frontend_port` | 只有要改默认端口 `8080` / `5180` 时才写 |
+| `network` | `proxy_enabled`, `http_proxy`, `youtube_cookies_file` | 只有下载/字幕需要代理或 YouTube 登录态时才写 |
+| `storage` | `db_path`, `temp_dir`, `max_pending_tasks_per_user` | 只有要改数据库、临时目录或配额时才写 |
+| `video` | `max_duration_seconds`, `confirm_threshold_seconds` | 只有要改视频时长限制时才写 |
+| `logging` | `level`, `dir` | 只有要改日志级别或目录时才写 |
 
 ## Debug API
 

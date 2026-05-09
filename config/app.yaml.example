@@ -1,61 +1,61 @@
+# Minimal config. Unspecified fields use defaults from backend/src/video_split/config.py.
+
 app:
-  host: "0.0.0.0"
-  port: 8080
-  frontend_port: 5180
-  secret_key: "change-me-to-a-random-string"  # REQUIRED — used for JWT signing
+  # REQUIRED in production: used for JWT signing.
+  secret_key: "change-me-to-a-random-string"
 
 admin:
-  password: ""  # REQUIRED — service refuses to start if empty
+  # REQUIRED: service refuses to start if empty.
+  password: ""
 
 llm:
-  base_url: ""   # REQUIRED — e.g. "https://open.bigmodel.cn/api/paas/v4"
-  model: ""      # REQUIRED — e.g. "glm-4-plus", "gpt-4o"
-  api_key: ""    # REQUIRED
-  timeout_ms: 120000           # LLM response timeout in ms; increase for long podcasts (e.g. 180000)
-  max_tokens: 8192
+  # REQUIRED for video analysis.
+  base_url: ""   # e.g. "https://open.bigmodel.cn/api/paas/v4"
+  model: ""      # e.g. "glm-4-plus", "gpt-4o"
+  api_key: ""
 
 transcription:
-  # --- OpenAI Whisper example ---
-  # base_url: "https://api.openai.com/v1"
-  # model: "whisper-1"
-  # --- Aliyun Fun-ASR example (requires oss section below) ---
-  base_url: ""   # REQUIRED — e.g. "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  model: "fun-asr"
-  api_key: ""    # REQUIRED
-  language: ""   # empty = auto-detect, or "zh", "en", "ja"
-  chunk_duration_seconds: 300
+  # REQUIRED only when a video has no usable subtitles and audio transcription is needed.
+  # OpenAI Whisper example:
+  base_url: ""   # e.g. "https://api.openai.com/v1"
+  model: "whisper-1"
+  api_key: ""
 
-# REQUIRED when using Aliyun Fun-ASR (needs public URL for audio files).
-# Not needed when using OpenAI Whisper (which supports direct file upload).
-oss:
-  endpoint: ""             # REQUIRED (Fun-ASR) — e.g. "oss-cn-beijing.aliyuncs.com"
-  access_key_id: ""        # REQUIRED (Fun-ASR) — RAM AccessKey ID
-  access_key_secret: ""    # REQUIRED (Fun-ASR) — RAM AccessKey Secret
-  bucket_name: ""          # REQUIRED (Fun-ASR) — your bucket name (private ACL is fine)
-  prefix: "video-split/tmp"
-  sign_expiry_seconds: 3600
-  object_expiry_days: 1
+# Optional: uncomment when using Aliyun Fun-ASR instead of Whisper.
+# transcription:
+#   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+#   model: "fun-asr"
+#   api_key: ""
+#
+# oss:
+#   endpoint: ""             # e.g. "oss-cn-beijing.aliyuncs.com"
+#   access_key_id: ""
+#   access_key_secret: ""
+#   bucket_name: ""
 
-network:
-  proxy_enabled: false
-  http_proxy: ""               # e.g. "http://127.0.0.1:7890" — used only for video download & subtitle fetch
-  https_proxy: ""
-  youtube_cookies_file: ""     # cookie file name in config/ dir, e.g. "www.youtube.com_cookies.txt"
-  download_timeout_seconds: 120  # HTTP timeout for audio downloads (xiaoyuzhou etc.)
-
-storage:
-  db_path: "data/video_split.db"
-  temp_dir: "data/tmp"
-  max_pending_tasks_per_user: 3
-  max_total_videos_per_user: 100
-
-video:
-  max_duration_seconds: 12600          # 3.5 hours — reject videos longer than this
-  confirm_threshold_seconds: 3600      # (reserved)
-  min_segment_duration_seconds: 60     # videos shorter than this won't be segmented
-
-logging:
-  level: "INFO"            # DEBUG, INFO, WARNING, ERROR
-  dir: "logs"
-  max_file_size_mb: 50
-  backup_count: 5
+# Optional: uncomment only if you need to override defaults.
+#
+# app:
+#   port: 8080              # backend API port exposed on the host
+#   frontend_port: 5180     # HTTPS frontend port exposed on the host
+#
+# network:
+#   proxy_enabled: false
+#   http_proxy: ""          # e.g. "http://127.0.0.1:7890"
+#   https_proxy: ""
+#   youtube_cookies_file: ""  # file name under config/, if YouTube requires login
+#
+# storage:
+#   db_path: "data/video_split.db"
+#   temp_dir: "data/tmp"
+#   max_pending_tasks_per_user: 3
+#   max_total_videos_per_user: 100
+#
+# video:
+#   max_duration_seconds: 12600
+#   confirm_threshold_seconds: 3600
+#   min_segment_duration_seconds: 60
+#
+# logging:
+#   level: "INFO"
+#   dir: "logs"
