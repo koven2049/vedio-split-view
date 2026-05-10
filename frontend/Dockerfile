@@ -3,7 +3,8 @@ FROM ${REGISTRY}/library/node:20-alpine AS build
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci && ls node_modules/.bin/tsc && echo "=== npm ci OK ==="
+RUN npm config set registry https://registry.npmmirror.com && \
+    npm ci && ls node_modules/.bin/tsc && echo "=== npm ci OK ==="
 COPY . .
 ENV PATH="/app/node_modules/.bin:$PATH"
 RUN tsc -b && vite build

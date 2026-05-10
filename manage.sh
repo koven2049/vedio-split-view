@@ -20,9 +20,10 @@ CONFIG_FILE="$CONFIG_DIR/app.yaml"
 CONFIG_EXAMPLE="$CONFIG_DIR/app.yaml.example"
 DEPLOY_CONFIG_FILE="$CONFIG_DIR/deploy.cfg"
 DEPLOY_CONFIG_EXAMPLE="$CONFIG_DIR/deploy.cfg.example"
-CERTS_DIR="$CONFIG_DIR/certs"
+CERTS_DIR="$CONFIG_DIR/certs"  # no longer generated; dir kept in .rsync-exclude
 REGISTRY="${REGISTRY:-docker.m.daocloud.io}"
 PODMAN_CMD="${PODMAN_CMD:-podman}"
+PODMAN_DNS="${PODMAN_DNS:-223.5.5.5}"
 
 DEPLOY_EXCLUDE_FILE=".rsync-exclude"
 DEPLOY_DEFAULT_REMOTE_DIR="ai/vedio-split-view"
@@ -147,6 +148,10 @@ _ensure_podman_network() {
     "$PODMAN_CMD" network exists "$NETWORK_NAME" 2>/dev/null || "$PODMAN_CMD" network create "$NETWORK_NAME" >/dev/null
 }
 
+_podman_dns_args() {
+    [[ -n "$PODMAN_DNS" ]] && printf '%s' "--dns=$PODMAN_DNS"
+}
+
 _ensure_images_exist() {
     ensure_podman
     local missing=()
@@ -166,23 +171,6 @@ _remove_container_if_exists() {
     fi
 }
 
-# ── generate certs ────────────────────────────────────────────────────────────
-_generate_certs() {
-    if [[ -f "$CERTS_DIR/cert.pem" ]] && [[ -f "$CERTS_DIR/key.pem" ]]; then
-        log_info "Certificates already exist in $CERTS_DIR"
-        return 0
-    fi
-    if ! command -v mkcert &>/dev/null; then
-        log_error "mkcert not found. Install: brew install mkcert (macOS)"
-        return 1
-    fi
-    mkdir -p "$CERTS_DIR"
-    log_step "Generating TLS certificates …"
-    mkcert -cert-file "$CERTS_DIR/cert.pem" -key-file "$CERTS_DIR/key.pem" \
-        localhost 127.0.0.1 ::1
-    log_ok "Certificates generated in $CERTS_DIR"
-}
-
 # ── commands ──────────────────────────────────────────────────────────────────
 
 run_init() {
@@ -196,7 +184,6 @@ run_init() {
         log_info "$CONFIG_FILE already exists"
     fi
 
-    _generate_certs
     _ensure_deploy_exclude
     _ensure_deploy_config
     log_ok "Init complete."
@@ -214,6 +201,7 @@ run_start() {
     _remove_container_if_exists "$BACKEND_CONTAINER"
 
     "$PODMAN_CMD" run -d \
+        $(_podman_dns_args) \
         --name "$BACKEND_CONTAINER" \
         --network "$NETWORK_NAME" \
         --network-alias backend \
@@ -230,16 +218,16 @@ run_start() {
         "$BACKEND_IMAGE" >/dev/null
 
     "$PODMAN_CMD" run -d \
+        $(_podman_dns_args) \
         --name "$FRONTEND_CONTAINER" \
         --network "$NETWORK_NAME" \
         --network-alias frontend \
-        -p "$FRONTEND_PORT:443" \
-        -v "$SCRIPT_DIR/config/certs:/etc/nginx/certs:ro" \
+        -p "$FRONTEND_PORT:80" \
         -v "$SCRIPT_DIR/logs/nginx:/var/log/nginx" \
         --restart unless-stopped \
         "$FRONTEND_IMAGE" >/dev/null
 
-    log_ok "Backend: http://localhost:$APP_PORT  Frontend: https://localhost:$FRONTEND_PORT"
+    log_ok "Backend: http://localhost:$APP_PORT  Frontend: http://localhost:$FRONTEND_PORT"
 }
 
 run_stop() {
@@ -268,6 +256,7 @@ run_rebuild() {
     ensure_podman
 
     log_step "Building images (registry: $REGISTRY) …"
+    [[ -n "$PODMAN_DNS" ]] && log_info "podman DNS: $PODMAN_DNS"
     [[ -n "$no_cache" ]] && log_info "--no-cache"
     [[ -n "$pull" ]]     && log_info "--pull"
 
@@ -281,18 +270,18 @@ run_rebuild() {
         log_step "Building $svc …"
         local image_tag="vedio-split-view_${svc}"
 
+        local build_args=(--build-arg "REGISTRY=$REGISTRY")
+        [[ -n "$PODMAN_DNS" ]] && build_args+=(--dns "$PODMAN_DNS")
+        [[ -n "$no_cache" ]] && build_args+=(--no-cache)
+        [[ -n "$pull" ]]     && build_args+=(--pull=always)
+
         if [[ "$use_proxy" -eq 1 ]]; then
-            local args="--network=host --build-arg REGISTRY=$REGISTRY"
-            [[ -n "${http_proxy:-}" ]]  && args="$args --build-arg http_proxy=$http_proxy"
-            [[ -n "${https_proxy:-}" ]] && args="$args --build-arg https_proxy=$https_proxy"
-            [[ -n "$no_cache" ]] && args="$args --no-cache"
-            "$PODMAN_CMD" build $args -t "$image_tag" "./${svc}"
-        else
-            local build_args=(--build-arg "REGISTRY=$REGISTRY")
-            [[ -n "$no_cache" ]] && build_args+=(--no-cache)
-            [[ -n "$pull" ]]     && build_args+=(--pull=always)
-            "$PODMAN_CMD" build "${build_args[@]}" -t "$image_tag" "./${svc}"
+            build_args+=(--network=host)
+            [[ -n "${http_proxy:-}" ]]  && build_args+=(--build-arg "http_proxy=$http_proxy")
+            [[ -n "${https_proxy:-}" ]] && build_args+=(--build-arg "https_proxy=$https_proxy")
         fi
+
+        "$PODMAN_CMD" build "${build_args[@]}" -t "$image_tag" "./${svc}"
 
         if ! "$PODMAN_CMD" image exists "$image_tag" 2>/dev/null; then
             log_error "$svc image not found after build."
@@ -575,7 +564,7 @@ usage() {
 Usage: $0 <command> [options]
 
 Lifecycle:
-  init                       Create config, certs, directories
+  init                       Create config, directories
   start                      Start all services
   stop                       Stop all services
   restart                    Stop + start

@@ -187,7 +187,7 @@ vedio-split-view/
 ├── config/
 │   ├── app.yaml           # 运行时配置（gitignore）
 │   ├── app.yaml.example   # 配置模板
-│   └── certs/             # HTTPS 证书（mkcert 生成）
+│   └── certs/             # （已移除，Cloudflare 终止 HTTPS）
 ├── backend/               # Python FastAPI
 ├── frontend/              # React + Vite + Tailwind
 ├── data/                  # SQLite DB + 临时文件（gitignore）

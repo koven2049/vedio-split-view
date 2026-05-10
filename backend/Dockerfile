@@ -1,7 +1,9 @@
 ARG REGISTRY=docker.io
-FROM ${REGISTRY}/library/python:3.12-slim
+FROM ${REGISTRY}/library/python:3.13-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null; \
+    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null; \
+    apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg curl nodejs && \
     rm -rf /var/lib/apt/lists/*
 
@@ -11,7 +13,7 @@ WORKDIR /app
 COPY pyproject.toml .
 RUN mkdir -p src/video_split && \
     echo '__version__ = "0.0.0"' > src/video_split/__init__.py && \
-    pip install --no-cache-dir . && \
+    pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com . && \
     rm -rf src/
 
 # Layer 2: copy source and install package code only (fast, no dependency download)
