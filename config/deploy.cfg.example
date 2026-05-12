@@ -3,6 +3,10 @@
 # 用法: cp config/deploy.cfg.example config/deploy.cfg
 #       编辑后执行 ./manage.sh deploy
 
+# 环境标识：production | test
+# production 环境下，agent 不得主动修改数据，必须经用户 approve
+env = production
+
 # SSH 目标（用户@主机 或 ~/.ssh/config 别名）
 ssh_target = root@aliyun-hk
 
