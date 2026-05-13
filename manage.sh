@@ -309,7 +309,7 @@ run_rebuild() {
     _remove_container_if_exists "$BACKEND_CONTAINER"
     run_start
 
-    log_ok "Done. Backend: http://localhost:$APP_PORT  Frontend: https://localhost:$FRONTEND_PORT"
+    log_ok "Done. Backend: http://localhost:$APP_PORT  Frontend: http://localhost:$FRONTEND_PORT"
 }
 
 run_status() {
@@ -325,7 +325,7 @@ run_status() {
     else
         log_error "Backend  :$APP_PORT  not responding"
     fi
-    if curl -skf --noproxy '*' "https://localhost:$FRONTEND_PORT/" >/dev/null 2>&1; then
+    if curl -sf --noproxy '*' "http://localhost:$FRONTEND_PORT/" >/dev/null 2>&1; then
         log_ok "Frontend :$FRONTEND_PORT"
     else
         log_error "Frontend :$FRONTEND_PORT  not responding"
