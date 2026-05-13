@@ -4,7 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-source "$(dirname "${BASH_SOURCE[0]}")/../scripts/deploy-check.sh"
+_deploy_check_sh="$(dirname "${BASH_SOURCE[0]}")/../scripts/deploy-check.sh"
+if [[ -f "$_deploy_check_sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$_deploy_check_sh"
+else
+    # Fallback: remote machines lack scripts/ from parent repo
+    _check_deploy_target() { :; }
+fi
 
 # ── colour helpers ────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
