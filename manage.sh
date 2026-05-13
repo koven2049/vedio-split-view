@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+source "$(dirname "${BASH_SOURCE[0]}")/../scripts/deploy-check.sh"
+
 # ── colour helpers ────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
 log_info()  { echo -e "${GREEN}[info]${NC}  $*"; }
@@ -404,6 +406,8 @@ run_deploy() {
         exit 1
     fi
 
+    _check_deploy_target "${ssh_target}" || exit 1
+
     _ensure_deploy_exclude
 
     local rsync_args=(-avz --progress --delete --exclude-from="$DEPLOY_EXCLUDE_FILE")
@@ -417,7 +421,7 @@ run_deploy() {
     log_info "Config file: $DEPLOY_CONFIG_FILE"
 
     if [[ "$dry_run" != true ]]; then
-        ssh "$remote" "mkdir -p '$remote_dir'"
+        ssh "$ssh_target" "mkdir -p '$remote_path'"
     fi
 
     rsync "${rsync_args[@]}" ${rsync_opts} ./ "${ssh_target}:${remote_path}/"
@@ -457,6 +461,8 @@ run_deploy_data() {
         log_error "deploy.cfg 中 ssh_target 或 remote_path 未配置"
         exit 1
     fi
+
+    _check_deploy_target "${ssh_target}" || exit 1
 
     local exports_dir="$DATA_DIR/exports"
     local thumbs_dir="$DATA_DIR/thumbnails"
