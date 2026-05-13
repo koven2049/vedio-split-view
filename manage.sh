@@ -92,6 +92,9 @@ _ensure_deploy_exclude() {
 .DS_Store
 .vscode/
 .idea/
+.claude/
+.superpowers/
+.code-review-graph/
 
 # ── python cache / build ─────────────────────────────────────────────────────
 backend/.venv/
@@ -114,10 +117,13 @@ test_transcribe.py
 .mirror_state
 
 # ── sensitive config (never overwrite remote secrets) ────────────────────────
+# exclude all config except examples
 config/app.yaml
 config/deploy.cfg
 config/certs/
 config/*_cookies.txt
+config/*.pem
+config/*.key
 
 # ── runtime data & logs (never overwrite remote DB / logs) ───────────────────
 data/
