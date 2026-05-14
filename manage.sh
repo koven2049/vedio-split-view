@@ -15,11 +15,11 @@ fi
 
 # ── colour helpers ────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
-log_info()  { echo -e "${GREEN}[info]${NC}  $*"; }
-log_warn()  { echo -e "${YELLOW}[warn]${NC}  $*"; }
-log_error() { echo -e "${RED}[error]${NC} $*"; }
-log_step()  { echo -e "${BLUE}[step]${NC}  $*"; }
-log_ok()    { echo -e "${GREEN}[ok]${NC}    $*"; }
+log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
+log_step()  { echo -e "${BLUE}[STEP]${NC}  $*"; }
+log_ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 
 # ── constants ─────────────────────────────────────────────────────────────────
 COMPOSE_FILE="compose.yaml"
@@ -319,16 +319,19 @@ run_status() {
     "$PODMAN_CMD" ps -a --filter "name=vsplit-"
     echo
 
-    log_step "Health check …"
     if curl -sf --noproxy '*' "http://localhost:$APP_PORT/api/health" >/dev/null 2>&1; then
-        log_ok "Backend  :$APP_PORT"
+        log_ok "URL: http://localhost:$APP_PORT"
+        log_ok "Health: OK"
     else
-        log_error "Backend  :$APP_PORT  not responding"
+        log_ok "URL: http://localhost:$APP_PORT"
+        log_error "Health: FAILED"
     fi
     if curl -sf --noproxy '*' "http://localhost:$FRONTEND_PORT/" >/dev/null 2>&1; then
-        log_ok "Frontend :$FRONTEND_PORT"
+        log_ok "URL: http://localhost:$FRONTEND_PORT"
+        log_ok "Health: OK"
     else
-        log_error "Frontend :$FRONTEND_PORT  not responding"
+        log_ok "URL: http://localhost:$FRONTEND_PORT"
+        log_error "Health: FAILED"
     fi
 }
 
