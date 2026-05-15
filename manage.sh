@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-_deploy_check_sh="$(dirname "${BASH_SOURCE[0]}")/../scripts/deploy-check.sh"
+_deploy_check_sh="$(dirname "${BASH_SOURCE[0]}")/../coding/deploy-common/deploy-check.sh"
 if [[ -f "$_deploy_check_sh" ]]; then
     # shellcheck source=/dev/null
     source "$_deploy_check_sh"
