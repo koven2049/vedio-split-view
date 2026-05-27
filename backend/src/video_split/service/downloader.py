@@ -3,8 +3,11 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+
+import httpx
 
 from video_split.config import get_settings
 
@@ -130,6 +133,85 @@ def _bilibili_headers(sessdata: str = "", bili_jct: str = "", buvid3: str = "") 
     return headers
 
 
+async def _fetch_bilibili_metadata_via_api(
+    bvid: str, headers: dict[str, str]
+) -> VideoMeta:
+    """Fetch Bilibili metadata via official API (bypasses 412 webpage blocks)."""
+    url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+    if data.get("code") != 0:
+        raise RuntimeError(f"Bilibili API error: {data.get('message', 'unknown')}")
+
+    video = data["data"]
+    pubdate = video.get("pubdate", 0)
+    upload_date = datetime.fromtimestamp(pubdate).strftime("%Y-%m-%d") if pubdate else ""
+
+    return VideoMeta(
+        url=f"https://www.bilibili.com/video/{bvid}",
+        platform="bilibili",
+        video_id=bvid,
+        title=video.get("title") or "",
+        duration_seconds=video.get("duration") or 0,
+        thumbnail_url=video.get("pic") or "",
+        upload_date=upload_date,
+        uploader=video.get("owner", {}).get("name") or "",
+    )
+
+
+async def _fetch_bilibili_subtitles_via_api(
+    bvid: str, headers: dict[str, str]
+) -> list[SubtitleEntry]:
+    """Fetch Bilibili subtitles via official API."""
+    view_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        resp = await client.get(view_url)
+        resp.raise_for_status()
+        data = resp.json()
+    if data.get("code") != 0:
+        return []
+
+    cid = data["data"]["cid"]
+    player_url = f"https://api.bilibili.com/x/player/v2?cid={cid}&bvid={bvid}"
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        resp = await client.get(player_url)
+        resp.raise_for_status()
+        player_data = resp.json()
+    if player_data.get("code") != 0:
+        return []
+
+    subtitles = player_data["data"]["subtitle"]["subtitles"]
+    if not subtitles:
+        return []
+
+    for lang in ["zh-CN", "zh-Hans", "zh", "en", "ai-zh"]:
+        for sub in subtitles:
+            if sub.get("lan") == lang:
+                sub_url = sub["subtitle_url"]
+                if sub_url.startswith("//"):
+                    sub_url = "https:" + sub_url
+                async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+                    resp = await client.get(sub_url)
+                    resp.raise_for_status()
+                    content = resp.json()
+                entries = []
+                for item in content.get("body", []):
+                    text = item.get("content", "").strip()
+                    if text:
+                        entries.append(
+                            SubtitleEntry(
+                                start=item.get("from", 0),
+                                duration=item.get("to", 0) - item.get("from", 0),
+                                text=text,
+                            )
+                        )
+                return entries
+
+    return []
+
+
 async def extract_metadata(
     url: str,
     *,
@@ -142,6 +224,15 @@ async def extract_metadata(
 
     platform, vid = detect_platform(url)
     settings = get_settings()
+
+    if platform == "bilibili":
+        headers = _bilibili_headers(sessdata, bili_jct, buvid3)
+        logger.info("[metadata] Bilibili via API: bvid=%s", vid)
+        try:
+            return await _fetch_bilibili_metadata_via_api(vid, headers)
+        except Exception:
+            logger.warning("[metadata] Bilibili API failed, falling back to yt-dlp: %s", url)
+
     ydl_opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
@@ -153,10 +244,7 @@ async def extract_metadata(
     else:
         ydl_opts["proxy"] = ""
 
-    if platform == "bilibili":
-        ydl_opts["http_headers"] = _bilibili_headers(sessdata, bili_jct, buvid3)
-        logger.info("[metadata] Bilibili headers attached (cookies=%s)", bool(sessdata))
-    elif platform == "youtube":
+    if platform == "youtube":
         _apply_youtube_opts(ydl_opts)
 
     logger.info("[metadata] Extracting metadata: platform=%s vid=%s url=%s", platform, vid, url)
@@ -275,64 +363,14 @@ async def fetch_youtube_subtitles(video_id: str) -> list[SubtitleEntry]:
 async def fetch_bilibili_subtitles(
     url: str, sessdata: str = "", bili_jct: str = "", buvid3: str = ""
 ) -> list[SubtitleEntry]:
-    """Fetch Bilibili subtitles via yt-dlp with optional cookies."""
-    import yt_dlp
-
-    settings = get_settings()
-    ydl_opts: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-    }
-    if settings.network.proxy_enabled and settings.network.http_proxy:
-        ydl_opts["proxy"] = settings.network.http_proxy
-    else:
-        ydl_opts["proxy"] = ""
-
-    ydl_opts["http_headers"] = _bilibili_headers(sessdata, bili_jct, buvid3)
-    logger.info("[subtitle] Bilibili subtitle fetch (cookies=%s): %s", bool(sessdata), url)
-
+    """Fetch Bilibili subtitles via API (bypasses 412 webpage blocks)."""
+    _, bvid = detect_platform(url)
+    headers = _bilibili_headers(sessdata, bili_jct, buvid3)
+    logger.info("[subtitle] Bilibili via API: bvid=%s", bvid)
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-        if info is None:
-            logger.warning("[subtitle] yt-dlp returned None for %s", url)
-            return []
-
-        subtitles_data = info.get("subtitles", {})
-        auto_subs = info.get("automatic_captions", {})
-        all_subs = {**auto_subs, **subtitles_data}
-        logger.info("[subtitle] Available subtitle langs: %s", list(all_subs.keys()))
-
-        for lang in ["zh-Hans", "zh", "zh-CN", "en", "ai_zh"]:
-            if lang in all_subs:
-                for fmt in all_subs[lang]:
-                    if fmt.get("ext") == "json3" or "json" in fmt.get("ext", ""):
-                        import httpx
-
-                        logger.info("[subtitle] Downloading subtitle: lang=%s ext=%s", lang, fmt.get("ext"))
-                        sub_proxy = settings.network.http_proxy if settings.network.proxy_enabled else None
-                        async with httpx.AsyncClient(proxy=sub_proxy, timeout=30.0) as client:
-                            resp = await client.get(fmt["url"])
-                            data = resp.json()
-                            events = data.get("events", data.get("body", []))
-                            entries = []
-                            for ev in events:
-                                start = ev.get("tStartMs", ev.get("from", 0)) / 1000
-                                dur = ev.get("dDurationMs", ev.get("to", 0) - ev.get("from", 0))
-                                dur = dur / 1000 if dur > 100 else dur
-                                text_parts = ev.get("segs", [{"utf8": ev.get("content", "")}])
-                                text = "".join(s.get("utf8", "") for s in text_parts).strip()
-                                if text:
-                                    entries.append(SubtitleEntry(start=start, duration=dur, text=text))
-                            logger.info("[subtitle] Bilibili subtitles: %d entries", len(entries))
-                            return entries
-        logger.info("[subtitle] No suitable Bilibili subtitle format found for %s", url)
-        return []
+        return await _fetch_bilibili_subtitles_via_api(bvid, headers)
     except Exception:
-        logger.exception("[subtitle] Bilibili subtitle fetch failed for %s", url)
+        logger.exception("[subtitle] Bilibili API subtitle fetch failed for %s", url)
         return []
 
 
