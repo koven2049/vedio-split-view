@@ -194,3 +194,7 @@ vedio-split-view/
 ├── logs/                  # 应用日志（gitignore）
 └── test_transcribe.py     # ASR 端到端测试脚本
 ```
+
+## Changelog
+
+- `2026-05-27` — Bilibili 元数据/字幕获取改为直接调用 `api.bilibili.com` 官方 API，绕过 `www.bilibili.com` 网页端的 412 风控拦截。
