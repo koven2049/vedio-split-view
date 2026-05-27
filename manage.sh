@@ -437,10 +437,16 @@ run_deploy() {
     log_info "Config file: $DEPLOY_CONFIG_FILE"
 
     if [[ "$dry_run" != true ]]; then
-        ssh "$ssh_target" "mkdir -p '$remote_path'"
+        ssh "$ssh_target" "mkdir -p '$remote_path'" || {
+            log_error "SSH 连接失败：无法创建远程目录 ${remote_path}"
+            exit 1
+        }
     fi
 
-    rsync "${rsync_args[@]}" ${rsync_opts} ./ "${ssh_target}:${remote_path}/"
+    rsync "${rsync_args[@]}" ${rsync_opts} ./ "${ssh_target}:${remote_path}/" || {
+        log_error "rsync 失败：请检查网络连接、SSH 配置或远程路径权限"
+        exit 1
+    }
 
     if [[ "$dry_run" == true ]]; then
         echo
@@ -499,16 +505,25 @@ run_deploy_data() {
     echo
 
     if [[ "$dry_run" != true ]]; then
-        ssh "$remote" "mkdir -p '$remote_dir/data/exports' '$remote_dir/data/thumbnails'"
+        ssh "$ssh_target" "mkdir -p '$remote_path/data/exports' '$remote_path/data/thumbnails'" || {
+            log_error "SSH 连接失败：无法创建远程数据目录"
+            exit 1
+        }
     fi
 
     log_info "exports (JSON) …"
-    rsync "${rsync_args[@]}" "$exports_dir/" "${ssh_target}:${remote_path}/data/exports/"
+    rsync "${rsync_args[@]}" "$exports_dir/" "${ssh_target}:${remote_path}/data/exports/" || {
+        log_error "rsync 失败（exports）：请检查网络连接或远程路径权限"
+        exit 1
+    }
 
     if [[ -d "$thumbs_dir" ]] && [[ -n "$(ls -A "$thumbs_dir" 2>/dev/null)" ]]; then
         echo
         log_info "thumbnails (JPG) …"
-        rsync "${rsync_args[@]}" "$thumbs_dir/" "${ssh_target}:${remote_path}/data/thumbnails/"
+        rsync "${rsync_args[@]}" "$thumbs_dir/" "${ssh_target}:${remote_path}/data/thumbnails/" || {
+            log_error "rsync 失败（thumbnails）：请检查网络连接或远程路径权限"
+            exit 1
+        }
     fi
 
     echo
