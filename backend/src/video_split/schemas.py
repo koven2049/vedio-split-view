@@ -155,6 +155,15 @@ class VideoOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TranscriptOut(BaseModel):
+    video_id: int
+    title: str
+    transcript: str = Field(
+        description="Full transcript, fragments pre-joined one per line as `[MM:SS] text`.",
+    )
+    char_count: int = Field(description="Transcript length in Unicode code points.")
+
+
 class VideoListOut(BaseModel):
     id: int
     url: str

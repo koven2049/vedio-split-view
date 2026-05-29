@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from video_split.database import get_db
 from video_split.dependencies import get_current_user, require_user, require_user_or_admin
 from video_split.models import Tag, User, Video, video_tags
-from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut, TranscriptSegment
+from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut, TranscriptOut, TranscriptSegment
 from video_split.service.data_sync import EXPORTS_DIR, _export_filename
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,21 @@ def _video_to_out(v: Video) -> VideoOut:
         tags=[TagOut.model_validate(t) for t in v.tags],
         owner_name=v.owner.username if v.owner else "",
     )
+
+
+async def _get_accessible_video(db: AsyncSession, video_id: int, user: User, *, load=()) -> Video:
+    stmt = select(Video).where(Video.id == video_id)
+    if load:
+        stmt = stmt.options(*load)
+    result = await db.execute(stmt)
+    video = result.scalar_one_or_none()
+    if video is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
+    if user.role == "viewer" and not video.is_public:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    if video.user_id != user.id and not video.is_public and user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    return video
 
 
 @router.get("", response_model=list[VideoListOut])
@@ -135,18 +150,10 @@ async def get_video(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Video)
-        .options(selectinload(Video.segments), selectinload(Video.tags), selectinload(Video.owner))
-        .where(Video.id == video_id)
+    video = await _get_accessible_video(
+        db, video_id, user,
+        load=(selectinload(Video.segments), selectinload(Video.tags), selectinload(Video.owner)),
     )
-    video = result.scalar_one_or_none()
-    if video is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
-    if user.role == "viewer" and not video.is_public:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
-    if video.user_id != user.id and not video.is_public and user.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
     return _video_to_out(video)
 
 
@@ -264,14 +271,7 @@ async def get_segment_subtitles(
     db: AsyncSession = Depends(get_db),
 ):
     """Return subtitle entries (start, duration, text) within a time range."""
-    result = await db.execute(select(Video).where(Video.id == video_id))
-    video = result.scalar_one_or_none()
-    if video is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
-    if user.role == "viewer" and not video.is_public:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
-    if video.user_id != user.id and not video.is_public and user.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    video = await _get_accessible_video(db, video_id, user)
 
     if not video.subtitle_json:
         return []
@@ -281,3 +281,24 @@ async def get_segment_subtitles(
         e for e in entries
         if e["start"] >= start - 0.5 and e["start"] < end
     ]
+
+
+@router.get("/{video_id}/transcript", response_model=TranscriptOut)
+async def get_transcript(
+    video_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the full transcript as one ready-to-use string.
+
+    The text is pre-joined (one line per subtitle, prefixed with `[MM:SS]`),
+    so callers get the whole transcript without reassembling fragments. Use
+    GET /{video_id}/subtitles instead when you need per-fragment timestamps.
+    """
+    video = await _get_accessible_video(db, video_id, user)
+
+    transcript = video.raw_transcript or ""
+    return TranscriptOut(
+        video_id=video.id, title=video.title,
+        transcript=transcript, char_count=len(transcript),
+    )
