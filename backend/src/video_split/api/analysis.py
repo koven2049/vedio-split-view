@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from video_split.database import get_db
 from video_split.dependencies import require_user
 from video_split.models import BilibiliCredential, Task, User
-from video_split.schemas import AnalyzeRequest, ProgressEvent
+from video_split.schemas import AnalyzeRequest, AnalyzeResponse, ProgressEvent
 from video_split.service.downloader import detect_platform, normalize_url
 from video_split.service.task_manager import (
     DuplicateVideoError,
@@ -82,12 +82,25 @@ def _start_background_analysis(
     runner.start(task_id, user_id, platform, url, gen_factory)
 
 
-@router.post("/analyze")
+@router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_video(
     body: AnalyzeRequest,
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Start analyzing a video. Asynchronous — returns a task_id, not the result.
+
+    Two-step flow:
+
+    1. POST here with a video URL → returns `{task_id, platform}` immediately;
+       analysis (download + transcribe + LLM segmentation) runs in the background.
+    2. Stream progress from `GET /api/videos/tasks/{task_id}/stream` (SSE), then
+       fetch the structured result (summary, segments, subtitles with timestamps)
+       from `GET /api/videos/{video_id}` once the task completes.
+
+    Supported URLs: YouTube, Bilibili, 小宇宙 (xiaoyuzhou). Requires a user-role
+    account (admin/viewer get 403).
+    """
     body.url = normalize_url(body.url)
     platform, video_id = detect_platform(body.url)
     if platform == "unknown":

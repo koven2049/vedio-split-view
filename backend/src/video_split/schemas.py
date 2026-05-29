@@ -84,7 +84,17 @@ class AdminCleanupResultOut(AdminCleanupSummaryOut):
 
 
 class AnalyzeRequest(BaseModel):
-    url: str = Field(min_length=5, max_length=1024)
+    url: str = Field(
+        min_length=5,
+        max_length=1024,
+        description="Video/episode URL. Supported platforms: YouTube, Bilibili, 小宇宙 (xiaoyuzhou).",
+    )
+
+
+class AnalyzeResponse(BaseModel):
+    task_id: int
+    platform: str
+    resumed: bool = False
 
 
 class ConfirmRequest(BaseModel):

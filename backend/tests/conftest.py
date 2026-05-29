@@ -74,6 +74,7 @@ video:
 @pytest_asyncio.fixture
 async def db_engine(test_config_path, tmp_path):
     set_config_path(test_config_path)
+    from video_split import models  # noqa: F401  register tables on Base.metadata
     db_file = tmp_path / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}", echo=False)
     async with engine.begin() as conn:

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from video_split.database import get_db
 from video_split.dependencies import get_current_user, require_user, require_user_or_admin
 from video_split.models import Tag, User, Video, video_tags
-from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut
+from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut, TranscriptSegment
 from video_split.service.data_sync import EXPORTS_DIR, _export_filename
 
 logger = logging.getLogger(__name__)
@@ -255,7 +255,7 @@ async def unshare_video(
     return {"message": "Video removed from public"}
 
 
-@router.get("/{video_id}/subtitles")
+@router.get("/{video_id}/subtitles", response_model=list[TranscriptSegment])
 async def get_segment_subtitles(
     video_id: int,
     start: float = Query(..., description="Segment start seconds"),
@@ -263,7 +263,7 @@ async def get_segment_subtitles(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return subtitle entries within a time range for a video."""
+    """Return subtitle entries (start, duration, text) within a time range."""
     result = await db.execute(select(Video).where(Video.id == video_id))
     video = result.scalar_one_or_none()
     if video is None:
