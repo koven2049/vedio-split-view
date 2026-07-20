@@ -93,6 +93,10 @@ def get_user_limits(user) -> dict[str, int]:
     return {
         "max_duration_seconds": prefs.get("max_duration_seconds") or settings.video.max_duration_seconds,
         "confirm_threshold_seconds": prefs.get("confirm_threshold_seconds") or settings.video.confirm_threshold_seconds,
+        "podcast_confirm_threshold_seconds": (
+            prefs.get("podcast_confirm_threshold_seconds")
+            or settings.video.podcast_confirm_threshold_seconds
+        ),
         "max_concurrent": prefs.get("max_concurrent_analyses") or settings.storage.max_pending_tasks_per_user,
     }
 
@@ -223,13 +227,29 @@ async def run_analysis(
             )
 
         threshold = limits.get("confirm_threshold_seconds") or settings.video.confirm_threshold_seconds
+        if meta.platform == "xiaoyuzhou":
+            threshold = (
+                limits.get("podcast_confirm_threshold_seconds")
+                or settings.video.podcast_confirm_threshold_seconds
+            )
         if confirm_event and duration > threshold:
             duration_str_confirm = f"{duration // 60}m{duration % 60:02d}s"
+            if meta.platform == "xiaoyuzhou":
+                confirm_message = (
+                    f"播客时长 {duration_str_confirm}（超过 {threshold // 60} 分钟阈值），"
+                    f"转写耗时较长，确认开始？"
+                )
+            else:
+                confirm_message = (
+                    f"Video duration {duration_str_confirm} exceeds {threshold // 60} min threshold. "
+                    f"Please confirm to continue."
+                )
             yield ProgressEvent(
                 stage="confirm_required", progress=10,
-                message=f"Video duration {duration_str_confirm} exceeds {threshold // 60} min threshold. Please confirm to continue.",
+                message=confirm_message,
                 detail={"task_id": task.id, "title": meta.title, "duration_seconds": duration,
-                        "thumbnail_url": meta.thumbnail_url},
+                        "thumbnail_url": meta.thumbnail_url, "platform": meta.platform,
+                        "threshold_seconds": threshold},
             )
             logger.info("[analysis] Task #%d — awaiting user confirmation (duration=%ds, threshold=%ds)",
                         task.id, duration, threshold)
@@ -345,26 +365,44 @@ async def run_analysis(
                     if meta.platform == "xiaoyuzhou":
                         if not audio_url:
                             raise RuntimeError("Missing 小宇宙 episode audio URL")
-                        audio_path = await download_xiaoyuzhou_audio(
-                            audio_url, task_dir, progress_callback=None,
-                        )
-                    else:
-                        audio_path = await asyncio.get_event_loop().run_in_executor(
-                            None, lambda: asyncio.run(
-                                _download_audio_wrapper(task.url, task_dir, **cred_kw)
+
+                        def _xy_factory(*, progress_callback=None):
+                            return download_xiaoyuzhou_audio(
+                                audio_url, task_dir, progress_callback=progress_callback,
                             )
-                        )
+
+                        async for ev in _relay_download_progress(
+                            "audio_download", 15, 40, _xy_factory,
+                            label=f"下载音频 · {meta.platform}",
+                            cancel_event=cancel_event,
+                        ):
+                            yield ev
+                    else:
+                        def _ydbili_factory(*, progress_callback=None):
+                            # download_audio's internal yt_dlp call is synchronous
+                            # and blocking; run it in a thread to keep the event
+                            # loop free to consume progress callbacks.
+                            async def _runner() -> Path:
+                                return await asyncio.to_thread(
+                                    _sync_download_audio,
+                                    task.url, task_dir, progress_callback,
+                                    cred_kw,
+                                )
+                            return _runner()
+
+                        async for ev in _relay_download_progress(
+                            "audio_download", 15, 40, _ydbili_factory,
+                            label=f"下载音频 · {meta.platform}",
+                            cancel_event=cancel_event,
+                        ):
+                            yield ev
                 except Exception as e:
                     logger.error("[analysis] Task #%d — audio download failed: %s", task.id, e)
                     await update_task_status(db, task, "failed_download", str(e))
                     raise
 
                 file_size_mb = audio_path.stat().st_size / (1024 * 1024)
-                yield ProgressEvent(
-                    stage="audio_download", progress=55,
-                    message=f"Audio downloaded ({file_size_mb:.1f} MB).",
-                    detail={"cached": False, "size_mb": round(file_size_mb, 1)},
-                )
+                _check_cancelled()
 
             _check_cancelled()
 
@@ -499,15 +537,135 @@ async def run_analysis(
 async def _download_audio_wrapper(
     url: str,
     output_dir: Path,
+    progress_callback=None,
     *,
     sessdata: str = "",
     bili_jct: str = "",
     buvid3: str = "",
 ) -> Path:
-    """Wrapper to call async download_audio from sync executor context."""
+    """Wrapper to call async download_audio from sync executor context.
+
+    Forwards ``progress_callback`` to ``download_audio`` so the relay helper
+    can observe download progress (yt_dlp progress_hook runs in a worker
+    thread; the relay bridges it back via ``call_soon_threadsafe``).
+    """
     return await download_audio(
-        url, output_dir,
+        url, output_dir, progress_callback,
         sessdata=sessdata, bili_jct=bili_jct, buvid3=buvid3,
+    )
+
+
+def _sync_download_audio(
+    url: str,
+    output_dir: Path,
+    progress_callback,
+    cred_kw: dict[str, str],
+) -> Path:
+    """Run the (async-bodied but synchronous) ``download_audio`` in a worker
+    thread via ``asyncio.run``.
+
+    ``download_audio`` is declared ``async`` but its body is fully synchronous
+    (yt_dlp blocking). Running it inside ``asyncio.run`` in a worker thread
+    keeps the main event loop responsive while yt_dlp's ``progress_hook``
+    invokes ``progress_callback`` from that worker thread; the relay bridges
+    the callback back to the main loop via ``call_soon_threadsafe``.
+    """
+    return asyncio.run(download_audio(
+        url, output_dir, progress_callback,
+        sessdata=cred_kw.get("sessdata", ""),
+        bili_jct=cred_kw.get("bili_jct", ""),
+        buvid3=cred_kw.get("buvid3", ""),
+    ))
+
+
+async def _relay_download_progress(
+    stage: str,
+    base_pct: int,
+    span_pct: int,
+    factory,
+    *,
+    label: str = "下载音频",
+    cancel_event: asyncio.Event | None = None,
+) -> AsyncGenerator[ProgressEvent, None]:
+    """Bridge a download function's ``progress_callback`` to ProgressEvent yield.
+
+    ``factory`` receives a ``progress_callback`` and returns an awaitable that
+    performs the actual download. The callback receives ``ratio: float`` in
+    ``[0, 1]``. This helper:
+
+    - Spawns the download as an ``asyncio.Task``.
+    - Pumps callback updates through an ``asyncio.Queue`` (thread-safe via
+      ``call_soon_threadsafe`` so yt_dlp worker threads are safe; same-loop
+      callers like httpx are also fine).
+    - Throttles yields: emit only when progress advanced by ≥1% or ≥0.5s
+      elapsed since the last yield.
+    - Cancels and exits when ``cancel_event`` is set.
+    - Propagates any exception from the download task.
+    - Always emits a closing event at ``base_pct + span_pct`` so downstream
+      sees a clean terminal percentage.
+    """
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[float] = asyncio.Queue()
+
+    def _on_progress(ratio: float) -> None:
+        # yt_dlp progress_hook runs in a worker thread; httpx runs in-loop.
+        # call_soon_threadsafe is safe in both cases.
+        loop.call_soon_threadsafe(queue.put_nowait, ratio)
+
+    download_task = asyncio.create_task(factory(progress_callback=_on_progress))
+
+    last_yield_pct: float | None = None
+    last_yield_monotonic: float = loop.time()
+    # opening event so the front-end immediately sees movement to base_pct
+    yield ProgressEvent(
+        stage=stage, progress=base_pct,
+        message=f"{label} 0%",
+        detail={"ratio": 0.0},
+    )
+    last_yield_pct = base_pct
+
+    try:
+        while not download_task.done():
+            if cancel_event is not None and cancel_event.is_set():
+                download_task.cancel()
+                return
+            try:
+                ratio = await asyncio.wait_for(queue.get(), timeout=0.3)
+            except asyncio.TimeoutError:
+                # loop back: re-check cancel + task.done()
+                continue
+
+            progress = base_pct + ratio * span_pct
+            now = loop.time()
+            pct_delta = progress - (last_yield_pct if last_yield_pct is not None else 0)
+            time_delta = now - last_yield_monotonic
+            # throttle: only yield on meaningful change or after half a second
+            if pct_delta >= 1.0 or time_delta >= 0.5 or ratio >= 1.0:
+                yield ProgressEvent(
+                    stage=stage,
+                    progress=progress,
+                    message=f"{label} {int(ratio * 100)}%",
+                    detail={"ratio": ratio},
+                )
+                last_yield_pct = progress
+                last_yield_monotonic = now
+
+        # propagate any exception raised inside the download task
+        await download_task
+    except asyncio.CancelledError:
+        if not download_task.done():
+            download_task.cancel()
+        raise
+    finally:
+        if not download_task.done():
+            download_task.cancel()
+
+    # closing event to lock the terminal percentage at base+span
+    yield ProgressEvent(
+        stage=stage,
+        progress=base_pct + span_pct,
+        message=f"{label} 100%",
+        detail={"ratio": 1.0},
     )
 
 
@@ -560,13 +718,40 @@ async def resume_analysis(
             if platform_hint == "xiaoyuzhou":
                 if not xy_audio_url:
                     raise RuntimeError("Missing 小宇宙 episode audio URL")
-                audio_path_dl = await download_xiaoyuzhou_audio(xy_audio_url, task_dir_dl)
-            else:
-                audio_path_dl = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: asyncio.run(
-                        _download_audio_wrapper(task.url, task_dir_dl, **cred_kw)
+
+                def _xy_factory(*, progress_callback=None):
+                    return download_xiaoyuzhou_audio(
+                        xy_audio_url, task_dir_dl, progress_callback=progress_callback,
                     )
-                )
+
+                async for ev in _relay_download_progress(
+                    "audio_download", 15, 40, _xy_factory,
+                    label=f"下载音频 · {meta.platform}",
+                    cancel_event=cancel_event,
+                ):
+                    yield ev
+                # pick up the path written by the download
+                audio_path_dl = task_dir_dl / "audio.m4a"
+            else:
+                def _ydbili_factory(*, progress_callback=None):
+                    async def _runner() -> Path:
+                        return await asyncio.to_thread(
+                            _sync_download_audio,
+                            task.url, task_dir_dl, progress_callback,
+                            cred_kw,
+                        )
+                    return _runner()
+
+                async for ev in _relay_download_progress(
+                    "audio_download", 15, 40, _ydbili_factory,
+                    label=f"下载音频 · {meta.platform}",
+                    cancel_event=cancel_event,
+                ):
+                    yield ev
+                audio_files = list(task_dir_dl.glob("audio.*"))
+                if not audio_files:
+                    raise RuntimeError("Audio download retry failed: no output file")
+                audio_path_dl = audio_files[0]
         except Exception as e:
             logger.error("[analysis] Task #%d — download retry failed: %s", task.id, e)
             await update_task_status(db, task, "failed_download", str(e))

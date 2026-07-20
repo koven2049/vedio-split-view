@@ -90,6 +90,9 @@ class StorageConfig(BaseModel):
 class VideoConfig(BaseModel):
     max_duration_seconds: int = 12600
     confirm_threshold_seconds: int = 3600
+    # Podcast (xiaoyuzhou) tends to be longer than short-form video; allow a
+    # wider threshold before prompting the user to confirm a long upload.
+    podcast_confirm_threshold_seconds: int = 7200
     min_segment_duration_seconds: int = 60
 
 
