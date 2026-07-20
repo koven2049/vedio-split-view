@@ -1,4 +1,4 @@
-"""Integration tests using real APIs (Fun-ASR + GLM-4.7) with config/app.yaml.
+"""Integration tests using real APIs (Fun-ASR + GLM-5.2) with config/app.yaml.
 
 These tests call external services and consume API credits.
 Run from the project root:
@@ -145,7 +145,7 @@ class TestTranscription:
 
 
 # ---------------------------------------------------------------------------
-# LLM analysis tests (GLM-4.7)
+# LLM analysis tests (GLM-5.2)
 # ---------------------------------------------------------------------------
 
 class TestLLMAnalysis:

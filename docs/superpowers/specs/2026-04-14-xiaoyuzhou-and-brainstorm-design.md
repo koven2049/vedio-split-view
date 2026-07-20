@@ -130,7 +130,7 @@ JSON 结构：
     }
   ],
   "usage": {
-    "model": "glm-4-plus",
+    "model": "glm-5.2",
     "prompt_tokens": 3200,
     "completion_tokens": 1800,
     "total_tokens": 5000

@@ -11,7 +11,7 @@ admin:
 llm:
   # REQUIRED for video analysis.
   base_url: ""   # e.g. "https://open.bigmodel.cn/api/paas/v4"
-  model: ""      # e.g. "glm-4-plus", "gpt-4o"
+  model: ""      # e.g. "glm-5.2", "gpt-4o"
   api_key: ""
 
 transcription:
