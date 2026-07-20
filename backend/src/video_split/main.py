@@ -78,7 +78,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         start = time.monotonic()
         response = await call_next(request)
         elapsed_ms = (time.monotonic() - start) * 1000
-        if not request.url.path.startswith("/api/health"):
+        if not request.url.path.startswith("/api/health") and request.url.path != "/health":
             logger.info(
                 "[api] %s %s → %d (%.0fms)",
                 request.method, request.url.path, response.status_code, elapsed_ms,
@@ -86,6 +86,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         return response
 
     @app.get("/api/health")
+    @app.get("/health")
     async def health():
         return {"status": "ok"}
 

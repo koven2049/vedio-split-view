@@ -147,14 +147,8 @@ _ensure_deploy_config() {
     mkdir -p "$CONFIG_DIR"
     if [[ ! -f "$DEPLOY_CONFIG_FILE" ]]; then
         cp "$DEPLOY_CONFIG_EXAMPLE" "$DEPLOY_CONFIG_FILE"
-        log_info "Created $DEPLOY_CONFIG_FILE (edit DEPLOY_REMOTE before deploying)"
+        log_info "Created $DEPLOY_CONFIG_FILE (edit ssh_target / remote_path before deploying)"
     fi
-}
-
-_load_deploy_config() {
-    [[ -f "$DEPLOY_CONFIG_FILE" ]] || return 0
-    # shellcheck source=/dev/null
-    source "$DEPLOY_CONFIG_FILE"
 }
 
 _ensure_podman_network() {
@@ -319,7 +313,7 @@ run_status() {
     "$PODMAN_CMD" ps -a --filter "name=vsplit-"
     echo
 
-    if curl -sf --noproxy '*' "http://localhost:$APP_PORT/api/health" >/dev/null 2>&1; then
+    if curl -sf --noproxy '*' "http://localhost:$APP_PORT/health" >/dev/null 2>&1; then
         log_ok "URL: http://localhost:$APP_PORT"
         log_ok "Health: OK"
     else
