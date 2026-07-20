@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from video_split.service.downloader import detect_platform, generate_playback_url
+from video_split.config import get_settings
+from video_split.service.downloader import _proxy_for_platform, detect_platform, generate_playback_url
 
 
 class TestDetectPlatform:
@@ -54,3 +55,31 @@ class TestGeneratePlaybackUrl:
     def test_unknown_platform(self):
         url = generate_playback_url("vimeo", "123", 30)
         assert url == ""
+
+
+class TestProxyForPlatform:
+    """Domestic platforms (bilibili, xiaoyuzhou) always bypass the global proxy;
+    YouTube / unknown follow proxy_enabled."""
+
+    def test_bilibili_always_direct_even_when_proxy_enabled(self, monkeypatch):
+        s = get_settings()
+        monkeypatch.setattr(s.network, "proxy_enabled", True)
+        monkeypatch.setattr(s.network, "http_proxy", "http://127.0.0.1:7890")
+        assert _proxy_for_platform("bilibili") is None
+
+    def test_xiaoyuzhou_always_direct_even_when_proxy_enabled(self, monkeypatch):
+        s = get_settings()
+        monkeypatch.setattr(s.network, "proxy_enabled", True)
+        monkeypatch.setattr(s.network, "http_proxy", "http://127.0.0.1:7890")
+        assert _proxy_for_platform("xiaoyuzhou") is None
+
+    def test_youtube_uses_proxy_when_enabled(self, monkeypatch):
+        s = get_settings()
+        monkeypatch.setattr(s.network, "proxy_enabled", True)
+        monkeypatch.setattr(s.network, "http_proxy", "http://127.0.0.1:7890")
+        assert _proxy_for_platform("youtube") == "http://127.0.0.1:7890"
+
+    def test_youtube_direct_when_proxy_disabled(self, monkeypatch):
+        s = get_settings()
+        monkeypatch.setattr(s.network, "proxy_enabled", False)
+        assert _proxy_for_platform("youtube") is None

@@ -24,7 +24,7 @@ from video_split.service.downloader import (
     fetch_bilibili_subtitles,
     fetch_youtube_subtitles,
 )
-from video_split.service.xiaoyuzhou import download_xiaoyuzhou_audio, extract_xiaoyuzhou_metadata
+from video_split.service.xiaoyuzhou import XiaoyuzhouError, download_xiaoyuzhou_audio, extract_xiaoyuzhou_metadata
 from video_split.service.task_manager import (
     cleanup_task_files,
     get_task_temp_dir,
@@ -601,8 +601,9 @@ async def _relay_download_progress(
       elapsed since the last yield.
     - Cancels and exits when ``cancel_event`` is set.
     - Propagates any exception from the download task.
-    - Always emits a closing event at ``base_pct + span_pct`` so downstream
-      sees a clean terminal percentage.
+    - Emits a closing event at ``base_pct + span_pct`` on successful
+      completion (reusing the last seen byte counters so the front-end does
+      not flash back to 0). On cancel / exception, no closing event is emitted.
     """
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict] = asyncio.Queue()
@@ -616,6 +617,7 @@ async def _relay_download_progress(
 
     last_yield_pct: float | None = None
     last_yield_monotonic: float = loop.time()
+    last_payload: dict = {"ratio": 0.0, "downloaded_bytes": 0, "total_bytes": 0}
 
     def _format_message(payload: dict) -> str:
         ratio = float(payload.get("ratio", 0.0))
@@ -656,6 +658,7 @@ async def _relay_download_progress(
             time_delta = now - last_yield_monotonic
             # throttle: only yield on meaningful change or after half a second
             if pct_delta >= 1.0 or time_delta >= 0.5 or ratio >= 1.0:
+                last_payload = payload
                 yield ProgressEvent(
                     stage=stage,
                     progress=progress,
@@ -674,13 +677,21 @@ async def _relay_download_progress(
     finally:
         if not download_task.done():
             download_task.cancel()
+            try:
+                await download_task
+            except (asyncio.CancelledError, Exception):
+                # swallow: the task was cancelled by us; its error is not the
+                # caller's concern. The original outcome (cancel/exception) is
+                # already being propagated via return/raise above.
+                pass
 
-    # closing event to lock the terminal percentage at base+span
+    # closing event to lock the terminal percentage at base+span — reuse last
+    # seen byte counters so the front-end does not flash 0.0 MB at the end.
     yield ProgressEvent(
         stage=stage,
         progress=base_pct + span_pct,
         message=f"{label} 100%",
-        detail={"ratio": 1.0, "downloaded_bytes": 0, "total_bytes": 0},
+        detail={**last_payload, "ratio": 1.0},
     )
 
 
@@ -767,6 +778,14 @@ async def resume_analysis(
                 if not audio_files:
                     raise RuntimeError("Audio download retry failed: no output file")
                 audio_path_dl = audio_files[0]
+        except XiaoyuzhouError as e:
+            logger.error("[analysis] Task #%d — xiaoyuzhou retry failed (%s): %s", task.id, e.code, e)
+            await update_task_status(db, task, "failed_download", str(e))
+            yield ProgressEvent(
+                stage="error", progress=0, message=str(e),
+                detail={"error_code": e.code},
+            )
+            return
         except Exception as e:
             logger.error("[analysis] Task #%d — download retry failed: %s", task.id, e)
             await update_task_status(db, task, "failed_download", str(e))

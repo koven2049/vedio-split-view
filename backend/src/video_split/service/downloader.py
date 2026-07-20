@@ -419,12 +419,12 @@ async def download_audio(
         if progress_callback and d.get("status") == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
             downloaded = d.get("downloaded_bytes", 0)
-            if total > 0:
-                progress_callback({
-                    "ratio": downloaded / total,
-                    "downloaded_bytes": int(downloaded),
-                    "total_bytes": int(total),
-                })
+            ratio = downloaded / total if total > 0 else 0.0
+            progress_callback({
+                "ratio": ratio,
+                "downloaded_bytes": int(downloaded),
+                "total_bytes": int(total),
+            })
 
     ydl_opts: dict[str, Any] = {
         "format": "bestaudio/best",

@@ -148,6 +148,24 @@ async def test_paid_private(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_paid_private_not_triggered_when_audio_present(monkeypatch):
+    """Shownotes mentioning 付费/会员 must NOT misclassify a public episode that
+    has a usable audio URL — should fall through to success (or cdn_expired),
+    not paid_private. Guards against false positives from topical body text."""
+    html = _build_html(
+        title="公开单集：讨论付费内容产业",
+        audio="https://cdn.xiaoyuzhoufm.com/audio.m4a",
+        json_ld=_podcast_episode_ld(duration="PT45M", content_url="https://cdn.xiaoyuzhoufm.com/audio.m4a"),
+        body_text="<p>本期聊聊付费墙、VIP 会员经济</p>",
+    )
+    _patch_async_client(monkeypatch, html=html)
+
+    meta, audio_url = await xy.extract_xiaoyuzhou_metadata(VALID_EPISODE_URL)
+    assert audio_url  # succeeded — not classified as paid_private
+    assert meta.title == "公开单集：讨论付费内容产业"
+
+
+@pytest.mark.asyncio
 async def test_page_changed(monkeypatch):
     """Neither og:title nor PodcastEpisode JSON-LD present → page_changed."""
     html = _build_html(title="", body_text="<div>404</div>")

@@ -41,11 +41,17 @@ class XiaoyuzhouError(RuntimeError):
         super().__init__(message)
 
 
-def _looks_paid_private(html: str, *, has_audio: bool, duration_seconds: int) -> bool:
-    """Heuristic: page text contains paywall markers AND audio is missing / duration is 0."""
-    if not any(marker in html for marker in _PAID_PRIVATE_MARKERS):
-        return False
-    return (not has_audio) or duration_seconds <= 0
+def _looks_paid_private(html: str, *, has_audio: bool) -> bool:
+    """Heuristic: page text contains paywall markers AND audio is missing.
+
+    Only trigger on missing audio — a page that has a usable audio URL but
+    duration=0 (JSON-LD timeRequired format drift) should still attempt a
+    normal download and surface cdn_expired on failure, rather than being
+    misclassified as paid/private from shownotes text that mentions 付费/会员.
+    """
+    if not has_audio:
+        return any(marker in html for marker in _PAID_PRIVATE_MARKERS)
+    return False
 
 
 def _og_meta(html: str, prop: str) -> str:
@@ -214,7 +220,7 @@ async def extract_xiaoyuzhou_metadata(url: str) -> tuple[VideoMeta, str]:
     #      will re-fetch the page and likely get a fresh CDN URL.
     #   3. page_changed: og + JSON-LD both miss — structural change, retry
     #      unlikely to help until code is updated.
-    if _looks_paid_private(page_html, has_audio=has_audio, duration_seconds=duration_seconds):
+    if _looks_paid_private(page_html, has_audio=has_audio):
         logger.warning("[xiaoyuzhou] paywall/private markers found for %s", url)
         raise XiaoyuzhouError(
             "paid_private", "Episode is paywalled or private; only public episodes are supported",
@@ -319,14 +325,6 @@ async def download_xiaoyuzhou_audio(
             except OSError:
                 pass
         raise
-
-    if progress_callback:
-        final_size = out_path.stat().st_size if out_path.exists() else 0
-        progress_callback({
-            "ratio": 1.0,
-            "downloaded_bytes": final_size,
-            "total_bytes": final_size,
-        })
 
     if not out_path.exists() or out_path.stat().st_size < MIN_AUDIO_BYTES:
         actual = out_path.stat().st_size if out_path.exists() else 0

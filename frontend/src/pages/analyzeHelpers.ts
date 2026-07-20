@@ -42,7 +42,7 @@ export function buildDownloadMbText(
   const downloaded = detail.downloaded_bytes
   const total = detail.total_bytes
   if (downloaded == null) return null
-  if (total == null) {
+  if (total == null || total === 0) {
     return t('analyze.downloadProgressDownloaded', { downloaded: formatMb(downloaded).toFixed(1) })
   }
   return t('analyze.downloadProgressBytes', {
