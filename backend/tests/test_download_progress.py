@@ -17,13 +17,22 @@ from video_split.service.video_service import _relay_download_progress
 
 
 def _factory_streaming(ratios: list[float]):
-    """Build a factory that invokes progress_callback with the given ratios."""
+    """Build a factory that invokes progress_callback with the given ratios.
+
+    Callback payload mirrors the real download contract: a dict with
+    ``ratio`` / ``downloaded_bytes`` / ``total_bytes``.
+    """
     ratios_iter = list(ratios)
+    total = 10 * 1024 * 1024  # pretend a 10 MB file
 
     async def download_coro(*, progress_callback=None):
         for r in ratios_iter:
             if progress_callback:
-                progress_callback(r)
+                progress_callback({
+                    "ratio": r,
+                    "downloaded_bytes": int(r * total),
+                    "total_bytes": total,
+                })
             await asyncio.sleep(0)
         return "ok"
 
@@ -84,7 +93,7 @@ async def test_relay_propagates_exception():
 
     async def download_coro(*, progress_callback=None):
         if progress_callback:
-            progress_callback(0.3)
+            progress_callback({"ratio": 0.3, "downloaded_bytes": 30, "total_bytes": 100})
         await asyncio.sleep(0)
         raise RuntimeError("download exploded")
 

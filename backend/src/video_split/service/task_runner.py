@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, AsyncGenerator
 
 from video_split.schemas import ProgressEvent
+from video_split.service.xiaoyuzhou import XiaoyuzhouError
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,16 @@ class TaskRunner:
                 async for event in gen:
                     entry = {"event": event.stage, "data": event.model_dump_json()}
                     self._broadcast(rt, entry)
+            except XiaoyuzhouError as e:
+                # Typed xiaoyuzhou failure — surface ``error_code`` so the
+                # frontend can map a per-code friendly message + retry hint.
+                logger.error("[runner] Task #%d xiaoyuzhou failure (%s): %s",
+                             task_id, e.code, e)
+                err = ProgressEvent(
+                    stage="error", progress=0, message=str(e),
+                    detail={"error_code": e.code},
+                )
+                self._broadcast(rt, {"event": "error", "data": err.model_dump_json()})
             except Exception as e:
                 logger.error("[runner] Task #%d unhandled: %s", task_id, e)
                 err = ProgressEvent(stage="error", progress=0, message=str(e))

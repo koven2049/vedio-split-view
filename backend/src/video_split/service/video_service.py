@@ -605,22 +605,36 @@ async def _relay_download_progress(
       sees a clean terminal percentage.
     """
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[float] = asyncio.Queue()
+    queue: asyncio.Queue[dict] = asyncio.Queue()
 
-    def _on_progress(ratio: float) -> None:
+    def _on_progress(payload: dict) -> None:
         # yt_dlp progress_hook runs in a worker thread; httpx runs in-loop.
         # call_soon_threadsafe is safe in both cases.
-        loop.call_soon_threadsafe(queue.put_nowait, ratio)
+        loop.call_soon_threadsafe(queue.put_nowait, payload)
 
     download_task = asyncio.create_task(factory(progress_callback=_on_progress))
 
     last_yield_pct: float | None = None
     last_yield_monotonic: float = loop.time()
+
+    def _format_message(payload: dict) -> str:
+        ratio = float(payload.get("ratio", 0.0))
+        pct = int(ratio * 100)
+        downloaded = int(payload.get("downloaded_bytes", 0))
+        total = int(payload.get("total_bytes", 0))
+        dl_mb = downloaded / (1024 * 1024)
+        if total > 0:
+            total_mb = total / (1024 * 1024)
+            return f"{label} {pct}% · {dl_mb:.1f} / {total_mb:.1f} MB"
+        if downloaded > 0:
+            return f"{label} {pct}% · {dl_mb:.1f} MB"
+        return f"{label} {pct}%"
+
     # opening event so the front-end immediately sees movement to base_pct
     yield ProgressEvent(
         stage=stage, progress=base_pct,
         message=f"{label} 0%",
-        detail={"ratio": 0.0},
+        detail={"ratio": 0.0, "downloaded_bytes": 0, "total_bytes": 0},
     )
     last_yield_pct = base_pct
 
@@ -630,11 +644,12 @@ async def _relay_download_progress(
                 download_task.cancel()
                 return
             try:
-                ratio = await asyncio.wait_for(queue.get(), timeout=0.3)
+                payload = await asyncio.wait_for(queue.get(), timeout=0.3)
             except asyncio.TimeoutError:
                 # loop back: re-check cancel + task.done()
                 continue
 
+            ratio = float(payload.get("ratio", 0.0))
             progress = base_pct + ratio * span_pct
             now = loop.time()
             pct_delta = progress - (last_yield_pct if last_yield_pct is not None else 0)
@@ -644,8 +659,8 @@ async def _relay_download_progress(
                 yield ProgressEvent(
                     stage=stage,
                     progress=progress,
-                    message=f"{label} {int(ratio * 100)}%",
-                    detail={"ratio": ratio},
+                    message=_format_message(payload),
+                    detail=payload,
                 )
                 last_yield_pct = progress
                 last_yield_monotonic = now
@@ -665,7 +680,7 @@ async def _relay_download_progress(
         stage=stage,
         progress=base_pct + span_pct,
         message=f"{label} 100%",
-        detail={"ratio": 1.0},
+        detail={"ratio": 1.0, "downloaded_bytes": 0, "total_bytes": 0},
     )
 
 

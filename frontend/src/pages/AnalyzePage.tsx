@@ -4,11 +4,18 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, Play, Save, Share2, Loader2, AlertCircle, Cookie, X, RefreshCw, Headphones } from 'lucide-react'
 import { api } from '../lib/api'
 import { formatDuration, formatTimeRange, generatePlaybackUrl, platformLabel, cn } from '../lib/utils'
-import { useAnalysisStore, type AnalysisPlatform, type SlotState } from '../stores/analysisStore'
+import { useAnalysisStore, type AnalysisPlatform, type SlotState, type DownloadProgressDetail } from '../stores/analysisStore'
 import LangToggle from '../components/LangToggle'
 import UsageDisplay from '../components/UsageDisplay'
 import { useLangPreference } from '../hooks/useLangPreference'
 import { useT, type TranslationKey } from '../i18n'
+import {
+  XIAOYUZHOU_ERROR_KEYS,
+  buildDownloadMbText,
+  isXiaoyuzhouErrorCode,
+  stagesForPlatform,
+  validateXiaoyuzhouUrl,
+} from './analyzeHelpers'
 
 interface CookiesStatus {
   configured: boolean
@@ -31,8 +38,6 @@ interface PreferencesData {
   defaults: { max_duration_seconds: number; confirm_threshold_seconds: number; max_concurrent_analyses: number }
 }
 
-const STAGES = ['metadata', 'subtitle_check', 'audio_download', 'transcription', 'analysis', 'complete']
-
 const STAGE_LABELS_KEYS: Record<string, TranslationKey> = {
   metadata: 'analyze.videoInfo',
   confirm_required: 'analyze.confirmation',
@@ -50,7 +55,7 @@ function detectPlatform(url: string): AnalysisPlatform | null {
   return null
 }
 
-function AnalysisSlotCard({
+export function AnalysisSlotCard({
   slot,
   lang,
   setLang,
@@ -68,12 +73,34 @@ function AnalysisSlotCard({
   const t = useT()
   const store = useAnalysisStore()
   const queryClient = useQueryClient()
-  const { analyzing, progress, stepLog, result, error, completedVideoId, pendingConfirm, slotId } = slot
+  const { analyzing, progress, stepLog, result, error, errorCode, completedVideoId, pendingConfirm, slotId } = slot
 
   const stageLabel = (stage: string) => {
     const key = STAGE_LABELS_KEYS[stage]
     return key ? t(key) : stage
   }
+
+  // Stages to render as dots. Xiaoyuzhou never has subtitles, so we hide
+  // the subtitle_check dot to avoid showing a permanently "skipped" step
+  // (spec 3.8). Backend still emits the event; this is display-only.
+  const visibleStages = stagesForPlatform(slot.platform)
+  const visibleStageIndex = progress ? visibleStages.indexOf(progress.stage) : -1
+
+  // Localized "{downloaded} / {total} MB" caption under the progress bar.
+  // Null when the backend hasn't sent byte info — caller renders nothing.
+  const downloadMbText = progress?.stage === 'audio_download'
+    ? buildDownloadMbText(progress?.detail as DownloadProgressDetail | undefined, t)
+    : null
+
+  // For Xiaoyuzhou failures, surface the typed error code as a friendly,
+  // actionable message instead of the generic backend text (spec 3.4).
+  const errorDisplay = (() => {
+    if (!error) return ''
+    if (slot.platform === 'xiaoyuzhou' && errorCode && isXiaoyuzhouErrorCode(errorCode)) {
+      return t(XIAOYUZHOU_ERROR_KEYS[errorCode])
+    }
+    return error
+  })()
 
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
@@ -90,8 +117,6 @@ function AnalysisSlotCard({
       store.fetchResultDetails(slotId, completedVideoId)
     }
   }, [completedVideoId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const currentStageIndex = progress ? STAGES.indexOf(progress.stage) : -1
 
   const hasMetadata = !!(slot.title || slot.uploader || slot.durationSeconds)
 
@@ -171,9 +196,9 @@ function AnalysisSlotCard({
               <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress.progress}%`, background: 'var(--color-primary)' }} />
             </div>
             <div className="flex gap-1.5 items-center">
-              {STAGES.slice(0, -1).map((stage, i) => {
+              {visibleStages.slice(0, -1).map((stage, i) => {
                 const isCurrent = stage === progress.stage
-                const isDone = i < currentStageIndex
+                const isDone = i < visibleStageIndex
                 const isSkipped = stage === 'audio_download' && stepLog.some((s) => s.detail?.method === 'subtitle')
                 const isSkippedTranscript = stage === 'transcription' && stepLog.some((s) => s.detail?.method === 'subtitle')
                 return (
@@ -192,6 +217,11 @@ function AnalysisSlotCard({
                 )
               })}
             </div>
+            {downloadMbText && (
+              <div className="text-xs tabular-nums font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                {downloadMbText}
+              </div>
+            )}
           </div>
 
           {stepLog.some((s) => s.detail?.method) && (
@@ -234,7 +264,7 @@ function AnalysisSlotCard({
       {error && (
         <div className="p-4 rounded-xl flex items-start gap-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-danger)' }}>
           <AlertCircle size={18} style={{ color: 'var(--color-danger)' }} className="mt-0.5 shrink-0" />
-          <p className="text-sm flex-1">{error}</p>
+          <p className="text-sm flex-1">{errorDisplay}</p>
           {slot.taskId && onRetry && (
             <button
               onClick={onRetry}
@@ -403,9 +433,13 @@ export default function AnalyzePage() {
 
   const validatePlatformMatch = (inputUrl: string): boolean => {
     const trimmed = inputUrl.trim()
-    if (activeTab === 'xiaoyuzhou' && !trimmed.includes('xiaoyuzhoufm.com')) {
-      setValidationError(t('analyze.invalidXiaoyuzhou'))
-      return false
+    if (activeTab === 'xiaoyuzhou') {
+      // Delegates to the pure validator so it stays unit-testable.
+      const errKey = validateXiaoyuzhouUrl(trimmed)
+      if (errKey) {
+        setValidationError(t(errKey))
+        return false
+      }
     }
     const detected = detectPlatform(trimmed)
     if (!detected) {
@@ -475,6 +509,14 @@ export default function AnalyzePage() {
           )
         })}
       </div>
+
+      {/* Xiaoyuzhou tab scope hint */}
+      {activeTab === 'xiaoyuzhou' && (
+        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          <Headphones size={13} className="shrink-0 opacity-70" aria-hidden />
+          <span>{t('analyze.xiaoyuzhouTabHint')}</span>
+        </div>
+      )}
 
       {/* YouTube Cookies Status */}
       {activeTab === 'youtube' && cookiesStatus && (() => {

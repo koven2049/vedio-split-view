@@ -4,12 +4,27 @@ import { useAuthStore } from './authStore'
 
 export type AnalysisPlatform = 'youtube' | 'bilibili' | 'xiaoyuzhou'
 
+/**
+ * Strongly-typed view of ProgressData.detail for the audio download stage.
+ * Backend sends { ratio, downloaded_bytes, total_bytes } when relaying chunked
+ * download progress (see spec 3.1/3.2). Other stages keep detail as a generic
+ * record — only audio_download populates these byte fields today.
+ */
+export interface DownloadProgressDetail {
+  ratio?: number
+  downloaded_bytes?: number
+  total_bytes?: number
+}
+
 export interface ProgressData {
   stage: string
   progress: number
   message: string
   detail?: Record<string, unknown>
 }
+
+/** Error codes surfaced from backend XiaoyuzhouError (spec 3.4). */
+export type XiaoyuzhouErrorCode = 'cdn_expired' | 'paid_private' | 'page_changed' | 'not_episode'
 
 export interface StepEntry {
   stage: string
@@ -74,6 +89,8 @@ export interface SlotState {
   stepLog: StepEntry[]
   result: AnalysisResult | null
   error: string
+  /** Backend error_code (e.g. cdn_expired) when the failure was typed. */
+  errorCode?: string
   completedVideoId: number | null
   pendingConfirm: ConfirmInfo | null
   reconnected: boolean
@@ -88,6 +105,7 @@ const EMPTY_SLOT: Omit<SlotState, 'slotId' | 'platform'> = {
   stepLog: [],
   result: null,
   error: '',
+  errorCode: undefined,
   completedVideoId: null,
   pendingConfirm: null,
   reconnected: false,
@@ -270,8 +288,10 @@ function processEvent(
   const d = data as ProgressData
 
   if (_event === 'error' || d.stage === 'error') {
+    const errorCode = typeof d.detail?.error_code === 'string' ? (d.detail.error_code as string) : undefined
     updateSlot(set, slotId, (slot) => ({
       error: d.message,
+      errorCode,
       analyzing: false,
       stepLog: [...slot.stepLog, { stage: 'error', message: d.message, detail: d.detail, timestamp: Date.now() }],
     }))

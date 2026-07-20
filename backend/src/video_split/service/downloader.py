@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 
 import httpx
 
@@ -78,6 +78,33 @@ def detect_platform(url: str) -> tuple[str, str]:
             return "xiaoyuzhou", m.group(1)
 
     return "unknown", ""
+
+
+# Domestic platforms always connect directly, bypassing the global proxy even
+# when proxy_enabled is on (proxy is intended for YouTube etc.).
+_DIRECT_PLATFORMS = {"bilibili", "xiaoyuzhou"}
+
+
+def _proxy_for_platform(platform: str) -> str | None:
+    """Return proxy URL for this platform, or None to connect directly.
+
+    bilibili / xiaoyuzhou are domestic China platforms — always direct.
+    """
+    if platform in _DIRECT_PLATFORMS:
+        return None
+    settings = get_settings()
+    if settings.network.proxy_enabled and settings.network.http_proxy:
+        return settings.network.http_proxy
+    return None
+
+
+class DownloadProgress(TypedDict):
+    """Progress payload passed to ``download_audio`` / ``download_xiaoyuzhou_audio``
+    callbacks. ``total_bytes == 0`` means the server did not report content-length."""
+
+    ratio: float
+    downloaded_bytes: int
+    total_bytes: int
 
 
 def _youtube_cookies_path() -> str | None:
@@ -239,10 +266,7 @@ async def extract_metadata(
         "skip_download": True,
         "format": "bestaudio/best",
     }
-    if settings.network.proxy_enabled and settings.network.http_proxy:
-        ydl_opts["proxy"] = settings.network.http_proxy
-    else:
-        ydl_opts["proxy"] = ""
+    ydl_opts["proxy"] = _proxy_for_platform(platform) or ""
 
     if platform == "youtube":
         _apply_youtube_opts(ydl_opts)
@@ -306,9 +330,7 @@ async def download_thumbnail(meta: VideoMeta) -> str:
     import httpx
 
     try:
-        proxy = None
-        if settings.network.proxy_enabled and settings.network.http_proxy:
-            proxy = settings.network.http_proxy
+        proxy = _proxy_for_platform(meta.platform)
 
         headers = {}
         if meta.platform == "bilibili":
@@ -377,7 +399,7 @@ async def fetch_bilibili_subtitles(
 async def download_audio(
     url: str,
     output_dir: Path,
-    progress_callback: Callable[[float], None] | None = None,
+    progress_callback: Callable[[DownloadProgress], None] | None = None,
     *,
     sessdata: str = "",
     bili_jct: str = "",
@@ -398,7 +420,11 @@ async def download_audio(
             total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
             downloaded = d.get("downloaded_bytes", 0)
             if total > 0:
-                progress_callback(downloaded / total)
+                progress_callback({
+                    "ratio": downloaded / total,
+                    "downloaded_bytes": int(downloaded),
+                    "total_bytes": int(total),
+                })
 
     ydl_opts: dict[str, Any] = {
         "format": "bestaudio/best",
@@ -414,10 +440,7 @@ async def download_audio(
             }
         ],
     }
-    if settings.network.proxy_enabled and settings.network.http_proxy:
-        ydl_opts["proxy"] = settings.network.http_proxy
-    else:
-        ydl_opts["proxy"] = ""
+    ydl_opts["proxy"] = _proxy_for_platform(platform) or ""
 
     if platform == "bilibili":
         ydl_opts["http_headers"] = _bilibili_headers(sessdata, bili_jct, buvid3)
