@@ -74,11 +74,11 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto relative">
-        <div className="absolute top-4 right-6 z-10">
+      <main className="flex-1 overflow-auto">
+        <div className="flex justify-end px-6 pt-4">
           <LangToggle lang={locale} onChange={setLocale} />
         </div>
-        <div className="max-w-6xl mx-auto p-6">
+        <div className="max-w-6xl mx-auto px-6 pb-6 pt-2">
           <Outlet />
         </div>
       </main>
