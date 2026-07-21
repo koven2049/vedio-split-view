@@ -98,17 +98,30 @@ _admin_login() {
 # drifting relative/external path.
 _db_abs_path() { echo "$SCRIPT_DIR/data/video_split.db"; }
 
-# Row count for a table via host sqlite3. Prints a plain integer, or "n/a" when
-# sqlite3 is missing, the DB is absent, or the query fails. Never aborts under
-# `set -e` (all failure paths are guarded).
+# Row count for a table. Prefers host sqlite3; falls back to the backend
+# container's bundled python (sqlite3 is stdlib) so row counts stay visible
+# even when the host lacks sqlite3. Prints a plain integer, or "n/a" when the
+# DB is absent or every path fails. Never aborts under `set -e`.
 _db_count() {
-    local table="$1" db
+    local table="$1" db n
     db="$(_db_abs_path)"
-    command -v sqlite3 >/dev/null 2>&1 || { echo "n/a"; return 0; }
     [[ -f "$db" ]] || { echo "n/a"; return 0; }
-    local n
-    n="$(sqlite3 "$db" "SELECT COUNT(*) FROM $table;" 2>/dev/null || true)"
-    [[ "$n" =~ ^[0-9]+$ ]] && echo "$n" || echo "n/a"
+
+    if command -v sqlite3 >/dev/null 2>&1; then
+        n="$(sqlite3 "$db" "SELECT COUNT(*) FROM $table;" 2>/dev/null || true)"
+        [[ "$n" =~ ^[0-9]+$ ]] && { echo "$n"; return 0; }
+    fi
+
+    # Fallback: query inside the running backend container (DB at /app/data).
+    if command -v "$PODMAN_CMD" >/dev/null 2>&1 \
+        && "$PODMAN_CMD" container exists "$BACKEND_CONTAINER" 2>/dev/null; then
+        n="$("$PODMAN_CMD" exec "$BACKEND_CONTAINER" python -c \
+            "import sqlite3;print(sqlite3.connect('/app/data/video_split.db').execute('SELECT COUNT(*) FROM ${table}').fetchone()[0])" \
+            2>/dev/null || true)"
+        [[ "$n" =~ ^[0-9]+$ ]] && { echo "$n"; return 0; }
+    fi
+
+    echo "n/a"
 }
 
 # Print DB location, size, mtime and users/videos/tasks row counts.
@@ -132,11 +145,6 @@ _report_data_health() {
     echo "  Size:    ${size} bytes"
     echo "  Mtime:   ${mtime}"
 
-    if ! command -v sqlite3 >/dev/null 2>&1; then
-        log_warn "sqlite3 not installed on host — cannot show row counts (install sqlite3 for full visibility)."
-        return 0
-    fi
-
     users="$(_db_count users)"
     videos="$(_db_count videos)"
     tasks="$(_db_count tasks)"
@@ -145,7 +153,7 @@ _report_data_health() {
     if [[ "$users" == "0" ]]; then
         log_error "users=0 — DB is EMPTY. Possible data loss or wrong data directory!"
     elif [[ "$users" == "n/a" ]]; then
-        log_warn "Could not read row counts (schema mismatch?). Inspect $db manually."
+        log_warn "Could not read row counts (no host sqlite3 and backend container not running). Inspect $db manually."
     else
         log_ok "Data present: $users user(s)."
     fi
