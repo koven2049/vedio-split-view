@@ -37,7 +37,6 @@ export default function AdminPage() {
   const [showForm, setShowForm] = useState(false)
   const [newUsername, setNewUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [newRole, setNewRole] = useState<'user' | 'viewer'>('user')
   const [formError, setFormError] = useState('')
   const [deletePreview, setDeletePreview] = useState<DeletePreview | null>(null)
   const [deleteError, setDeleteError] = useState('')
@@ -82,7 +81,6 @@ export default function AdminPage() {
       setShowForm(false)
       setNewUsername('')
       setNewPassword('')
-      setNewRole('user')
       setFormError('')
     },
     onError: (e: Error) => setFormError(e.message),
@@ -105,7 +103,7 @@ export default function AdminPage() {
     setFormError('')
     if (newUsername.length < 2) { setFormError(t('admin.usernameMinLength')); return }
     if (newPassword.length < 4) { setFormError(t('admin.passwordMinLength')); return }
-    createMutation.mutate({ username: newUsername, password: newPassword, role: newRole })
+    createMutation.mutate({ username: newUsername, password: newPassword, role: 'viewer' })
   }
 
   const handleDeleteClick = (userId: number) => {
@@ -176,15 +174,12 @@ export default function AdminPage() {
               className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
               style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
             />
-            <select
-              value={newRole}
-              onChange={(e) => setNewRole(e.target.value as 'user' | 'viewer')}
-              className="px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            <span
+              className="flex items-center px-3 py-2 rounded-lg text-sm"
+              style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
             >
-              <option value="user">{t('admin.user')}</option>
-              <option value="viewer">{t('admin.viewer')}</option>
-            </select>
+              {t('admin.viewer')}
+            </span>
             <button
               onClick={handleCreate}
               disabled={createMutation.isPending}

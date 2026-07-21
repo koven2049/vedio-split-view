@@ -60,6 +60,7 @@ read_yaml_value() {
 
 get_app_port()      { read_yaml_value "app.port" "8080"; }
 get_frontend_port() { read_yaml_value "app.frontend_port" "5180"; }
+get_admin_password() { read_yaml_value "admin.password" ""; }
 
 ensure_config() {
     [[ -f "$CONFIG_FILE" ]] || { log_error "Config not found. Run: $0 init"; exit 1; }
@@ -84,6 +85,105 @@ _admin_login() {
         -H "Content-Type: application/json" \
         -d "{\"username\":\"$admin_user\",\"password\":\"$admin_pass\"}" \
         | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4
+}
+
+# ── data-health helpers ───────────────────────────────────────────────────────
+# The production DB is a host-side SQLite file bind-mounted read-write into the
+# backend container ($SCRIPT_DIR/data:/app/data). A vanished bind-mount target
+# once let a container write to an orphan inode for two months; a prune then made
+# the data physically disappear. These helpers make the DB's location and row
+# counts VISIBLE so drift/loss is caught by eye instead of silently.
+
+# Absolute path of the DB, resolved from $SCRIPT_DIR so it can never be a
+# drifting relative/external path.
+_db_abs_path() { echo "$SCRIPT_DIR/data/video_split.db"; }
+
+# Row count for a table via host sqlite3. Prints a plain integer, or "n/a" when
+# sqlite3 is missing, the DB is absent, or the query fails. Never aborts under
+# `set -e` (all failure paths are guarded).
+_db_count() {
+    local table="$1" db
+    db="$(_db_abs_path)"
+    command -v sqlite3 >/dev/null 2>&1 || { echo "n/a"; return 0; }
+    [[ -f "$db" ]] || { echo "n/a"; return 0; }
+    local n
+    n="$(sqlite3 "$db" "SELECT COUNT(*) FROM $table;" 2>/dev/null || true)"
+    [[ "$n" =~ ^[0-9]+$ ]] && echo "$n" || echo "n/a"
+}
+
+# Print DB location, size, mtime and users/videos/tasks row counts.
+# fail-loud: WARN when the DB is missing or users==0 (likely data-source drift/loss).
+_report_data_health() {
+    local db users videos tasks
+    db="$(_db_abs_path)"
+    log_step "Data health:"
+    echo "  DB path: $db"
+
+    if [[ ! -f "$db" ]]; then
+        log_error "DB file does NOT exist — data source may have drifted or been lost!"
+        log_warn  "Expected bind-mount target: $SCRIPT_DIR/data (project-local)."
+        return 0
+    fi
+
+    # size + mtime (portable-ish: try GNU stat, then BSD stat, then ls fallback)
+    local size mtime
+    size="$(stat -c %s "$db" 2>/dev/null || stat -f %z "$db" 2>/dev/null || echo '?')"
+    mtime="$(stat -c %y "$db" 2>/dev/null || stat -f '%Sm' "$db" 2>/dev/null || echo '?')"
+    echo "  Size:    ${size} bytes"
+    echo "  Mtime:   ${mtime}"
+
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        log_warn "sqlite3 not installed on host — cannot show row counts (install sqlite3 for full visibility)."
+        return 0
+    fi
+
+    users="$(_db_count users)"
+    videos="$(_db_count videos)"
+    tasks="$(_db_count tasks)"
+    echo "  Rows:    users=$users  videos=$videos  tasks=$tasks"
+
+    if [[ "$users" == "0" ]]; then
+        log_error "users=0 — DB is EMPTY. Possible data loss or wrong data directory!"
+    elif [[ "$users" == "n/a" ]]; then
+        log_warn "Could not read row counts (schema mismatch?). Inspect $db manually."
+    else
+        log_ok "Data present: $users user(s)."
+    fi
+}
+
+# Post-rebuild smoke check: wait for /health, log in as admin, print row counts.
+# fail-loud on empty data (WARN) but NON-blocking — a rebuild that lost data
+# should still finish so the operator can react, not hang.
+_smoke_check() {
+    local port="$1" admin_pass="$2"
+    log_step "Smoke check:"
+
+    local ok=0 i
+    for i in $(seq 1 30); do
+        if curl -sf --noproxy '*' "http://localhost:$port/health" >/dev/null 2>&1; then
+            ok=1; break
+        fi
+        sleep 1
+    done
+    if [[ "$ok" -ne 1 ]]; then
+        log_error "Backend /health did not come up within 30s."
+        return 0
+    fi
+    log_ok "Backend reachable at http://localhost:$port"
+
+    if [[ -n "$admin_pass" ]]; then
+        local token
+        token="$(_admin_login "$port" admin "$admin_pass" 2>/dev/null || true)"
+        if [[ -n "$token" ]]; then
+            log_ok "Admin login OK."
+        else
+            log_warn "Admin login failed (check admin.password in $CONFIG_FILE)."
+        fi
+    else
+        log_warn "admin.password empty in $CONFIG_FILE — skipping login check."
+    fi
+
+    _report_data_health
 }
 
 # ── deploy exclude file ──────────────────────────────────────────────────────
@@ -303,6 +403,9 @@ run_rebuild() {
     _remove_container_if_exists "$BACKEND_CONTAINER"
     run_start
 
+    echo
+    _smoke_check "$APP_PORT" "$(get_admin_password)"
+
     log_ok "Done. Backend: http://localhost:$APP_PORT  Frontend: http://localhost:$FRONTEND_PORT"
 }
 
@@ -327,6 +430,9 @@ run_status() {
         log_ok "URL: http://localhost:$FRONTEND_PORT"
         log_error "Health: FAILED"
     fi
+
+    echo
+    _report_data_health
 }
 
 run_export() {
@@ -557,12 +663,26 @@ run_clean_exports() {
 run_clean() {
     ensure_podman
     log_warn "This will remove dangling images and build cache."
-    read -r -p "Continue? [y/N] " confirm
+    log_warn "PRUNE SAFETY: 'podman system prune' releases file descriptors held"
+    log_warn "  by stopped containers. If a container was writing to a bind-mount"
+    log_warn "  whose host directory was deleted, its data lives only in that fd —"
+    log_warn "  pruning makes it disappear permanently. This is exactly how the"
+    log_warn "  production SQLite DB was lost. NEVER prune while data-bearing"
+    log_warn "  containers are stopped; verify the list below first."
+    echo
+    log_step "Stopped containers (must be safe to discard before pruning):"
+    # Never abort status listing under set -e.
+    "$PODMAN_CMD" ps -a --filter "status=exited" \
+        --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null || true
+    echo
+    log_warn "Confirm none of the above still hold unflushed data (e.g. vsplit-backend"
+    log_warn "  writing to data/video_split.db). If unsure, 'start' them first, then quit."
+    read -r -p "Continue with prune? [y/N] " confirm
     [[ "${confirm,,}" == "y" ]] || { log_info "Aborted."; exit 0; }
 
     log_step "Pruning images …"
     "$PODMAN_CMD" image prune -f
-    log_step "Pruning system …"
+    log_step "Pruning system (containers/networks/build cache; volumes NOT touched) …"
     "$PODMAN_CMD" system prune -f
     log_ok "Clean complete."
 }

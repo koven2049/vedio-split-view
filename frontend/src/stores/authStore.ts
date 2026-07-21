@@ -1,9 +1,11 @@
 import { create } from 'zustand'
 
+export type Role = 'admin' | 'viewer'
+
 interface AuthState {
   token: string | null
   username: string | null
-  role: string | null
+  role: Role | null
   langPreference: string
   setAuth: (token: string, username: string, role: string, lang?: string) => void
   setLang: (lang: string) => void
@@ -14,10 +16,14 @@ interface AuthState {
   canAnalyze: () => boolean
 }
 
+function normalizeRole(role: string | null): Role | null {
+  return role === 'admin' || role === 'viewer' ? role : null
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   token: localStorage.getItem('vsplit_token'),
   username: localStorage.getItem('vsplit_username'),
-  role: localStorage.getItem('vsplit_role'),
+  role: normalizeRole(localStorage.getItem('vsplit_role')),
   langPreference: localStorage.getItem('vsplit_lang') || 'zh',
 
   setAuth: (token, username, role, lang = 'zh') => {
@@ -25,7 +31,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.setItem('vsplit_username', username)
     localStorage.setItem('vsplit_role', role)
     localStorage.setItem('vsplit_lang', lang)
-    set({ token, username, role, langPreference: lang })
+    set({ token, username, role: normalizeRole(role), langPreference: lang })
   },
 
   setLang: (lang) => {
@@ -44,5 +50,5 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoggedIn: () => !!get().token,
   isAdmin: () => get().role === 'admin',
   isViewer: () => get().role === 'viewer',
-  canAnalyze: () => get().role === 'user',
+  canAnalyze: () => get().role === 'admin',
 }))

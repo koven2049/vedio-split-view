@@ -144,19 +144,44 @@ _BILI_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
+# Seconds to pause between successive Bilibili requests (both yt-dlp and the
+# sequential API calls) — conservative default to avoid -352 frequency
+# risk-control on data-center IPs.
+_BILI_SLEEP_REQUESTS = 1.0
+
 
 def _bilibili_headers(sessdata: str = "", bili_jct: str = "", buvid3: str = "") -> dict[str, str]:
     """Build HTTP headers for Bilibili requests.
 
     Always includes User-Agent and Referer (required to avoid 403/412).
-    Appends cookies when credentials are provided.
+    Appends login cookies when provided, plus any cached device-fingerprint
+    cookies (buvid3/buvid4/b_nut/bili_ticket) to reduce -352 risk-control on
+    data-center IPs. The fingerprint is best-effort: if none is cached the
+    Cookie header simply omits those fields.
     """
     headers: dict[str, str] = {
         "User-Agent": _BILI_UA,
         "Referer": "https://www.bilibili.com/",
     }
+
+    cookies: dict[str, str] = {}
+    # Device fingerprint (works even without a logged-in session).
+    try:
+        from video_split.service.bilibili_auth import load_fingerprint
+
+        cookies.update(load_fingerprint().as_cookie_dict())
+    except Exception:
+        logger.warning("[bilibili] fingerprint load failed", exc_info=True)
+
     if sessdata:
-        headers["Cookie"] = f"SESSDATA={sessdata}; bili_jct={bili_jct}; buvid3={buvid3}"
+        cookies["SESSDATA"] = sessdata
+        cookies["bili_jct"] = bili_jct
+    # An explicit buvid3 (e.g. from QR login) takes precedence over the cached one.
+    if buvid3:
+        cookies["buvid3"] = buvid3
+
+    if cookies:
+        headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
     return headers
 
 
@@ -201,6 +226,8 @@ async def _fetch_bilibili_subtitles_via_api(
         return []
 
     cid = data["data"]["cid"]
+    import asyncio
+    await asyncio.sleep(_BILI_SLEEP_REQUESTS)
     player_url = f"https://api.bilibili.com/x/player/v2?cid={cid}&bvid={bvid}"
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         resp = await client.get(player_url)
@@ -444,6 +471,8 @@ async def download_audio(
 
     if platform == "bilibili":
         ydl_opts["http_headers"] = _bilibili_headers(sessdata, bili_jct, buvid3)
+        # Conservative pacing to avoid tripping -352 frequency risk-control.
+        ydl_opts["sleep_interval_requests"] = _BILI_SLEEP_REQUESTS
         logger.info("[download] Bilibili headers attached (cookies=%s)", bool(sessdata))
     elif platform == "youtube":
         _apply_youtube_opts(ydl_opts)

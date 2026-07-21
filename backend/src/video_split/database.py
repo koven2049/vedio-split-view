@@ -93,6 +93,19 @@ async def _recover_orphan_tasks(conn) -> None:  # type: ignore[no-untyped-def]
             logger.info("[db] Recovered %d orphan tasks: %s → %s", result.rowcount, active_status, target_status)
 
 
+async def _migrate_user_role(conn) -> None:  # type: ignore[no-untyped-def]
+    """Collapse the removed 'user' role into 'viewer'.
+
+    The three-role model (admin/user/viewer) was reduced to two (admin/viewer).
+    Any leftover 'user' rows become read-only viewers. admin is untouched.
+    """
+    result = await conn.execute(
+        text("UPDATE users SET role = 'viewer' WHERE role = 'user'")
+    )
+    if result.rowcount:
+        logger.info("[db] Migrated %d legacy 'user' accounts to 'viewer'", result.rowcount)
+
+
 async def _ensure_platform_tags(conn) -> None:  # type: ignore[no-untyped-def]
     """Ensure every video has a platform tag (YouTube / Bilibili)."""
     for platform, name, color in [
@@ -123,6 +136,7 @@ async def init_db() -> None:
         from video_split.models import Base  # noqa: F811
         await conn.run_sync(Base.metadata.create_all)
         await _run_migrations(conn)
+        await _migrate_user_role(conn)
         await _recover_orphan_tasks(conn)
         await _ensure_platform_tags(conn)
 

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from video_split.database import get_db
-from video_split.dependencies import get_current_user, require_user
+from video_split.dependencies import get_current_user, require_admin
 from video_split.models import Tag, User, Video
 from video_split.schemas import TagCreate, TagOut, TagUpdate
 
@@ -25,7 +25,7 @@ async def list_tags(
 @router.post("", response_model=TagOut, status_code=status.HTTP_201_CREATED)
 async def create_tag(
     body: TagCreate,
-    _user: User = Depends(require_user),
+    _user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     existing = await db.execute(select(Tag).where(Tag.name == body.name))
@@ -42,7 +42,7 @@ async def create_tag(
 async def update_tag(
     tag_id: int,
     body: TagUpdate,
-    _user: User = Depends(require_user),
+    _user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Tag).where(Tag.id == tag_id))
@@ -61,7 +61,7 @@ async def update_tag(
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tag(
     tag_id: int,
-    _user: User = Depends(require_user),
+    _user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Tag).where(Tag.id == tag_id))
@@ -76,7 +76,7 @@ async def delete_tag(
 async def add_video_tag(
     video_id: int,
     body: TagCreate,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -104,7 +104,7 @@ async def add_video_tag(
 async def remove_video_tag(
     video_id: int,
     tag_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

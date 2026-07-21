@@ -17,8 +17,10 @@ class AuthLogin(BaseModel):
 
 class AdminCreateUser(BaseModel):
     username: str = Field(min_length=2, max_length=64)
+    # Only viewer accounts can be created. admin is a single seeded account and
+    # cannot be created via the API.
+    role: str = Field(default="viewer", pattern=r"^viewer$")
     password: str = Field(min_length=4, max_length=128)
-    role: str = Field(default="user", pattern=r"^(user|viewer)$")
 
 
 class AdminResetPassword(BaseModel):
@@ -38,7 +40,7 @@ class UserPreferences(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    role: str
+    role: str  # "admin" | "viewer"
     username: str
     lang_preference: str = "zh"
 
@@ -46,7 +48,7 @@ class TokenResponse(BaseModel):
 class UserInfo(BaseModel):
     id: int
     username: str
-    role: str
+    role: str  # "admin" | "viewer"
     is_active: bool
     lang_preference: str = "zh"
     created_at: datetime

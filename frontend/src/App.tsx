@@ -16,23 +16,9 @@ function ProtectedRoute({ children, adminOnly = false }: { children: React.React
   return <>{children}</>
 }
 
-function UserOnlyRoute({ children }: { children: React.ReactNode }) {
-  const { token, role } = useAuthStore()
-  if (!token) return <Navigate to="/login" replace />
-  if (role !== 'user') return <Navigate to="/library" replace />
-  return <>{children}</>
-}
-
-function UserOrAdminRoute({ children }: { children: React.ReactNode }) {
-  const { token, role } = useAuthStore()
-  if (!token) return <Navigate to="/login" replace />
-  if (role !== 'user' && role !== 'admin') return <Navigate to="/library" replace />
-  return <>{children}</>
-}
-
 function HomeRedirect() {
   const { role } = useAuthStore()
-  if (role === 'admin') return <Navigate to="/admin" replace />
+  if (role === 'admin') return <Navigate to="/analyze" replace />
   return <Navigate to="/library" replace />
 }
 
@@ -44,11 +30,11 @@ export default function App() {
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/" element={<HomeRedirect />} />
-        <Route path="/analyze" element={<UserOnlyRoute><AnalyzePage /></UserOnlyRoute>} />
+        <Route path="/analyze" element={<ProtectedRoute adminOnly><AnalyzePage /></ProtectedRoute>} />
         <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
         <Route path="/video/:id" element={<ProtectedRoute><VideoDetailPage /></ProtectedRoute>} />
-        <Route path="/api-docs" element={<UserOnlyRoute><ApiDocsPage /></UserOnlyRoute>} />
-        <Route path="/settings" element={<UserOrAdminRoute><SettingsPage /></UserOrAdminRoute>} />
+        <Route path="/api-docs" element={<ProtectedRoute adminOnly><ApiDocsPage /></ProtectedRoute>} />
+        <Route path="/settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

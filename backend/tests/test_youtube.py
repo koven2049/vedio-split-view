@@ -28,7 +28,7 @@ async def test_youtube_cookies_status_reports_probe_failure(client, test_config_
         lambda: (False, "Configured cookies are present, but YouTube still requires bot/login verification."),
     )
 
-    token = await admin_create_user(client, "youtube_probe_user", role="user")
+    token = await get_admin_token(client)
     resp = await client.get(
         "/api/youtube/cookies-status",
         headers={"Authorization": f"Bearer {token}"},
@@ -76,11 +76,12 @@ async def test_youtube_cookies_status_allows_admin(client, test_config_path, mon
 
 
 @pytest.mark.asyncio
-async def test_youtube_cookies_status_rejects_viewer(client):
+async def test_youtube_cookies_status_allows_viewer(client):
+    """cookies-status is a read endpoint; viewers (read-only) may access it."""
     token = await admin_create_user(client, "youtube_probe_viewer", role="viewer")
     resp = await client.get(
         "/api/youtube/cookies-status",
         headers={"Authorization": f"Bearer {token}"},
     )
 
-    assert resp.status_code == 403
+    assert resp.status_code == 200

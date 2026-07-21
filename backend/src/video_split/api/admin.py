@@ -56,6 +56,11 @@ async def create_user(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    # Defense in depth: the schema already restricts role to "viewer", but reject
+    # explicitly so admin can never be created via this endpoint (admin is unique
+    # and seeded from config).
+    if req.role != "viewer":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only viewer accounts can be created")
     existing = await db.execute(select(User).where(User.username == req.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Username already exists")

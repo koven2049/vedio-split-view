@@ -124,7 +124,7 @@ export default function SettingsPage() {
 
       {role === 'admin' && <AdminCleanupSection />}
 
-      {role !== 'user' ? null : (
+      {role !== 'admin' ? null : (
         <>
       {/* Bilibili Connection */}
       <section className="p-5 rounded-xl space-y-4" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import admin_create_user
+from tests.conftest import admin_create_user, get_admin_token
 
 
 @pytest.mark.asyncio
 async def test_tag_crud(client):
-    token = await admin_create_user(client, "tag_user_crud")
+    token = await get_admin_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
     resp = await client.post("/api/tags", json={"name": "AI", "color": "#3b82f6"}, headers=headers)
@@ -31,7 +31,7 @@ async def test_tag_crud(client):
 
 @pytest.mark.asyncio
 async def test_duplicate_tag(client):
-    token = await admin_create_user(client, "dup_tag_user2")
+    token = await get_admin_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
     await client.post("/api/tags", json={"name": "Tutorial"}, headers=headers)
@@ -41,8 +41,8 @@ async def test_duplicate_tag(client):
 
 @pytest.mark.asyncio
 async def test_viewer_can_list_tags(client):
-    user_token = await admin_create_user(client, "tag_list_owner", role="user")
-    await client.post("/api/tags", json={"name": "ViewerVisible"}, headers={"Authorization": f"Bearer {user_token}"})
+    admin_token = await get_admin_token(client)
+    await client.post("/api/tags", json={"name": "ViewerVisible"}, headers={"Authorization": f"Bearer {admin_token}"})
 
     viewer_token = await admin_create_user(client, "tag_viewer_list", role="viewer")
     resp = await client.get("/api/tags", headers={"Authorization": f"Bearer {viewer_token}"})

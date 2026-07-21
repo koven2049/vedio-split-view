@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from video_split.database import get_db
-from video_split.dependencies import require_user
+from video_split.dependencies import require_admin
 from video_split.models import BilibiliCredential, Task, User
 from video_split.schemas import TaskOut
 from video_split.service.task_manager import (
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/videos/tasks", tags=["tasks"])
 
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     tasks = await get_user_tasks(db, user.id)
@@ -34,7 +34,7 @@ async def list_tasks(
 
 @router.get("/recoverable", response_model=list[TaskOut])
 async def list_recoverable_tasks(
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     tasks = await get_user_recoverable_tasks(db, user.id)
@@ -42,7 +42,7 @@ async def list_recoverable_tasks(
 
 
 @router.get("/active")
-async def list_active_tasks(user: User = Depends(require_user)):
+async def list_active_tasks(user: User = Depends(require_admin)):
     """Return tasks currently running in the background for this user."""
     tasks = runner.active_for_user(user.id)
     return [
@@ -60,7 +60,7 @@ async def list_active_tasks(user: User = Depends(require_user)):
 @router.get("/{task_id}/stream")
 async def stream_task_progress(
     task_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """SSE endpoint — replays past events then streams live updates."""
@@ -97,7 +97,7 @@ async def stream_task_progress(
 @router.post("/{task_id}/retry")
 async def retry_task(
     task_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -135,7 +135,7 @@ async def retry_task(
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(
     task_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

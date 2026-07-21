@@ -120,9 +120,12 @@ async def get_admin_token(client: AsyncClient) -> str:
 
 
 async def admin_create_user(
-    client: AsyncClient, username: str, password: str = "pass123", role: str = "user",
+    client: AsyncClient, username: str, password: str = "pass123", role: str = "viewer",
 ) -> str:
-    """Create a user via admin API and login. Returns access token."""
+    """Create a viewer account via the admin API and log in. Returns access token.
+
+    Only viewer accounts can be created — admin is the single seeded account.
+    """
     admin_token = await get_admin_token(client)
     await client.post(
         "/api/admin/users",
@@ -131,8 +134,3 @@ async def admin_create_user(
     )
     login_resp = await client.post("/api/auth/login", json={"username": username, "password": password})
     return login_resp.json()["access_token"]
-
-
-# Keep backward-compat alias
-async def register_and_login(client: AsyncClient, username: str = "testuser", password: str = "pass123") -> str:
-    return await admin_create_user(client, username, password, role="user")

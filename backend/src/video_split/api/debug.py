@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from video_split.config import get_settings
 from video_split.database import get_db
-from video_split.dependencies import require_user
+from video_split.dependencies import require_admin
 from video_split.models import BilibiliCredential, User
 from video_split.schemas import (
     ChunkInfo,
@@ -63,7 +63,7 @@ def _sse_event(stage: str, progress: int, message: str, detail: dict | None = No
 @router.post("/download")
 async def debug_download(
     req: DebugDownloadRequest,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Download audio via SSE with real-time progress from yt-dlp."""
@@ -197,7 +197,7 @@ async def debug_download(
 
 @router.get("/tasks", response_model=list[DebugTaskInfo])
 async def debug_list_tasks(
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """List all non-terminal tasks with file details."""
@@ -230,7 +230,7 @@ async def debug_list_tasks(
 @router.post("/transcribe", response_model=DebugTranscribeResponse)
 async def debug_transcribe(
     req: DebugTranscribeRequest,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Transcribe a downloaded audio. Optionally specify chunk_index to transcribe one chunk only."""
@@ -301,7 +301,7 @@ async def debug_transcribe(
 @router.delete("/tasks/{task_id}", response_model=DebugCleanupResponse)
 async def debug_cleanup(
     task_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete temp files and remove task record."""
@@ -329,7 +329,7 @@ async def debug_cleanup(
 @router.get("/tasks/{task_id}/chunks", response_model=list[ChunkInfo])
 async def debug_list_chunks(
     task_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """List chunk files for a downloaded task. If not yet split, split now."""
@@ -355,7 +355,7 @@ async def debug_list_chunks(
 @router.post("/test-asr", response_model=DebugTranscribeResponse)
 async def debug_test_asr(
     req: DebugTestASRRequest,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
 ):
     """Transcribe a local audio file directly (no task/quota required).
 

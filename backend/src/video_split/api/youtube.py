@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from video_split.config import get_settings
-from video_split.dependencies import require_user_or_admin
+from video_split.dependencies import require_authenticated
 from video_split.models import User
 from video_split.service.downloader import _apply_youtube_opts
 
@@ -103,7 +103,7 @@ def _parse_cookies_file(path: str) -> list[dict]:
 
 
 @router.get("/cookies-status", response_model=CookiesStatusOut)
-async def cookies_status(_user: User = Depends(require_user_or_admin)):
+async def cookies_status(_user: User = Depends(require_authenticated)):
     settings = get_settings()
     path_str = settings.network.youtube_cookies_file
     checked_at = datetime.now(tz=timezone.utc).isoformat()

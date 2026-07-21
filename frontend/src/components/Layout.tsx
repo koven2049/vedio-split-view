@@ -9,12 +9,12 @@ const NAV_ITEMS: {
   path: string
   label: TranslationKey
   icon: typeof Video
-  roles: ('user' | 'admin' | 'viewer')[]
+  roles: ('admin' | 'viewer')[]
 }[] = [
-  { path: '/analyze', label: 'nav.analyze', icon: Video, roles: ['user'] },
-  { path: '/library', label: 'nav.library', icon: Library, roles: ['user', 'admin', 'viewer'] },
-  { path: '/api-docs', label: 'nav.apiDocs', icon: BookOpen, roles: ['user'] },
-  { path: '/settings', label: 'nav.settings', icon: Settings, roles: ['user', 'admin'] },
+  { path: '/analyze', label: 'nav.analyze', icon: Video, roles: ['admin'] },
+  { path: '/library', label: 'nav.library', icon: Library, roles: ['admin', 'viewer'] },
+  { path: '/api-docs', label: 'nav.apiDocs', icon: BookOpen, roles: ['admin'] },
+  { path: '/settings', label: 'nav.settings', icon: Settings, roles: ['admin'] },
   { path: '/admin', label: 'nav.users', icon: Shield, roles: ['admin'] },
 ]
 

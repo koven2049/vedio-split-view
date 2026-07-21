@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from video_split.database import get_db
-from video_split.dependencies import require_user
+from video_split.dependencies import require_admin
 from video_split.models import ApiKey, User
 
 router = APIRouter(tags=["api-keys"])
@@ -48,7 +48,7 @@ def _hash_key(key: str) -> str:
 @router.get("/api/settings/api-keys", response_model=list[ApiKeyOut])
 @router.get("/api/settings/tokens", response_model=list[ApiKeyOut])
 async def list_api_keys(
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -69,7 +69,7 @@ async def list_api_keys(
 @router.post("/api/settings/tokens", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     body: ApiKeyCreate,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     full_key = _generate_key()
@@ -94,7 +94,7 @@ async def create_api_key(
 @router.delete("/api/settings/tokens/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_api_key(
     key_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from video_split.database import get_db
-from video_split.dependencies import get_current_user, require_user, require_user_or_admin
+from video_split.dependencies import get_current_user, require_admin, require_authenticated
 from video_split.models import Tag, User, Video, video_tags
 from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut, TranscriptOut, TranscriptSegment
 from video_split.service.data_sync import EXPORTS_DIR, _export_filename
@@ -52,10 +52,9 @@ async def _get_accessible_video(db: AsyncSession, video_id: int, user: User, *, 
     video = result.scalar_one_or_none()
     if video is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
-    if user.role == "viewer" and not video.is_public:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
-    if video.user_id != user.id and not video.is_public and user.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
+    # Any authenticated account can read any video: admin owns everything and
+    # viewer has full read access to the whole library. Write endpoints gate on
+    # require_admin, so no per-video authorization is needed for reads.
     return video
 
 
@@ -65,15 +64,14 @@ async def list_my_videos(
     tag: str = Query("", max_length=64),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    user: User = Depends(require_user_or_admin),
+    _user: User = Depends(require_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
+    # Whole library is visible to every logged-in account (admin + viewer).
     stmt = (
         select(Video)
         .options(selectinload(Video.tags), selectinload(Video.owner))
     )
-    if user.role != "admin":
-        stmt = stmt.where(Video.user_id == user.id)
     if q:
         stmt = stmt.where(Video.title.ilike(f"%{q}%"))
     if tag:
@@ -161,7 +159,7 @@ async def get_video(
 async def update_video(
     video_id: int,
     body: VideoUpdate,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -184,7 +182,7 @@ async def update_video(
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_video(
     video_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -206,7 +204,7 @@ async def delete_video(
 @router.post("/bulk-share")
 async def bulk_share_videos(
     body: dict,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Set is_public for multiple videos at once. Body: { ids: [1,2,3], share: true }"""
@@ -231,7 +229,7 @@ async def bulk_share_videos(
 @router.post("/{video_id}/share")
 async def share_video(
     video_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -248,7 +246,7 @@ async def share_video(
 @router.post("/{video_id}/unshare")
 async def unshare_video(
     video_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

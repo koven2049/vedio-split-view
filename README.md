@@ -92,6 +92,26 @@ bash manage.sh deploy-data   # 同步导出的 JSON 和缩略图
 
 命令行参数仍可覆盖配置，例如 `bash manage.sh deploy root@srv ai/vedio-split-view`。
 
+## 数据安全纪律（务必遵守）
+
+生产 SQLite 数据库是宿主机文件 `data/video_split.db`，通过 bind mount 挂进后端容器
+（`$SCRIPT_DIR/data:/app/data`，工程内绝对路径）。**曾发生过一次生产数据静默丢失**：
+某容器 bind mount 的宿主目录被删，容器靠 orphan inode 继续写了两个月，`deploy`/`rebuild` +
+`podman prune` 释放 fd 后数据物理消失。以下纪律用来杜绝复发：
+
+1. **单一部署目录**：远端只用 `/home/dev/ai/vedio-split-view` 一个目录部署，禁止出现
+   `vedio-split-view-bak`、`vedio-split-view2` 之类的残留副本——多份副本会让 bind mount
+   指向错误目录，是数据漂移的根源。发现残留副本先确认其 `data/` 无用后再删除，切勿多份并存。
+2. **`data/` 必须存在且在工程内**：`data/.gitkeep` 已入库保证 clone 后目录存在；`.gitignore`
+   忽略 `data/*` 但保留 `.gitkeep`。DB 文件本身永不入库、永不随 `deploy` 覆盖（见 `.rsync-exclude`）。
+3. **prune 前先确认**：**永远不要在有数据容器停止时执行 `podman system prune`**。
+   `manage.sh clean` 已内置防护——先 `podman ps -a` 列出已停止容器并要求人工确认，
+   再执行 prune。手动 prune 前也必须先 `podman ps -a` 核对，确认没有正在写 `data/` 的
+   停止容器（fd 里的数据会被 prune 永久抹掉）。
+4. **随时验证数据可见**：`bash manage.sh status` 末尾会打印 DB 绝对路径、大小、mtime 和
+   `users/videos/tasks` 行数；`users=0` 或 DB 不存在会显式 WARN/ERROR。`rebuild` 结束也会跑
+   smoke check（连通性 + admin 登录 + 行数）。部署后务必看一眼行数是否符合预期。
+
 ## 配置说明 (config/app.yaml)
 
 `config/app.yaml` 可以很短。除了下面的必填项，其它参数都有代码默认值，只有需要覆盖默认行为时再写。

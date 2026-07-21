@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from video_split.database import get_db
-from video_split.dependencies import require_user
+from video_split.dependencies import require_admin
 from video_split.models import BilibiliCredential, Task, User
 from video_split.schemas import AnalyzeRequest, AnalyzeResponse, ProgressEvent
 from video_split.service.downloader import detect_platform, normalize_url
@@ -85,7 +85,7 @@ def _start_background_analysis(
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_video(
     body: AnalyzeRequest,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Start analyzing a video. Asynchronous — returns a task_id, not the result.
@@ -98,8 +98,8 @@ async def analyze_video(
        fetch the structured result (summary, segments, subtitles with timestamps)
        from `GET /api/videos/{video_id}` once the task completes.
 
-    Supported URLs: YouTube, Bilibili, 小宇宙 (xiaoyuzhou). Requires a user-role
-    account (admin/viewer get 403).
+    Supported URLs: YouTube, Bilibili, 小宇宙 (xiaoyuzhou). Admin only —
+    viewer accounts get 403.
     """
     body.url = normalize_url(body.url)
     platform, video_id = detect_platform(body.url)
@@ -150,7 +150,7 @@ async def analyze_video(
 @router.delete("/tasks/{task_id}/cancel")
 async def cancel_task(
     task_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     if runner.cancel(task_id):
@@ -172,7 +172,7 @@ async def cancel_task(
 @router.post("/tasks/{task_id}/confirm")
 async def confirm_task(
     task_id: int,
-    _user: User = Depends(require_user),
+    _user: User = Depends(require_admin),
 ):
     if runner.confirm(task_id):
         return {"message": "Confirmed"}

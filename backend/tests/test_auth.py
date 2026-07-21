@@ -23,17 +23,6 @@ async def test_admin_login(client):
 
 
 @pytest.mark.asyncio
-async def test_user_login(client):
-    token = await admin_create_user(client, "auth_user_login", role="user")
-    resp = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert resp.status_code == 200
-    me = resp.json()
-    assert me["username"] == "auth_user_login"
-    assert me["role"] == "user"
-    assert me["lang_preference"] == "zh"
-
-
-@pytest.mark.asyncio
 async def test_viewer_login(client):
     token = await admin_create_user(client, "auth_viewer_login", role="viewer")
     resp = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -64,7 +53,7 @@ async def test_invalid_token(client):
 
 @pytest.mark.asyncio
 async def test_update_lang_preference(client):
-    token = await admin_create_user(client, "lang_user", role="user")
+    token = await admin_create_user(client, "lang_user", role="viewer")
     headers = {"Authorization": f"Bearer {token}"}
 
     resp = await client.put("/api/auth/lang", json={"lang": "en"}, headers=headers)
@@ -81,7 +70,7 @@ async def test_update_lang_preference(client):
 
 @pytest.mark.asyncio
 async def test_update_lang_invalid(client):
-    token = await admin_create_user(client, "lang_invalid_user", role="user")
+    token = await admin_create_user(client, "lang_invalid_user", role="viewer")
     headers = {"Authorization": f"Bearer {token}"}
     resp = await client.put("/api/auth/lang", json={"lang": "fr"}, headers=headers)
     assert resp.status_code == 422
@@ -89,7 +78,7 @@ async def test_update_lang_invalid(client):
 
 @pytest.mark.asyncio
 async def test_login_returns_lang(client):
-    token = await admin_create_user(client, "lang_login_user", role="user")
+    token = await admin_create_user(client, "lang_login_user", role="viewer")
     headers = {"Authorization": f"Bearer {token}"}
     await client.put("/api/auth/lang", json={"lang": "en"}, headers=headers)
 

@@ -50,7 +50,7 @@ function canAnalyze(status: string): boolean {
 export default function LibraryPage() {
   const t = useT()
   const isViewer = useAuthStore((s) => s.isViewer)()
-  const [activeTab, setActiveTab] = useState<'mine' | 'public'>(isViewer ? 'public' : 'mine')
+  const [activeTab, setActiveTab] = useState<'mine' | 'public'>('mine')
   const [search, setSearch] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'video' | 'task'; id: number; title: string } | null>(null)
@@ -163,7 +163,7 @@ export default function LibraryPage() {
             ))}
           </div>
         ) : (
-          <h2 className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('library.publicVideos')}</h2>
+          <h2 className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>{t('library.allVideos')}</h2>
         )}
 
         <div className="flex gap-2 items-center">

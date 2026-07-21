@@ -13,15 +13,14 @@ from video_split.models import Task, User, Video
 @pytest.mark.asyncio
 async def test_admin_list_users(client):
     admin_token = await get_admin_token(client)
-    await admin_create_user(client, "admin_test_user1", role="user")
     await admin_create_user(client, "admin_test_viewer1", role="viewer")
 
     resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
     assert resp.status_code == 200
     users = resp.json()
     usernames = [u["username"] for u in users]
-    assert "admin_test_user1" in usernames
     assert "admin_test_viewer1" in usernames
+    # admin is never listed (it is filtered out as the single privileged account)
     assert "admin" not in usernames
 
     viewer = next(u for u in users if u["username"] == "admin_test_viewer1")
@@ -37,8 +36,34 @@ async def test_admin_create_user_default_role(client):
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 201
-    assert resp.json()["role"] == "user"
+    # Default (and only permitted) role is viewer.
+    assert resp.json()["role"] == "viewer"
     assert resp.json()["is_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_create_admin(client):
+    """admin is a single seeded account and cannot be created via the API."""
+    admin_token = await get_admin_token(client)
+    resp = await client.post(
+        "/api/admin/users",
+        json={"username": "another_admin", "password": "pass123", "role": "admin"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    # Rejected by the schema pattern (422) before reaching the 400 guard.
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_create_legacy_user_role(client):
+    """The removed 'user' role is no longer creatable."""
+    admin_token = await get_admin_token(client)
+    resp = await client.post(
+        "/api/admin/users",
+        json={"username": "legacy_user", "password": "pass123", "role": "user"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -72,7 +97,7 @@ async def test_admin_create_invalid_role(client):
 @pytest.mark.asyncio
 async def test_admin_toggle_user(client):
     admin_token = await get_admin_token(client)
-    await admin_create_user(client, "toggle_user", role="user")
+    await admin_create_user(client, "toggle_user", role="viewer")
 
     resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
     target = next(u for u in resp.json() if u["username"] == "toggle_user")
@@ -86,7 +111,7 @@ async def test_admin_toggle_user(client):
 @pytest.mark.asyncio
 async def test_admin_reset_user_password(client):
     admin_token = await get_admin_token(client)
-    await admin_create_user(client, "reset_password_user", password="oldpass123", role="user")
+    await admin_create_user(client, "reset_password_user", password="oldpass123", role="viewer")
 
     users_resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
     target = next(u for u in users_resp.json() if u["username"] == "reset_password_user")
@@ -114,7 +139,7 @@ async def test_admin_reset_user_password(client):
 @pytest.mark.asyncio
 async def test_admin_delete_user(client):
     admin_token = await get_admin_token(client)
-    await admin_create_user(client, "delete_admin_user", role="user")
+    await admin_create_user(client, "delete_admin_user", role="viewer")
 
     resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
     target = next(u for u in resp.json() if u["username"] == "delete_admin_user")
@@ -134,7 +159,7 @@ async def test_admin_delete_user_preview_and_cleanup_files(client, db_session, m
     monkeypatch.setattr(cleanup_service, "EXPORTS_DIR", export_dir)
 
     admin_token = await get_admin_token(client)
-    await admin_create_user(client, "delete_with_files", role="user")
+    await admin_create_user(client, "delete_with_files", role="viewer")
 
     users_resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
     target = next(u for u in users_resp.json() if u["username"] == "delete_with_files")
@@ -244,13 +269,6 @@ async def test_admin_cleanup_summary_and_run(client, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_user_cannot_access_admin(client):
-    user_token = await admin_create_user(client, "non_admin_user2", role="user")
-    resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {user_token}"})
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
 async def test_viewer_cannot_access_admin(client):
     viewer_token = await admin_create_user(client, "viewer_admin_test", role="viewer")
     resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {viewer_token}"})
@@ -258,11 +276,23 @@ async def test_viewer_cannot_access_admin(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_cannot_analyze(client):
+async def test_admin_can_analyze(client, monkeypatch):
+    """Admin now has analysis capability (the removed 'user' role's job)."""
+    from video_split.api import analysis as analysis_api
+
+    started: dict[str, int] = {}
+
+    def _fake_start(task_id, user_id, platform, url, **kwargs):
+        started["task_id"] = task_id
+
+    monkeypatch.setattr(analysis_api, "_start_background_analysis", _fake_start)
+
     admin_token = await get_admin_token(client)
     resp = await client.post(
         "/api/videos/analyze",
-        json={"url": "https://www.youtube.com/watch?v=test123"},
+        json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json()["platform"] == "youtube"
+    assert "task_id" in started

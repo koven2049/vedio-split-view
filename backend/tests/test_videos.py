@@ -5,7 +5,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from video_split.models import Segment, User, Video
-from tests.conftest import admin_create_user
+from tests.conftest import admin_create_user, get_admin_token
+
+
+async def _admin_user(db: AsyncSession) -> User:
+    """The seeded admin — sole owner of all library content."""
+    result = await db.execute(select(User).where(User.username == "admin"))
+    return result.scalar_one()
 
 
 async def _create_video(db: AsyncSession, user_id: int, title: str = "Test Video", is_public: bool = False) -> Video:
@@ -29,18 +35,17 @@ async def _create_video(db: AsyncSession, user_id: int, title: str = "Test Video
     return video
 
 
-# ─── Basic user tests ───
+# ─── Admin content-management tests ───
 
 
 @pytest.mark.asyncio
 async def test_list_my_videos(client, db_session):
-    token = await admin_create_user(client, "myvideos_user2")
+    token = await get_admin_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    result = await db_session.execute(select(User).where(User.username == "myvideos_user2"))
-    user = result.scalar_one()
-    await _create_video(db_session, user.id, "My Test Video 1")
-    await _create_video(db_session, user.id, "My Test Video 2")
+    admin = await _admin_user(db_session)
+    await _create_video(db_session, admin.id, "My Test Video 1")
+    await _create_video(db_session, admin.id, "My Test Video 2")
 
     resp = await client.get("/api/videos", headers=headers)
     assert resp.status_code == 200
@@ -50,12 +55,11 @@ async def test_list_my_videos(client, db_session):
 
 @pytest.mark.asyncio
 async def test_get_video_detail(client, db_session):
-    token = await admin_create_user(client, "detail_user2")
+    token = await get_admin_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    result = await db_session.execute(select(User).where(User.username == "detail_user2"))
-    user = result.scalar_one()
-    video = await _create_video(db_session, user.id, "Detail Video 2")
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "Detail Video 2")
 
     resp = await client.get(f"/api/videos/{video.id}", headers=headers)
     assert resp.status_code == 200
@@ -66,12 +70,11 @@ async def test_get_video_detail(client, db_session):
 
 @pytest.mark.asyncio
 async def test_delete_video(client, db_session):
-    token = await admin_create_user(client, "delete_user2")
+    token = await get_admin_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    result = await db_session.execute(select(User).where(User.username == "delete_user2"))
-    user = result.scalar_one()
-    video = await _create_video(db_session, user.id, "To Delete 2")
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "To Delete 2")
 
     resp = await client.delete(f"/api/videos/{video.id}", headers=headers)
     assert resp.status_code == 204
@@ -82,12 +85,11 @@ async def test_delete_video(client, db_session):
 
 @pytest.mark.asyncio
 async def test_share_unshare_video(client, db_session):
-    token = await admin_create_user(client, "share_user2")
+    token = await get_admin_token(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    result = await db_session.execute(select(User).where(User.username == "share_user2"))
-    user = result.scalar_one()
-    video = await _create_video(db_session, user.id, "Shareable Video 2")
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "Shareable Video 2")
 
     resp = await client.post(f"/api/videos/{video.id}/share", headers=headers)
     assert resp.status_code == 200
@@ -105,28 +107,13 @@ async def test_share_unshare_video(client, db_session):
     assert "Shareable Video 2" not in public_titles2
 
 
-@pytest.mark.asyncio
-async def test_cannot_access_other_users_video(client, db_session):
-    await admin_create_user(client, "owner_user2")
-    token2 = await admin_create_user(client, "other_user2")
-
-    result = await db_session.execute(select(User).where(User.username == "owner_user2"))
-    user1 = result.scalar_one()
-    video = await _create_video(db_session, user1.id, "Private Video 2")
-
-    resp = await client.get(f"/api/videos/{video.id}", headers={"Authorization": f"Bearer {token2}"})
-    assert resp.status_code == 403
-
-
 # ─── Viewer role tests ───
 
 
 @pytest.mark.asyncio
 async def test_viewer_can_see_public_videos(client, db_session):
-    user_token = await admin_create_user(client, "viewer_pub_owner")
-    result = await db_session.execute(select(User).where(User.username == "viewer_pub_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Viewer Public Video", is_public=True)
+    admin = await _admin_user(db_session)
+    await _create_video(db_session, admin.id, "Viewer Public Video", is_public=True)
 
     viewer_token = await admin_create_user(client, "viewer_pub_test", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}
@@ -139,10 +126,8 @@ async def test_viewer_can_see_public_videos(client, db_session):
 
 @pytest.mark.asyncio
 async def test_viewer_can_view_public_detail(client, db_session):
-    user_token = await admin_create_user(client, "viewer_detail_owner")
-    result = await db_session.execute(select(User).where(User.username == "viewer_detail_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Viewer Detail Video", is_public=True)
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "Viewer Detail Video", is_public=True)
 
     viewer_token = await admin_create_user(client, "viewer_detail_test", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}
@@ -153,26 +138,34 @@ async def test_viewer_can_view_public_detail(client, db_session):
 
 
 @pytest.mark.asyncio
-async def test_viewer_cannot_see_private_video(client, db_session):
-    user_token = await admin_create_user(client, "viewer_priv_owner")
-    result = await db_session.execute(select(User).where(User.username == "viewer_priv_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Private From Viewer", is_public=False)
+async def test_viewer_can_see_private_video(client, db_session):
+    """Viewer has full read access to the whole library, including private videos."""
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "Private In Library", is_public=False)
 
     viewer_token = await admin_create_user(client, "viewer_priv_test", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}
 
     resp = await client.get(f"/api/videos/{video.id}", headers=headers)
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Private In Library"
 
 
 @pytest.mark.asyncio
-async def test_viewer_cannot_list_my_videos(client):
-    viewer_token = await admin_create_user(client, "viewer_no_my", role="viewer")
+async def test_viewer_can_list_all_videos(client, db_session):
+    """The main listing returns the entire library to a viewer (public + private)."""
+    admin = await _admin_user(db_session)
+    await _create_video(db_session, admin.id, "Lib Public", is_public=True)
+    await _create_video(db_session, admin.id, "Lib Private", is_public=False)
+
+    viewer_token = await admin_create_user(client, "viewer_list_all", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}
 
     resp = await client.get("/api/videos", headers=headers)
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    titles = [v["title"] for v in resp.json()]
+    assert "Lib Public" in titles
+    assert "Lib Private" in titles
 
 
 @pytest.mark.asyncio
@@ -190,10 +183,8 @@ async def test_viewer_cannot_analyze(client):
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_delete_video(client, db_session):
-    user_token = await admin_create_user(client, "viewer_del_owner")
-    result = await db_session.execute(select(User).where(User.username == "viewer_del_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Viewer No Delete", is_public=True)
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "Viewer No Delete", is_public=True)
 
     viewer_token = await admin_create_user(client, "viewer_no_delete", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}
@@ -204,10 +195,8 @@ async def test_viewer_cannot_delete_video(client, db_session):
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_share_video(client, db_session):
-    user_token = await admin_create_user(client, "viewer_share_owner")
-    result = await db_session.execute(select(User).where(User.username == "viewer_share_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Viewer No Share", is_public=True)
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "Viewer No Share", is_public=True)
 
     viewer_token = await admin_create_user(client, "viewer_no_share", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}
@@ -218,10 +207,8 @@ async def test_viewer_cannot_share_video(client, db_session):
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_modify_tags(client, db_session):
-    user_token = await admin_create_user(client, "viewer_tag_owner")
-    result = await db_session.execute(select(User).where(User.username == "viewer_tag_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Viewer No Tag", is_public=True)
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "Viewer No Tag", is_public=True)
 
     viewer_token = await admin_create_user(client, "viewer_no_tag", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}
@@ -232,10 +219,8 @@ async def test_viewer_cannot_modify_tags(client, db_session):
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_update_video(client, db_session):
-    user_token = await admin_create_user(client, "viewer_upd_owner")
-    result = await db_session.execute(select(User).where(User.username == "viewer_upd_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Viewer No Update", is_public=True)
+    admin = await _admin_user(db_session)
+    video = await _create_video(db_session, admin.id, "Viewer No Update", is_public=True)
 
     viewer_token = await admin_create_user(client, "viewer_no_update", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}

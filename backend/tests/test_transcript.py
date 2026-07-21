@@ -68,34 +68,19 @@ async def test_get_transcript_not_found(client):
 
 
 @pytest.mark.asyncio
-async def test_get_transcript_forbidden_for_other_users_private(client, db_session):
-    await admin_create_user(client, "tr_owner")
-    result = await db_session.execute(select(User).where(User.username == "tr_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Private", is_public=False)
-
-    other_token = await admin_create_user(client, "tr_other")
-    resp = await client.get(
-        f"/api/videos/{video.id}/transcript",
-        headers={"Authorization": f"Bearer {other_token}"},
-    )
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_get_transcript_forbidden_for_viewer_on_private(client, db_session):
-    """The viewer-role branch (distinct from non-owner) must also block private access."""
-    await admin_create_user(client, "tr_priv_owner")
-    result = await db_session.execute(select(User).where(User.username == "tr_priv_owner"))
-    owner = result.scalar_one()
-    video = await _create_video(db_session, owner.id, "Private", is_public=False)
+async def test_get_transcript_readable_by_viewer_even_when_private(client, db_session):
+    """Viewers have full read access to the whole library, public or not."""
+    result = await db_session.execute(select(User).where(User.username == "admin"))
+    admin = result.scalar_one()
+    video = await _create_video(db_session, admin.id, "Private", is_public=False)
 
     viewer_token = await admin_create_user(client, "tr_viewer", role="viewer")
     resp = await client.get(
         f"/api/videos/{video.id}/transcript",
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json()["video_id"] == video.id
 
 
 @pytest.mark.asyncio

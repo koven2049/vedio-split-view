@@ -57,18 +57,12 @@ async def get_current_user(
 
 
 async def require_admin(user: User = Depends(get_current_user)) -> User:
+    """Write access. Only the single admin account may mutate content."""
     if user.role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin access required")
     return user
 
 
-async def require_user(user: User = Depends(get_current_user)) -> User:
-    if user.role != "user":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "User access required for this action")
-    return user
-
-
-async def require_user_or_admin(user: User = Depends(get_current_user)) -> User:
-    if user.role not in {"user", "admin"}:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "User or admin access required for this action")
+async def require_authenticated(user: User = Depends(get_current_user)) -> User:
+    """Read access. Any logged-in account (admin or viewer) is allowed."""
     return user

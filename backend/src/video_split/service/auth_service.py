@@ -56,17 +56,6 @@ async def ensure_admin_user(db: AsyncSession) -> None:
     await db.commit()
 
 
-async def register_user(db: AsyncSession, username: str, password: str) -> User:
-    result = await db.execute(select(User).where(User.username == username))
-    if result.scalar_one_or_none() is not None:
-        raise ValueError("Username already taken")
-    user = User(username=username, password_hash=hash_password(password), role="user", is_active=False)
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
-
-
 class PendingApprovalError(Exception):
     pass
 

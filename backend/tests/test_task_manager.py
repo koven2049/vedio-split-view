@@ -14,7 +14,7 @@ from video_split.service.task_manager import (
 
 
 async def _create_test_user(db, username="task_test_user") -> User:
-    user = User(username=username, password_hash=hash_password("pass"), role="user")
+    user = User(username=username, password_hash=hash_password("pass"), role="admin")
     db.add(user)
     await db.commit()
     await db.refresh(user)

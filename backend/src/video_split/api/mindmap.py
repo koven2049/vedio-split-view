@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
 from video_split.database import get_db
-from video_split.dependencies import get_current_user, require_user_or_admin
+from video_split.dependencies import get_current_user, require_admin
 from video_split.models import User, Video
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/videos", tags=["mindmap"])
 
 
-async def _get_video(video_id: int, user: User, db: AsyncSession) -> Video:
+async def _get_video(video_id: int, db: AsyncSession) -> Video:
+    # Any authenticated account (admin or viewer) can read any video's mindmap;
+    # callers gate write access via require_admin.
     result = await db.execute(
         select(Video)
         .options(selectinload(Video.segments))
@@ -27,21 +29,17 @@ async def _get_video(video_id: int, user: User, db: AsyncSession) -> Video:
     video = result.scalar_one_or_none()
     if video is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
-    if user.role == "viewer" and not video.is_public:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
-    if video.user_id != user.id and not video.is_public and user.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access denied")
     return video
 
 
 @router.get("/{video_id}/mindmap")
 async def get_mindmap(
     video_id: int,
-    user: User = Depends(get_current_user),
+    _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Return existing mindmap data, or status not_generated."""
-    video = await _get_video(video_id, user, db)
+    video = await _get_video(video_id, db)
     if video.mindmap_json:
         try:
             return json.loads(video.mindmap_json)
@@ -55,14 +53,11 @@ async def get_mindmap(
 async def generate_mindmap_endpoint(
     video_id: int,
     refresh: bool = False,
-    user: User = Depends(require_user_or_admin),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Generate mindmap via SSE stream. Only the video owner (or admin) can generate."""
-    video = await _get_video(video_id, user, db)
-
-    if video.user_id != user.id and user.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the video owner can generate mindmaps")
+    """Generate mindmap via SSE stream. Admin only."""
+    video = await _get_video(video_id, db)
 
     from video_split.service.brainstorm import generate_mindmap
 
