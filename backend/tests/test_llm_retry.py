@@ -14,6 +14,7 @@ import pytest
 from video_split.service import analyzer as analyzer_mod
 from video_split.service import brainstorm as brainstorm_mod
 from video_split.service.downloader import SubtitleEntry
+from video_split.service.llm_http import LLMInsufficientBalanceError
 
 
 def _ok_llm_response() -> dict:
@@ -25,11 +26,16 @@ def _ok_llm_response() -> dict:
 
 
 class _FlakyClient:
-    """httpx.AsyncClient stand-in: N 429s, then 200."""
+    """httpx.AsyncClient stand-in: N failures, then 200.
 
-    def __init__(self, failures: int, calls: list[int]):
+    fail_body lets callers return BigModel's 余额不足 body (code 1113) to
+    exercise the non-retryable path.
+    """
+
+    def __init__(self, failures: int, calls: list[int], fail_body: str = "rate limited"):
         self._failures = failures
         self._calls = calls
+        self._fail_body = fail_body
 
     async def __aenter__(self):
         return self
@@ -41,7 +47,7 @@ class _FlakyClient:
         self._calls.append(1)
         req = httpx.Request("POST", url)
         if len(self._calls) <= self._failures:
-            return httpx.Response(429, request=req, text="rate limited")
+            return httpx.Response(429, request=req, text=self._fail_body)
         return httpx.Response(200, request=req, json=_ok_llm_response())
 
 
@@ -107,3 +113,22 @@ async def test_brainstorm_retries_429_then_succeeds(monkeypatch, _llm_config):
 
     assert result == {"summary": "s", "segments": []}
     assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_analyzer_insufficient_balance_does_not_retry(monkeypatch, _llm_config):
+    """BigModel code 1113 (余额不足) is deterministic — retrying won't help.
+    Fail fast on the first attempt with a clear Chinese error so the user
+    knows to top up, instead of burning 2s/4s backoff on every request."""
+    calls: list[int] = []
+    body = '{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}'
+    monkeypatch.setattr(
+        analyzer_mod.httpx, "AsyncClient",
+        lambda **kw: _FlakyClient(failures=99, calls=calls, fail_body=body),
+    )
+    subs = [SubtitleEntry(start=0.0, duration=5.0, text="hello")]
+
+    with pytest.raises(LLMInsufficientBalanceError, match="余额不足"):
+        await analyzer_mod.analyze_transcript(subs, duration_seconds=30)
+
+    assert len(calls) == 1  # no retry — failed fast
