@@ -22,6 +22,9 @@ async def test_youtube_cookies_status_reports_probe_failure(client, test_config_
         encoding="utf-8",
     )
 
+    from video_split.config import get_settings
+    monkeypatch.setattr(get_settings().network, "youtube_cookies_file", str(cookie_file))
+
     monkeypatch.setattr(
         youtube_api,
         "_probe_youtube_cookiefile",
@@ -58,6 +61,9 @@ async def test_youtube_cookies_status_allows_admin(client, test_config_path, mon
         ]),
         encoding="utf-8",
     )
+
+    from video_split.config import get_settings
+    monkeypatch.setattr(get_settings().network, "youtube_cookies_file", str(cookie_file))
 
     monkeypatch.setattr(
         youtube_api,
