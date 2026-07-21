@@ -22,6 +22,12 @@ config/*_cookies.txt
 # manage.sh bind mount ($SCRIPT_DIR/data) always lands inside the project.
 data/*
 !data/.gitkeep
+# Belt-and-suspenders: never commit a SQLite DB from any path (e.g. a stray
+# backend/data/ created by running the CLI from the wrong cwd).
+*.db
+*.sqlite
+*.sqlite3
+backend/data/
 logs/
 
 # Podman
