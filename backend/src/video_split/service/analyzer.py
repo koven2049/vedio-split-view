@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -10,6 +9,7 @@ import httpx
 
 from video_split.config import get_settings
 from video_split.service.downloader import SubtitleEntry
+from video_split.service.llm_http import post_chat
 
 logger = logging.getLogger(__name__)
 
@@ -181,42 +181,7 @@ async def analyze_transcript(
         base_url, settings.llm.model, len(subtitles), len(prompt),
     )
 
-    max_retries = 3
-    _TRANSIENT_ERRORS = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.RemoteProtocolError)
-    last_exc: Exception | None = None
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                result = resp.json()
-            break
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code >= 500 and attempt < max_retries:
-                wait = 2 ** attempt
-                logger.warning("[llm] HTTP %d (attempt %d/%d), retrying in %ds",
-                               e.response.status_code, attempt, max_retries, wait)
-                await asyncio.sleep(wait)
-                last_exc = e
-                continue
-            logger.error("[llm] HTTP %d from %s: %s", e.response.status_code, url, e.response.text[:500])
-            raise
-        except _TRANSIENT_ERRORS as e:
-            last_exc = e
-            if attempt < max_retries:
-                wait = 2 ** attempt
-                logger.warning("[llm] %s (attempt %d/%d), retrying in %ds",
-                               type(e).__name__, attempt, max_retries, wait)
-                await asyncio.sleep(wait)
-                continue
-            logger.exception("[llm] Request to %s failed after %d attempts", url, max_retries)
-            raise
-        except Exception:
-            logger.exception("[llm] Request to %s failed", url)
-            raise
-    else:
-        raise last_exc  # type: ignore[misc]
+    result = await post_chat(url, payload, headers, timeout)
 
     content = result["choices"][0]["message"]["content"]
     usage = result.get("usage", {})

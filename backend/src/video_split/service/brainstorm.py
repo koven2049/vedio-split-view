@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from video_split.config import get_settings
 from video_split.models import Video
+from video_split.service.llm_http import post_chat
 from video_split.service.video_service import accumulate_usage
 
 logger = logging.getLogger(__name__)
@@ -161,10 +162,7 @@ async def _call_llm(prompt: str) -> tuple[dict, dict]:
         settings.llm.model,
         len(prompt),
     )
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-        result = resp.json()
+    result = await post_chat(url, payload, headers, timeout)
 
     content = result["choices"][0]["message"]["content"]
     usage = result.get("usage", {})
