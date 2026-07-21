@@ -124,7 +124,18 @@ def _parse_llm_response(text: str) -> AnalysisResult:
     json_match = re.search(r"\{[\s\S]*\}", text)
     if not json_match:
         raise ValueError("LLM response does not contain valid JSON")
-    data = json.loads(json_match.group())
+    raw = json_match.group()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Reasoning models (glm-5.2 etc.) routinely emit unescaped " inside
+        # string values — e.g. 'like the "trap theory"'. Fall back to a
+        # tolerant repair so a multi-minute transcription isn't wasted on a
+        # stray quote. Still raises if even repair can't salvage it.
+        from json_repair import repair_json
+        repaired = repair_json(raw, return_objects=False)
+        data = json.loads(repaired)
+        logger.warning("[llm] response JSON was malformed; repaired %d chars", len(raw))
 
     segments = []
     for seg in data.get("segments", []):
