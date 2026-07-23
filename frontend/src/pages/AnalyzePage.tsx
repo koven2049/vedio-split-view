@@ -102,6 +102,10 @@ export function AnalysisSlotCard({
     return error
   })()
 
+  // Deterministic failures (e.g. duration over the hard limit) can never
+  // succeed on retry — hide the retry button instead of inviting a no-op.
+  const retryable = errorCode !== 'duration_exceeded'
+
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
     if (!analyzing) return
@@ -265,7 +269,7 @@ export function AnalysisSlotCard({
         <div className="p-4 rounded-xl flex items-start gap-3" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-danger)' }}>
           <AlertCircle size={18} style={{ color: 'var(--color-danger)' }} className="mt-0.5 shrink-0" />
           <p className="text-sm flex-1">{errorDisplay}</p>
-          {slot.taskId && onRetry && (
+          {slot.taskId && onRetry && retryable && (
             <button
               onClick={onRetry}
               disabled={!canRetry}

@@ -11,7 +11,7 @@ import { AnalysisSlotCard } from './AnalyzePage'
 //   - QueryClientProvider  (useQueryClient)
 //   - analysisStore  (useAnalysisStore — a zustand global, no provider needed;
 //     we set state directly before each test)
-function renderCard(slot: Partial<SlotState> & { platform: string }) {
+function renderCard(slot: Partial<SlotState> & { platform: string }, opts: { onRetry?: () => void } = {}) {
   const t = createT('en')
   const value = { locale: 'en' as const, t, setLocale: () => {} }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -38,7 +38,8 @@ function renderCard(slot: Partial<SlotState> & { platform: string }) {
           lang="en"
           setLang={() => {}}
           onNavigateVideo={() => {}}
-          canRetry={false}
+          canRetry={true}
+          onRetry={opts.onRetry}
         />
       </QueryClientProvider>
     </I18nContext.Provider>,
@@ -140,5 +141,33 @@ describe('AnalysisSlotCard — typed Xiaoyuzhou error message (spec 3.4)', () =>
       stepLog: [],
     })
     expect(screen.getByText('backend raw message')).toBeInTheDocument()
+  })
+})
+
+describe('AnalysisSlotCard — retry button visibility on deterministic failures', () => {
+  it('hides retry when duration_exceeded (retry can never succeed)', () => {
+    renderCard({
+      platform: 'youtube',
+      taskId: 7,
+      analyzing: false,
+      error: 'Video is 4h0m, exceeding the 3h30m limit.',
+      errorCode: 'duration_exceeded',
+      progress: { stage: 'error', progress: 0, message: 'exceeded' },
+      stepLog: [],
+    }, { onRetry: () => {} })
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
+  })
+
+  it('shows retry for transient failures (e.g. cdn_expired)', () => {
+    renderCard({
+      platform: 'xiaoyuzhou',
+      taskId: 7,
+      analyzing: false,
+      error: 'cdn gone',
+      errorCode: 'cdn_expired',
+      progress: { stage: 'error', progress: 0, message: 'cdn gone' },
+      stepLog: [],
+    }, { onRetry: () => {} })
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
   })
 })

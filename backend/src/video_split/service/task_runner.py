@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, AsyncGenerator
 
 from video_split.schemas import ProgressEvent
+from video_split.service.video_service import DurationLimitExceeded
 from video_split.service.xiaoyuzhou import XiaoyuzhouError
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,15 @@ class TaskRunner:
                 err = ProgressEvent(
                     stage="error", progress=0, message=str(e),
                     detail={"error_code": e.code},
+                )
+                self._broadcast(rt, {"event": "error", "data": err.model_dump_json()})
+            except DurationLimitExceeded as e:
+                # Deterministic — same URL will always exceed the limit, so
+                # tell the frontend not to offer a retry.
+                logger.error("[runner] Task #%d duration exceeded: %s", task_id, e)
+                err = ProgressEvent(
+                    stage="error", progress=0, message=str(e),
+                    detail={"error_code": "duration_exceeded"},
                 )
                 self._broadcast(rt, {"event": "error", "data": err.model_dump_json()})
             except Exception as e:

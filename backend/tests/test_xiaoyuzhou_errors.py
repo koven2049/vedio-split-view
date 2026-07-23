@@ -315,3 +315,33 @@ async def test_task_runner_no_error_code_for_generic_exception():
     # Either detail is None, or detail has no error_code key.
     if payload["detail"] is not None:
         assert "error_code" not in payload["detail"]
+
+
+@pytest.mark.asyncio
+async def test_task_runner_duration_exceeded_error_code():
+    """Exceeding max_duration is deterministic — the error event must carry
+    error_code=duration_exceeded so the frontend can hide the (useless) retry
+    button instead of inviting the user to retry an impossible task."""
+    from video_split.service.video_service import DurationLimitExceeded
+
+    async def _gen_factory(cancel_event, confirm_event):
+        yield ProgressEvent(stage="metadata", progress=5, message="...")
+        raise DurationLimitExceeded("Video is 4h0m, exceeding the 3h30m limit.")
+
+    runner = TaskRunner()
+    rt = runner.start(
+        task_id=99003, user_id=1, platform="youtube",
+        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", gen_factory=_gen_factory,
+    )
+
+    import asyncio as _asyncio
+    for _ in range(100):
+        if rt.finished:
+            break
+        await _asyncio.sleep(0.01)
+
+    error_events = [e for e in rt.events if e["event"] == "error"]
+    assert error_events
+    payload = json.loads(error_events[-1]["data"])
+    assert payload["detail"] is not None
+    assert payload["detail"].get("error_code") == "duration_exceeded"

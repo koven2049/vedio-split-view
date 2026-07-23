@@ -60,6 +60,15 @@ class AnalysisCancelled(Exception):
     pass
 
 
+class DurationLimitExceeded(ValueError):
+    """Video/podcast exceeds the hard max-duration limit.
+
+    Deterministic — retrying the same URL can never succeed, so the frontend
+    should show the reason without offering a retry button
+    (error_code=duration_exceeded).
+    """
+
+
 def _transcription_progress_pct(tp: TranscriptionProgress) -> int:
     """Map transcription sub-step to an overall progress percentage (56-84 range)."""
     base, span = 56, 28  # transcription occupies progress 56..84
@@ -221,7 +230,7 @@ async def run_analysis(
         limits = user_limits or {}
         max_dur = limits.get("max_duration_seconds") or settings.video.max_duration_seconds
         if duration > max_dur:
-            raise ValueError(
+            raise DurationLimitExceeded(
                 f"Video is {duration // 3600}h{(duration % 3600) // 60}m, "
                 f"exceeding the {max_dur // 3600}h{(max_dur % 3600) // 60}m limit."
             )
