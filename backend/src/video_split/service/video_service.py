@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from video_split.models import BilibiliCredential, Segment, Tag, Task, User, Video, video_tags
 from video_split.schemas import ProgressEvent
+from video_split.service.error_text import describe_error
 from video_split.service.analyzer import analyze_transcript
 from video_split.service.downloader import (
     MIN_AUDIO_BYTES,
@@ -171,6 +172,7 @@ async def _save_analysis_results(
         user_id=task.user_id, url=meta.url, platform=meta.platform, video_id=meta.video_id,
         title=meta.title, thumbnail_url=meta.thumbnail_url, upload_date=meta.upload_date,
         duration_seconds=meta.duration_seconds, summary=analysis.summary, summary_en=analysis.summary_en,
+        essence=analysis.essence,
         raw_transcript=transcript_text, subtitle_json=subtitle_data,
         usage_json=json.dumps(usage_data, ensure_ascii=False),
     )
@@ -406,8 +408,8 @@ async def run_analysis(
                         ):
                             yield ev
                 except Exception as e:
-                    logger.error("[analysis] Task #%d — audio download failed: %s", task.id, e)
-                    await update_task_status(db, task, "failed_download", str(e))
+                    logger.error("[analysis] Task #%d — audio download failed: %s", task.id, describe_error(e))
+                    await update_task_status(db, task, "failed_download", describe_error(e))
                     raise
 
                 file_size_mb = audio_path.stat().st_size / (1024 * 1024)
@@ -455,8 +457,8 @@ async def run_analysis(
             except Exception as e:
                 if not transcription_task.done():
                     transcription_task.cancel()
-                logger.error("[analysis] Task #%d — transcription failed: %s", task.id, e)
-                await update_task_status(db, task, "failed_transcribe", str(e))
+                logger.error("[analysis] Task #%d — transcription failed: %s", task.id, describe_error(e))
+                await update_task_status(db, task, "failed_transcribe", describe_error(e))
                 raise
 
             # drain remaining progress events
@@ -477,6 +479,16 @@ async def run_analysis(
                 detail={"entry_count": len(subtitles)},
             )
 
+        # Stage 4.5: Translate subtitles to Chinese if not already
+        from video_split.service.analyzer import _is_mostly_chinese, translate_subtitles_to_chinese
+        if not _is_mostly_chinese(subtitles):
+            yield ProgressEvent(
+                stage="translation", progress=86,
+                message=f"Translating {len(subtitles)} subtitles to Chinese...",
+            )
+            logger.info("[analysis] Task #%d — translating %d subtitles to Chinese", task.id, len(subtitles))
+            subtitles = await translate_subtitles_to_chinese(subtitles)
+
         # Stage 5: LLM analysis
         settings = get_settings()
         llm_model = settings.llm.model
@@ -494,12 +506,12 @@ async def run_analysis(
         try:
             analysis = await analyze_transcript(subtitles, meta.duration_seconds)
         except Exception as e:
-            logger.error("[analysis] Task #%d — LLM analysis failed: %s", task.id, e)
+            logger.error("[analysis] Task #%d — LLM analysis failed: %s", task.id, describe_error(e))
             transcript_text = json.dumps(
                 [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles]
             )
             task.progress_data = transcript_text
-            await update_task_status(db, task, "failed_analyze", str(e))
+            await update_task_status(db, task, "failed_analyze", describe_error(e))
             raise
 
         _check_cancelled()
@@ -528,18 +540,18 @@ async def run_analysis(
         logger.error("[analysis] Task #%d — unhandled error: %s", task.id, e)
         try:
             if task.status == "downloading":
-                await update_task_status(db, task, "failed_download", str(e))
+                await update_task_status(db, task, "failed_download", describe_error(e))
             elif task.status == "analyzing":
                 if subtitles:
                     task.progress_data = json.dumps(
                         [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles]
                     )
-                await update_task_status(db, task, "failed_analyze", str(e))
+                await update_task_status(db, task, "failed_analyze", describe_error(e))
             elif task.status == "transcribing":
-                await update_task_status(db, task, "failed_transcribe", str(e))
+                await update_task_status(db, task, "failed_transcribe", describe_error(e))
         except Exception:
             logger.exception("[analysis] Task #%d — failed to update status after error", task.id)
-        yield ProgressEvent(stage="error", progress=0, message=str(e))
+        yield ProgressEvent(stage="error", progress=0, message=describe_error(e))
         raise
 
 
@@ -789,16 +801,16 @@ async def resume_analysis(
                 audio_path_dl = audio_files[0]
         except XiaoyuzhouError as e:
             logger.error("[analysis] Task #%d — xiaoyuzhou retry failed (%s): %s", task.id, e.code, e)
-            await update_task_status(db, task, "failed_download", str(e))
+            await update_task_status(db, task, "failed_download", describe_error(e))
             yield ProgressEvent(
-                stage="error", progress=0, message=str(e),
+                stage="error", progress=0, message=describe_error(e),
                 detail={"error_code": e.code},
             )
             return
         except Exception as e:
-            logger.error("[analysis] Task #%d — download retry failed: %s", task.id, e)
-            await update_task_status(db, task, "failed_download", str(e))
-            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            logger.error("[analysis] Task #%d — download retry failed: %s", task.id, describe_error(e))
+            await update_task_status(db, task, "failed_download", describe_error(e))
+            yield ProgressEvent(stage="error", progress=0, message=describe_error(e))
             return
 
         file_size_mb = audio_path_dl.stat().st_size / (1024 * 1024)
@@ -827,9 +839,9 @@ async def resume_analysis(
         except Exception as e:
             if not transcription_task_dl.done():
                 transcription_task_dl.cancel()
-            logger.error("[analysis] Task #%d — transcription failed on download-retry: %s", task.id, e)
-            await update_task_status(db, task, "failed_transcribe", str(e))
-            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            logger.error("[analysis] Task #%d — transcription failed on download-retry: %s", task.id, describe_error(e))
+            await update_task_status(db, task, "failed_transcribe", describe_error(e))
+            yield ProgressEvent(stage="error", progress=0, message=describe_error(e))
             return
 
         yield ProgressEvent(stage="transcription", progress=85, message="Transcription complete.")
@@ -839,12 +851,12 @@ async def resume_analysis(
         try:
             analysis_dl = await analyze_transcript(subtitles_dl, meta.duration_seconds)
         except Exception as e:
-            logger.error("[analysis] Task #%d — LLM failed on download-retry: %s", task.id, e)
+            logger.error("[analysis] Task #%d — LLM failed on download-retry: %s", task.id, describe_error(e))
             task.progress_data = json.dumps(
                 [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles_dl]
             )
-            await update_task_status(db, task, "failed_analyze", str(e))
-            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            await update_task_status(db, task, "failed_analyze", describe_error(e))
+            yield ProgressEvent(stage="error", progress=0, message=describe_error(e))
             return
 
         video_dl, usage_data_dl = await _save_analysis_results(
@@ -887,8 +899,8 @@ async def resume_analysis(
             if not transcription_task.done():
                 transcription_task.cancel()
             logger.error("[analysis] Task #%d — transcription failed on resume: %s", task.id, e)
-            await update_task_status(db, task, "failed_transcribe", str(e))
-            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            await update_task_status(db, task, "failed_transcribe", describe_error(e))
+            yield ProgressEvent(stage="error", progress=0, message=describe_error(e))
             return
 
         logger.info("[analysis] Task #%d — transcription done: %d segments", task.id, len(subtitles))
@@ -903,8 +915,8 @@ async def resume_analysis(
             task.progress_data = json.dumps(
                 [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles]
             )
-            await update_task_status(db, task, "failed_analyze", str(e))
-            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            await update_task_status(db, task, "failed_analyze", describe_error(e))
+            yield ProgressEvent(stage="error", progress=0, message=describe_error(e))
             return
 
         video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
@@ -939,8 +951,8 @@ async def resume_analysis(
             analysis = await analyze_transcript(subtitles, meta.duration_seconds)
         except Exception as e:
             logger.error("[analysis] Task #%d — LLM analysis failed on resume: %s", task.id, e)
-            await update_task_status(db, task, "failed_analyze", str(e))
-            yield ProgressEvent(stage="error", progress=0, message=str(e))
+            await update_task_status(db, task, "failed_analyze", describe_error(e))
+            yield ProgressEvent(stage="error", progress=0, message=describe_error(e))
             return
 
         video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)

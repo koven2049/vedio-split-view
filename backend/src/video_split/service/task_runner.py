@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, AsyncGenerator
 
 from video_split.schemas import ProgressEvent
+from video_split.service.error_text import describe_error
 from video_split.service.video_service import DurationLimitExceeded
 from video_split.service.xiaoyuzhou import XiaoyuzhouError
 
@@ -90,7 +91,7 @@ class TaskRunner:
                 logger.error("[runner] Task #%d xiaoyuzhou failure (%s): %s",
                              task_id, e.code, e)
                 err = ProgressEvent(
-                    stage="error", progress=0, message=str(e),
+                    stage="error", progress=0, message=describe_error(e),
                     detail={"error_code": e.code},
                 )
                 self._broadcast(rt, {"event": "error", "data": err.model_dump_json()})
@@ -99,13 +100,13 @@ class TaskRunner:
                 # tell the frontend not to offer a retry.
                 logger.error("[runner] Task #%d duration exceeded: %s", task_id, e)
                 err = ProgressEvent(
-                    stage="error", progress=0, message=str(e),
+                    stage="error", progress=0, message=describe_error(e),
                     detail={"error_code": "duration_exceeded"},
                 )
                 self._broadcast(rt, {"event": "error", "data": err.model_dump_json()})
             except Exception as e:
                 logger.error("[runner] Task #%d unhandled: %s", task_id, e)
-                err = ProgressEvent(stage="error", progress=0, message=str(e))
+                err = ProgressEvent(stage="error", progress=0, message=describe_error(e))
                 self._broadcast(rt, {"event": "error", "data": err.model_dump_json()})
             finally:
                 rt.finished = True
