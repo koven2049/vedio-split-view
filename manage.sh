@@ -443,6 +443,48 @@ run_status() {
     _report_data_health
 }
 
+run_backup() {
+    ensure_config
+    local enabled dir max_copies db_path
+    enabled=$(read_yaml_value "backup.enabled" "false")
+    dir=$(read_yaml_value "backup.dir" "")
+    max_copies=$(read_yaml_value "backup.max_copies" "3")
+    db_path=$(read_yaml_value "storage.db_path" "data/video_split.db")
+
+    if [[ "$enabled" != "true" ]]; then
+        log_warn "backup.enabled is not true in app.yaml — skipping."
+        return 0
+    fi
+    if [[ -z "$dir" ]]; then
+        log_error "backup.dir is empty in app.yaml."
+        exit 1
+    fi
+    if [[ ! -f "$db_path" ]]; then
+        log_error "Database not found: $db_path"
+        exit 1
+    fi
+
+    mkdir -p "$dir"
+    local ts filename
+    ts=$(date +%Y%m%d_%H%M%S)
+    filename="video_split_${ts}.db"
+    log_step "Backing up database → $dir/$filename"
+    cp "$db_path" "$dir/$filename"
+    log_ok "Backup created: $dir/$filename ($(du -h "$dir/$filename" | cut -f1))"
+
+    # Retention: keep newest $max_copies, delete the rest
+    local count deleted=0
+    count=$(ls -1 "$dir"/video_split_*.db 2>/dev/null | wc -l | tr -d ' ')
+    if [[ $count -gt $max_copies ]]; then
+        ls -1t "$dir"/video_split_*.db | tail -n +$((max_copies + 1)) | while IFS= read -r old; do
+            rm -f "$old"
+            deleted=$((deleted + 1))
+            log_info "Removed old backup: $(basename "$old")"
+        done
+    fi
+    log_ok "Retention: $count total, keeping $max_copies"
+}
+
 run_export() {
     ensure_config
     local port
@@ -747,6 +789,7 @@ main() {
         status)      run_status ;;
         export)      run_export "$@" ;;
         import)      run_import "$@" ;;
+        backup)      run_backup "$@" ;;
         deploy)        run_deploy "$@" ;;
         deploy-data)   run_deploy_data "$@" ;;
         clean-exports) run_clean_exports "$@" ;;

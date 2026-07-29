@@ -62,6 +62,7 @@ class Video(Base):
     duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str] = mapped_column(Text, default="")
     summary_en: Mapped[str] = mapped_column(Text, default="")
+    essence: Mapped[str] = mapped_column(Text, default="")
     raw_transcript: Mapped[str] = mapped_column(Text, default="")
     subtitle_json: Mapped[str] = mapped_column(Text, default="")
     usage_json: Mapped[str] = mapped_column(Text, default="")
@@ -156,3 +157,20 @@ class BilibiliCredential(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     owner: Mapped[User] = relationship(back_populates="bilibili_credential")
+
+
+class LLMLog(Base):
+    __tablename__ = "llm_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), default="primary")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    purpose: Mapped[str] = mapped_column(String(64), default="")
+    status: Mapped[str] = mapped_column(String(16), default="ok")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

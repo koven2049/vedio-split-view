@@ -8,6 +8,7 @@ import VideoDetailPage from './pages/VideoDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import ApiDocsPage from './pages/ApiDocsPage'
 import AdminPage from './pages/AdminPage'
+import LLMLogsPage from './pages/LLMLogsPage'
 
 function ProtectedRoute({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
   const { token, role } = useAuthStore()
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
         <Route path="/video/:id" element={<ProtectedRoute><VideoDetailPage /></ProtectedRoute>} />
         <Route path="/api-docs" element={<ProtectedRoute adminOnly><ApiDocsPage /></ProtectedRoute>} />
+        <Route path="/llm-logs" element={<ProtectedRoute adminOnly><LLMLogsPage /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
       </Route>

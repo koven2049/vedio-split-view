@@ -145,6 +145,7 @@ class VideoOut(BaseModel):
     duration_seconds: int
     summary: str
     summary_en: str = ""
+    essence: str = ""
     usage_json: str = ""
     mindmap_json: str = ""
     is_public: bool
@@ -291,3 +292,20 @@ class DebugCleanupResponse(BaseModel):
     task_id: int
     files_removed: int
     status: str
+
+
+class LLMLogOut(BaseModel):
+    id: int
+    task_id: int | None = None
+    provider: str
+    model: str
+    purpose: str
+    status: str
+    error_message: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    duration_ms: int = 0
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

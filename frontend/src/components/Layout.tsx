@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { BookOpen, LayoutDashboard, Library, Settings, Shield, LogOut, Video } from 'lucide-react'
+import { BookOpen, LayoutDashboard, Library, ScrollText, Settings, Shield, LogOut, Video } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { cn } from '../lib/utils'
 import { useLocale, type TranslationKey } from '../i18n'
@@ -13,6 +13,7 @@ const NAV_ITEMS: {
 }[] = [
   { path: '/analyze', label: 'nav.analyze', icon: Video, roles: ['admin'] },
   { path: '/library', label: 'nav.library', icon: Library, roles: ['admin', 'viewer'] },
+  { path: '/llm-logs', label: 'nav.llmLogs', icon: ScrollText, roles: ['admin'] },
   { path: '/api-docs', label: 'nav.apiDocs', icon: BookOpen, roles: ['admin'] },
   { path: '/settings', label: 'nav.settings', icon: Settings, roles: ['admin'] },
   { path: '/admin', label: 'nav.users', icon: Shield, roles: ['admin'] },

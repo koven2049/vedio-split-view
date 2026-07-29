@@ -1,220 +1,97 @@
 # VideoSplit
 
-将长视频拆分为独立主题片段的自动化分析服务。支持 Bilibili / YouTube。
+把一条长视频链接变成一份带摘要、主题片段和脑图的结构化笔记。
 
-## 分析流程
+粘贴 YouTube / Bilibili / 小宇宙 链接，服务会自动获取字幕（或转录音频），再用 LLM 按主题把视频切分成若干片段，每段配一句摘要和起止时间。结果可以在线浏览、导出 Markdown、生成脑图，也能分享到站内广场。
 
-```
-┌──────────┐     ┌───────────────┐     ┌──────────────┐     ┌────────────┐     ┌──────────┐
-│  用户输入  │────▶│  提取视频元数据  │────▶│  获取字幕/转录  │────▶│  LLM 内容分析 │────▶│  保存结果  │
-│  视频 URL  │     │  (yt-dlp)      │     │              │     │  (主题分段)  │     │  (SQLite) │
-└──────────┘     └───────────────┘     └──────┬───────┘     └────────────┘     └──────────┘
-                                              │
-                              ┌────────────────┼────────────────┐
-                              ▼                ▼                ▼
-                     YouTube 字幕 API    Bilibili 字幕      音频转录
-                     (无需认证)          (需 QR 登录)      (无字幕时)
-                                                               │
-                                                    ┌──────────┴──────────┐
-                                                    ▼                     ▼
-                                              OpenAI Whisper        Aliyun Fun-ASR
-                                              (直传文件)            (OSS → 签名URL)
-```
+## 功能
 
-**音频转录细节：**
-```
-音频文件 ──▶ ffmpeg 按 5min 切片 ──▶ 逐片转录（带缓存） ──▶ 合并时间线 ──▶ 完整文本
-                                       │
-                                  .transcript.json 缓存
-                                  (重试时跳过已完成片段)
-```
+- **一键分析**：粘贴链接即可，进度通过实时流推送（下载 → 字幕/转录 → AI 分析）。
+- **主题分段**：AI 按内容主题把长视频拆成独立片段，标注每段起止时间与一句话摘要。
+- **字幕 + 摘要**：每个片段可显示原文字幕，点击「从此处播放」直接跳到对应位置；同时给出整段精华总结。
+- **脑图模式**：AI 把内容按章节重组，提取关键要点和名言金句，一眼看清视频骨架。
+- **导出 Markdown**：一键导出全文（摘要 + 各片段 + 逐字稿）或仅精华总结，方便存进 Obsidian / Notion。
+- **资源库 + 广场**：分析过的视频进资源库管理，可设为公开分享到广场给其他用户看。
+- **标签管理**：给视频打标签，资源库支持搜索。
+- **多用户**：管理员账号负责建用户、配额、清理存储；普通用户独立空间。
+- **API Token**：可在设置里签发长期 Token，用脚本或外部工具调用分析接口。
+- **用量追踪**：记录每次分析的 LLM / ASR Token 消耗，视频删除后统计仍保留。
+- **双语界面**：中文 / English 自由切换。
 
-## 快速开始
+## 支持的平台
+
+| 平台 | 字幕来源 | 备注 |
+|------|---------|------|
+| YouTube | YouTube 字幕 API | 部分视频需配置 cookies 才能下载 |
+| Bilibili | 官方字幕 API | 需在设置里扫码登录 Bilibili 账号 |
+| 小宇宙 | 内嵌逐字稿 | 仅支持公开单集 |
+
+当视频没有可用字幕时，服务会下载音频并调用转录模型（OpenAI Whisper 或阿里云 Fun-ASR）生成文本，再进入分析。
+
+## 怎么用
+
+1. 用管理员账号登录后，在「用户管理」创建一个普通用户。
+2. 切到普通账号，在「分析」页粘贴视频链接，点「分析」。
+3. 等待流水线跑完（有字幕的视频通常很快；需要转录的长视频会久一些）。
+4. 在「资源库」或「分析」页点开视频详情：看摘要、浏览片段、生成脑图、导出 Markdown。
+
+## 自部署
+
+依赖：**Podman**（不依赖 Docker）。先装好并启动 Podman，确认 `podman info` 能跑通。
 
 ```bash
-# 0. 确认本机已安装并启动 Podman
-podman info
-
-# 1. 初始化（生成配置 + HTTPS 证书）
+# 1. 初始化（生成配置模板 + 目录结构）
 bash manage.sh init
 
-# 2. 编辑配置（必填 admin.password, llm.api_key, transcription.api_key）
+# 2. 填配置（必填项见下表）
 vim config/app.yaml
 
 # 3. 构建并启动
 bash manage.sh rebuild
 ```
 
-打开 `https://localhost:5180`，用 admin 账号登录后创建普通用户。
+打开 `https://localhost:5180`，用 admin 账号登录即可。
 
-## manage.sh
+### 常用命令
 
 ```bash
-bash manage.sh init                  # 初始化目录、配置、证书
-bash manage.sh start                 # 启动
-bash manage.sh stop                  # 停止
-bash manage.sh restart               # 重启
-bash manage.sh rebuild               # 增量构建并重启（最常用）
-bash manage.sh rebuild -n            # 无缓存完全重建
-bash manage.sh rebuild -p            # 重新拉取基础镜像
-bash manage.sh status                # 查看状态 + 健康检查
-bash manage.sh clean                 # 清理构建缓存
+bash manage.sh status     # 查看容器状态 + 健康检查 + 数据库行数
+bash manage.sh rebuild     # 改完代码后增量构建并重启（最常用）
+bash manage.sh restart     # 只重启，不重建镜像
+bash manage.sh stop        # 停止
+bash manage.sh start       # 启动
 ```
 
-容器生命周期由 `manage.sh` 直接调用 Podman：构建使用 `podman build`，启动使用
-`podman run` 创建 `vsplit-backend` / `vsplit-frontend` 两个容器，并放入
-`vsplit-net` 网络。脚本不再依赖 `podman compose`，因此不会被 Podman 委托给
-Docker Compose provider。
-
-## 部署配置 (config/deploy.cfg)
-
-`manage.sh deploy` 和 `manage.sh deploy-data` 默认读取 `config/deploy.cfg`。首次配置：
+部署到远端服务器：
 
 ```bash
 cp config/deploy.cfg.example config/deploy.cfg
-vim config/deploy.cfg
+vim config/deploy.cfg       # 填 DEPLOY_REMOTE 和 DEPLOY_REMOTE_DIR
+bash manage.sh deploy -d    # dry-run 预览
+bash manage.sh deploy       # 同步代码（不含 data/、配置、密钥）
 ```
 
-`config/deploy.cfg` 是本地配置，不进 Git；`config/deploy.cfg.example` 用于提交模板。
+## 配置（config/app.yaml）
 
-```bash
-DEPLOY_REMOTE="root@your-server"
-DEPLOY_REMOTE_DIR="ai/vedio-split-view"
-```
+`config/app.yaml` 可以很短，没写的字段都走代码默认值。**必填**：
 
-常用方式：
+| 节 | 字段 | 说明 |
+|----|------|------|
+| `app` | `secret_key` | JWT 密钥，生产请换成随机长字符串 |
+| `admin` | `password` | 管理员密码，留空服务拒绝启动 |
+| `llm` | `base_url`, `model`, `api_key` | 视频分析用的 OpenAI 兼容 LLM |
 
-```bash
-bash manage.sh deploy -d     # dry run，使用 config/deploy.cfg
-bash manage.sh deploy        # 同步代码到远端，不同步 data/config/app.yaml 等敏感和运行时数据
-bash manage.sh deploy-data   # 同步导出的 JSON 和缩略图
-```
+**按需**（只在用到时才写）：
 
-命令行参数仍可覆盖配置，例如 `bash manage.sh deploy root@srv ai/vedio-split-view`。
+| 节 | 何时需要 |
+|----|---------|
+| `transcription` | 视频无可用字幕、需要音频转录时（Whisper 或 Fun-ASR） |
+| `oss` | 使用阿里云 Fun-ASR 时（Whisper 不需要） |
+| `network` | 下载 / 字幕需要代理，或 YouTube 需要登录态时 |
+| `app` (`port`, `frontend_port`) | 想改默认端口 8080 / 5180 时 |
 
-## 数据安全纪律（务必遵守）
+完整字段和默认值见 `config/app.yaml.example`。
 
-生产 SQLite 数据库是宿主机文件 `data/video_split.db`，通过 bind mount 挂进后端容器
-（`$SCRIPT_DIR/data:/app/data`，工程内绝对路径）。**曾发生过一次生产数据静默丢失**：
-某容器 bind mount 的宿主目录被删，容器靠 orphan inode 继续写了两个月，`deploy`/`rebuild` +
-`podman prune` 释放 fd 后数据物理消失。以下纪律用来杜绝复发：
+## 技术栈
 
-1. **单一部署目录**：远端只用 `/home/dev/ai/vedio-split-view` 一个目录部署，禁止出现
-   `vedio-split-view-bak`、`vedio-split-view2` 之类的残留副本——多份副本会让 bind mount
-   指向错误目录，是数据漂移的根源。发现残留副本先确认其 `data/` 无用后再删除，切勿多份并存。
-2. **`data/` 必须存在且在工程内**：`data/.gitkeep` 已入库保证 clone 后目录存在；`.gitignore`
-   忽略 `data/*` 但保留 `.gitkeep`。DB 文件本身永不入库、永不随 `deploy` 覆盖（见 `.rsync-exclude`）。
-3. **prune 前先确认**：**永远不要在有数据容器停止时执行 `podman system prune`**。
-   `manage.sh clean` 已内置防护——先 `podman ps -a` 列出已停止容器并要求人工确认，
-   再执行 prune。手动 prune 前也必须先 `podman ps -a` 核对，确认没有正在写 `data/` 的
-   停止容器（fd 里的数据会被 prune 永久抹掉）。
-4. **随时验证数据可见**：`bash manage.sh status` 末尾会打印 DB 绝对路径、大小、mtime 和
-   `users/videos/tasks` 行数；`users=0` 或 DB 不存在会显式 WARN/ERROR。`rebuild` 结束也会跑
-   smoke check（连通性 + admin 登录 + 行数）。部署后务必看一眼行数是否符合预期。
-
-## 配置说明 (config/app.yaml)
-
-`config/app.yaml` 可以很短。除了下面的必填项，其它参数都有代码默认值，只有需要覆盖默认行为时再写。
-
-必填：
-
-| 节 | 关键字段 | 说明 |
-|---|---------|------|
-| `app` | `secret_key` | JWT 密钥，生产环境必须换成随机长字符串 |
-| `admin` | `password` | 管理员密码，启动时覆盖 DB |
-| `llm` | `base_url`, `model`, `api_key` | 视频总结和分段使用的 OpenAI 兼容 LLM |
-
-按需填写：
-
-| 节 | 关键字段 | 说明 |
-|---|---------|------|
-| `transcription` | `base_url`, `model`, `api_key` | 只有视频无可用字幕、需要音频转录时才用 |
-| `oss` | `endpoint`, `access_key_id/secret`, `bucket_name` | 只有使用阿里云 Fun-ASR 时才需要；Whisper 不需要 |
-| `app` | `port`, `frontend_port` | 只有要改默认端口 `8080` / `5180` 时才写 |
-| `network` | `proxy_enabled`, `http_proxy`, `youtube_cookies_file` | 只有下载/字幕需要代理或 YouTube 登录态时才写 |
-| `storage` | `db_path`, `temp_dir`, `max_pending_tasks_per_user` | 只有要改数据库、临时目录或配额时才写 |
-| `video` | `max_duration_seconds`, `confirm_threshold_seconds` | 只有要改视频时长限制时才写 |
-| `logging` | `level`, `dir` | 只有要改日志级别或目录时才写 |
-
-## Debug API
-
-通过 `http://localhost:{port}/docs` 查看 Swagger UI。以下为调试常用接口：
-
-```bash
-# 登录获取 token
-TOKEN=$(curl -s http://localhost:4305/api/auth/login \
-  -X POST -H "Content-Type: application/json" \
-  -d '{"username":"test","password":"password"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-
-# 仅下载音频（SSE 流，实时进度）
-curl -N http://localhost:4305/api/debug/download \
-  -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-  -d '{"url":"https://www.bilibili.com/video/BV1xxxxxx/"}'
-
-# 列出当前任务
-curl http://localhost:4305/api/debug/tasks -H "Authorization: Bearer $TOKEN"
-
-# 查看某任务的音频分片
-curl http://localhost:4305/api/debug/tasks/3/chunks -H "Authorization: Bearer $TOKEN"
-
-# 转录指定任务（全部分片）
-curl http://localhost:4305/api/debug/transcribe \
-  -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-  -d '{"task_id": 3}'
-
-# 转录指定任务的单个分片
-curl http://localhost:4305/api/debug/transcribe \
-  -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-  -d '{"task_id": 3, "chunk_index": 0}'
-
-# 直接转录本地文件（不占配额，用于测试 ASR 连通性）
-curl http://localhost:4305/api/debug/test-asr \
-  -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-  -d '{"file_path": "/app/data/tmp/3/chunks/chunk_000.mp3"}'
-
-# 清理某个任务（删除文件 + DB 记录）
-curl -X DELETE http://localhost:4305/api/debug/tasks/3 -H "Authorization: Bearer $TOKEN"
-```
-
-## 本地测试脚本
-
-```bash
-# 端到端 ASR 测试（需先通过 debug/download 下载音频）
-# 编辑 test_transcribe.py 中的 test_file 路径，然后：
-cd vedio-split-view
-python3 test_transcribe.py
-# 结果输出到 test_transcription_result.txt
-```
-
-## 日志
-
-应用日志写入 `logs/app.log`（自动轮转，50MB/文件，保留 5 份）。
-
-```bash
-# 实时查看
-tail -f logs/app.log
-
-# 筛选外部调用
-grep '\[metadata\]\|\[download\]\|\[whisper\]\|\[funasr\]\|\[llm\]\|\[oss\]' logs/app.log
-```
-
-## 目录结构
-
-```
-vedio-split-view/
-├── manage.sh              # 容器管理脚本
-├── compose.yaml           # Podman Compose 定义
-├── config/
-│   ├── app.yaml           # 运行时配置（gitignore）
-│   ├── app.yaml.example   # 配置模板
-│   └── certs/             # （已移除，Cloudflare 终止 HTTPS）
-├── backend/               # Python FastAPI
-├── frontend/              # React + Vite + Tailwind
-├── data/                  # SQLite DB + 临时文件（gitignore）
-├── logs/                  # 应用日志（gitignore）
-└── test_transcribe.py     # ASR 端到端测试脚本
-```
-
-## Changelog
-
-- `2026-05-27` — Bilibili 元数据/字幕获取改为直接调用 `api.bilibili.com` 官方 API，绕过 `www.bilibili.com` 网页端的 412 风控拦截。
+后端 Python + FastAPI + SQLite，前端 React + Vite + Tailwind，容器化用 Podman。

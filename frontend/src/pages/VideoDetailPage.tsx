@@ -1,9 +1,10 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Play, ExternalLink, Share2, Lock, Trash2, Plus, X, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { ArrowLeft, Play, ExternalLink, Share2, Lock, Trash2, Plus, X, ChevronDown, ChevronUp, Loader2, Download } from 'lucide-react'
 import { useState } from 'react'
 import { api } from '../lib/api'
 import { formatDuration, formatTimeRange, generatePlaybackUrl, platformLabel, cn } from '../lib/utils'
+import { buildMarkdown, buildEssenceMarkdown, downloadMarkdown, safeFilename } from '../lib/exportMarkdown'
 import LangToggle from '../components/LangToggle'
 import MindmapView from '../components/MindmapView'
 import UsageDisplay from '../components/UsageDisplay'
@@ -27,7 +28,7 @@ interface VideoDetail {
   id: number; url: string; platform: string; video_id: string
   title: string; thumbnail_url: string; upload_date: string
   duration_seconds: number
-  summary: string; summary_en: string; usage_json: string
+  summary: string; summary_en: string; essence: string; usage_json: string
   is_public: boolean; segments: SegmentInfo[]
   tags: TagInfo[]; owner_name: string
 }
@@ -138,6 +139,7 @@ export default function VideoDetailPage() {
   const [activeView, setActiveView] = useState<'segments' | 'mindmap'>('segments')
   const isViewer = useAuthStore((s) => s.isViewer)()
   const { lang, setLang } = useLangPreference()
+  const [exporting, setExporting] = useState(false)
 
   const { data: video, isLoading, isError, error } = useQuery({
     queryKey: ['video', id],
@@ -164,6 +166,22 @@ export default function VideoDetailPage() {
     mutationFn: () => api.delete(`/videos/${id}`),
     onSuccess: () => navigate('/library'),
   })
+
+  const handleExport = async () => {
+    if (!video || exporting) return
+    setExporting(true)
+    try {
+      let subs: SubtitleEntry[] = []
+      try {
+        subs = await api.get<SubtitleEntry[]>(
+          `/videos/${video.id}/subtitles?start=0&end=${video.duration_seconds + 1}`
+        )
+      } catch { /* transcript optional — export summary + segments anyway */ }
+      downloadMarkdown(safeFilename(video.title), buildMarkdown(video, subs, lang))
+    } finally {
+      setExporting(false)
+    }
+  }
 
   if (isLoading) return <div className="flex justify-center py-20 opacity-50">{t('detail.loading')}</div>
   if (isError) return (
@@ -213,7 +231,7 @@ export default function VideoDetailPage() {
             ))}
             {!isViewer && (
               showTagInput ? (
-                <form onSubmit={(e) => { e.preventDefault(); newTag.trim() && addTagMutation.mutate(newTag.trim()) }} className="flex gap-1">
+                <form onSubmit={(e) => { e.preventDefault(); if (newTag.trim()) addTagMutation.mutate(newTag.trim()) }} className="flex gap-1">
                   <input
                     type="text" value={newTag} onChange={(e) => setNewTag(e.target.value)}
                     className="px-2 py-1 rounded text-xs w-24 outline-none"
@@ -231,19 +249,28 @@ export default function VideoDetailPage() {
             )}
           </div>
 
-          {/* Actions — hidden for viewer */}
-          {!isViewer && (
-            <div className="flex gap-2">
-              <button onClick={() => shareMutation.mutate(!video.is_public)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
-                style={{ border: '1px solid var(--color-border)' }}>
-                {video.is_public ? <><Lock size={13} /> {t('detail.makePrivate')}</> : <><Share2 size={13} /> {t('detail.shareToPublic')}</>}
-              </button>
-              <button onClick={() => { if (window.confirm(t('detail.confirmDeleteVideo'))) deleteMutation.mutate() }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs" style={{ color: 'var(--color-danger)', border: '1px solid var(--color-border)' }}>
-                <Trash2 size={13} /> {t('common.delete')}
-              </button>
-            </div>
-          )}
+          {/* Actions — share/delete hidden for viewer, export always available */}
+          <div className="flex gap-2">
+            {!isViewer && (
+              <>
+                <button onClick={() => shareMutation.mutate(!video.is_public)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+                  style={{ border: '1px solid var(--color-border)' }}>
+                  {video.is_public ? <><Lock size={13} /> {t('detail.makePrivate')}</> : <><Share2 size={13} /> {t('detail.shareToPublic')}</>}
+                </button>
+                <button onClick={() => { if (window.confirm(t('detail.confirmDeleteVideo'))) deleteMutation.mutate() }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs" style={{ color: 'var(--color-danger)', border: '1px solid var(--color-border)' }}>
+                  <Trash2 size={13} /> {t('common.delete')}
+                </button>
+              </>
+            )}
+            <button onClick={handleExport} disabled={exporting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs disabled:opacity-50"
+              style={{ border: '1px solid var(--color-border)' }}
+              title={t('detail.downloadMarkdownHint')}>
+              {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+              {t('detail.downloadMarkdown')}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -280,6 +307,26 @@ export default function VideoDetailPage() {
           ) : null
         })()}
       </div>
+
+      {/* Essence */}
+      {video.essence && (
+        <div className="p-5 rounded-xl" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold">{t('detail.essence')}</h2>
+            <button
+              onClick={() => downloadMarkdown(safeFilename(video.title + '_精华'), buildEssenceMarkdown(video.title, video.essence))}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs"
+              style={{ border: '1px solid var(--color-border)' }}
+              title={t('detail.downloadEssenceHint')}
+            >
+              <Download size={13} /> {t('detail.downloadEssence')}
+            </button>
+          </div>
+          <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text-secondary)' }}>
+            {video.essence}
+          </div>
+        </div>
+      )}
 
       {/* Segments / Mind map */}
       <div>

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from video_split.database import get_db
 from video_split.dependencies import get_current_user, require_admin, require_authenticated
 from video_split.models import Tag, User, Video, video_tags
-from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut, TranscriptOut, TranscriptSegment
+from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut, TranscriptOut, TranscriptSegment, LLMLogOut
 from video_split.service.data_sync import EXPORTS_DIR, _export_filename
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ def _video_to_out(v: Video) -> VideoOut:
         id=v.id, url=v.url, platform=v.platform, video_id=v.video_id,
         title=v.title, thumbnail_url=v.thumbnail_url, upload_date=v.upload_date,
         duration_seconds=v.duration_seconds, summary=v.summary, summary_en=v.summary_en,
+        essence=v.essence,
         usage_json=v.usage_json,
         mindmap_json=v.mindmap_json,
         is_public=v.is_public, created_at=v.created_at, updated_at=v.updated_at,
@@ -140,6 +141,18 @@ async def usage_summary(
         "llm": [{"model": m, "prompt_tokens": v["prompt"], "completion_tokens": v["completion"],
                  "total_tokens": v["total"]} for m, v in sorted(llm_totals.items())],
     }
+
+
+@router.get("/llm-logs", response_model=list[LLMLogOut])
+async def llm_logs(
+    _user: User = Depends(require_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent LLM call history (last 100 entries)."""
+    from video_split.models import LLMLog
+    stmt = select(LLMLog).order_by(LLMLog.created_at.desc()).limit(100)
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 
 @router.get("/{video_id}", response_model=VideoOut)

@@ -73,6 +73,24 @@ class OSSConfig(BaseModel):
         return bool(self.endpoint and self.access_key_id and self.access_key_secret and self.bucket_name)
 
 
+class BackupConfig(BaseModel):
+    enabled: bool = False
+    dir: str = ""
+    max_copies: int = 3
+    # cron-like schedule for launchd/cron: "daily" runs once at 03:00
+    schedule: str = "daily"
+
+
+class LLMBackupConfig(BaseModel):
+    """Fallback LLM for content-filter-blocked chunks (e.g. GLM code 1301)."""
+    enabled: bool = False
+    base_url: str = ""
+    model: str = ""
+    api_key: str = ""
+    timeout_ms: int = 120000
+    max_tokens: int = 8192
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
     dir: str = "logs"
@@ -105,6 +123,8 @@ class Settings(BaseModel):
     network: NetworkConfig = NetworkConfig()
     storage: StorageConfig = StorageConfig()
     video: VideoConfig = VideoConfig()
+    backup: BackupConfig = BackupConfig()
+    llm_backup: LLMBackupConfig = LLMBackupConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @field_validator("admin")

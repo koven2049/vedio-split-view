@@ -90,6 +90,14 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     async def health():
         return {"status": "ok"}
 
+    @app.middleware("http")
+    async def no_cache_thumbnails(request, call_next):  # type: ignore[no-untyped-def]
+        """Prevent Cloudflare from caching stale thumbnail responses."""
+        response = await call_next(request)
+        if request.url.path.startswith("/api/thumbnails/"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
     thumb_dir = Path(settings.storage.temp_dir).parent / "thumbnails"
     thumb_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/api/thumbnails", StaticFiles(directory=str(thumb_dir)), name="thumbnails")

@@ -377,30 +377,27 @@ async def download_thumbnail(meta: VideoMeta) -> str:
 async def fetch_youtube_subtitles(video_id: str) -> list[SubtitleEntry]:
     """Fetch YouTube subtitles via youtube-transcript-api (no auth needed)."""
     from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api.proxies import GenericProxyConfig
 
     logger.info("[subtitle] Fetching YouTube subtitles for %s", video_id)
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = None
-        for lang in ["zh-Hans", "zh", "zh-CN", "en", "ja"]:
-            try:
-                transcript = transcript_list.find_transcript([lang])
-                break
-            except Exception:
-                continue
-        if transcript is None:
-            try:
-                generated = transcript_list.find_generated_transcript(["zh-Hans", "zh", "en", "ja"])
-                transcript = generated
-            except Exception:
-                pass
-        if transcript is None:
-            logger.info("[subtitle] No YouTube subtitles found for %s", video_id)
-            return []
-        data = transcript.fetch()
+        # youtube-transcript-api v1.x: instance methods, proxy via GenericProxyConfig.
+        proxy_url = _proxy_for_platform("youtube")
+        kwargs: dict[str, Any] = {}
+        if proxy_url:
+            kwargs["proxy_config"] = GenericProxyConfig(
+                http_url=proxy_url, https_url=proxy_url
+            )
+        ytt_api = YouTubeTranscriptApi(**kwargs)
+
+        # fetch() with multiple languages auto-matches manual or auto-generated
+        # transcripts, trying languages in order. Supports: zh, en, ja, ko, es.
+        languages = ["zh-Hans", "zh", "zh-CN", "en", "ja", "ko", "es"]
+        transcript = ytt_api.fetch(video_id, languages=languages)
+
         entries = [
-            SubtitleEntry(start=item["start"], duration=item["duration"], text=item["text"])
-            for item in data
+            SubtitleEntry(start=snip.start, duration=snip.duration, text=snip.text)
+            for snip in transcript.snippets
         ]
         logger.info("[subtitle] YouTube subtitles: %d entries for %s", len(entries), video_id)
         return entries
