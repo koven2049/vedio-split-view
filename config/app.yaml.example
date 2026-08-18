@@ -1,0 +1,61 @@
+# Minimal config. Unspecified fields use defaults from backend/src/video_split/config.py.
+
+app:
+  # REQUIRED in production: used for JWT signing.
+  secret_key: "change-me-to-a-random-string"
+
+admin:
+  # REQUIRED: service refuses to start if empty.
+  password: ""
+
+llm:
+  # REQUIRED for video analysis.
+  base_url: ""   # e.g. "https://open.bigmodel.cn/api/paas/v4"
+  model: ""      # e.g. "glm-5.2", "gpt-4o"
+  api_key: ""
+
+transcription:
+  # REQUIRED only when a video has no usable subtitles and audio transcription is needed.
+  # OpenAI Whisper example:
+  base_url: ""   # e.g. "https://api.openai.com/v1"
+  model: "whisper-1"
+  api_key: ""
+
+# Optional: uncomment when using Aliyun Fun-ASR instead of Whisper.
+# transcription:
+#   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+#   model: "fun-asr"
+#   api_key: ""
+#
+# oss:
+#   endpoint: ""             # e.g. "oss-cn-beijing.aliyuncs.com"
+#   access_key_id: ""
+#   access_key_secret: ""
+#   bucket_name: ""
+
+# Optional: uncomment only if you need to override defaults.
+#
+# app:
+#   port: 8080              # backend API port exposed on the host
+#   frontend_port: 5180     # HTTPS frontend port exposed on the host
+#
+# network:
+#   proxy_enabled: false
+#   http_proxy: ""          # e.g. "http://127.0.0.1:7890"
+#   https_proxy: ""
+#   youtube_cookies_file: ""  # file name under config/, if YouTube requires login
+#
+# storage:
+#   db_path: "data/video_split.db"
+#   temp_dir: "data/tmp"
+#   max_pending_tasks_per_user: 3
+#   max_total_videos_per_user: 100
+#
+# video:
+#   max_duration_seconds: 12600
+#   confirm_threshold_seconds: 3600
+#   min_segment_duration_seconds: 60
+#
+# logging:
+#   level: "INFO"
+#   dir: "logs"

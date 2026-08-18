@@ -1,0 +1,15 @@
+# deploy target for manage.sh deploy / deploy-data
+# Keys must match manage.sh parser: ssh_target / remote_path / env
+
+# 环境标识：production | test
+# production 环境下，agent 不得主动修改远端数据，必须经用户 approve
+env = production
+
+# SSH 目标（用户@主机 或 ~/.ssh/config 别名）
+ssh_target = dev@aliyun-sz2
+
+# 远程部署路径（源码将同步到此目录，相对 SSH 用户 home）
+remote_path = ai/vedio-split-view
+
+# rsync 额外选项（可选）
+# rsync_opts = -e "ssh -p 22"

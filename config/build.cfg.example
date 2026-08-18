@@ -1,0 +1,20 @@
+# 构建源配置 — 用于 manage.sh rebuild
+#
+# 用法: cp config/build.cfg.example config/build.cfg
+#
+# 与 deploy.cfg 分开：deploy.cfg 含 SSH 目标，被 .rsync-exclude 排除，
+# 远端拿不到；build.cfg 不含密钥，随代码同步，保证本地与生产用同一套镜像源。
+# 环境变量优先级高于本文件（REGISTRY=docker.io ./manage.sh rebuild）。
+
+# 容器镜像仓库（拉取 python / node / nginx 基础镜像）
+registry = docker.io
+
+# podman 构建/运行 DNS，留空则用系统默认
+podman_dns =
+
+# Debian apt 镜像域名
+apt_mirror = deb.debian.org
+
+# PyPI 索引；镜像站为 http 或自签证书时才需要填 pypi_trusted_host
+pypi_index = https://pypi.org/simple/
+pypi_trusted_host =

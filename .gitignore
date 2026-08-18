@@ -1,0 +1,37 @@
+__pycache__
+# Backend
+backend/.venv/
+backend/.pytest_cache/
+backend/__pycache__/
+backend/src/**/__pycache__/
+backend/*.egg-info/
+backend/src/*.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Config (contains secrets)
+config/app.yaml
+config/deploy.cfg
+config/certs/
+config/*_cookies.txt
+
+# Runtime data — keep the directory (bind-mount target) but never commit DB / contents.
+# The tracked data/.gitkeep guarantees the dir exists on fresh clones so the
+# manage.sh bind mount ($SCRIPT_DIR/data) always lands inside the project.
+data/*
+!data/.gitkeep
+# Belt-and-suspenders: never commit a SQLite DB from any path (e.g. a stray
+# backend/data/ created by running the CLI from the wrong cwd).
+*.db
+*.sqlite
+*.sqlite3
+backend/data/
+logs/
+
+# Podman
+.mirror_state
+
+# OS
+.DS_Store
