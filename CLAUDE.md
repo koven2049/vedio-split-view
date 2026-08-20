@@ -1,7 +1,8 @@
 # Scope
 
 只关注本目录，除非用户显式指定，禁止引用父目录下其他子工程代码。
-code-review-graph 速查：入口 get_minimal_context(task)；关系查询 query_graph(pattern=callers_of|callees_of|imports_of|tests_for|children_of|file_summary|importers_of|inheritors_of, target="本工程符号/文件路径", detail_level=minimal)；语义搜索 semantic_search_nodes(query, kind) 限定精确关键词防跨工程。
+
+流程规范（分支/Worktree 纪律、远程红线、根因先行、code-review-graph 用法等）以上级 `/Users/mingjian/Documents/workspace/ai/ai-projects/AGENTS.md` 为唯一来源，本文件不重复，冲突时以上级为准。
 
 # API 变更工作流（每次新增/修改/删除 API 后必做）
 
@@ -15,63 +16,26 @@ API 文档是**自动派生**的，不要手写端点清单。真相源 = 路由
   4. 让运行实例生效：后端容器**未挂载 src**，改完代码必须 `./manage.sh rebuild`（restart 不重建镜像，看不到新代码）。
 - 收窄/扩大外部文档范围：编辑 `apidocs.py:_VISIBLE_GROUPS`（tag → 组名），不要回退到手写列表。
 
+# 优化记录（APPEND ONLY，性能 + 可靠性增强）
 
 **2026-08-12 三个优化同时部署**
 
-
-2. **Bilibili view API 去重**  
-
-3. **YouTube cookies 支持文档化**  
-
-
-
-
-
-
-
-
-
-
-
-# 优化���录（APPEND ONLY，性能 + 可���性增强���
-
-**2026-08-12 ���个优化同时部署**
-
-1. **FFmpeg stream copy (67× ���速)**  
-   ���：每��� decode → seek → encode，5700s 音频 40.1s  
-   新：`-f segment -c copy` ���次完成���0.6s  
-   代价：块长���化到帧���界 ±26ms，19 块累积���移 < 0.5s���可接���）  
-   无 re-encode = 无���量损失  
-
-2. **Bilibili view API 去���**  
-   旧���metadata 调一次 `/view`���subtitle 再调一次 `/view` + `/player`  
-   新：metadata + subtitle 共享一次 `/view`，���调 `/player` 拿字幕  
-   -352 风控下耗���减半  
-
-3. **YouTube cookies 支持���档化**  
-   代���已支��� `config/app.yaml` ��� `youtube_cookies_file`，但生产未配置  
-   无配 cookies → bot-check / 年龄限制视���失败，auto-caption ���可用  
-   配置���需放 `config/youtube_cookies.txt` 并在 `app.yaml` 填路径
-
-# 优化���录（APPEND ONLY���性能 + 可靠性���强）
-
-**2026-08-12 三�����优化���������署**
-
-1. **FFmpeg stream copy (67x 提速)**  
-   旧：每块 decode → seek ��� encode，5700s 音��� 40.1s  
-   新���`-f segment -c copy` 一次完���，0.6s  
-   代价：块长量���到帧边��� ±26ms，19 块累积漂移 < 0.5s（���接受）  
+1. **FFmpeg stream copy（67× 提速）**
+   旧：每块 decode → seek → encode，5700s 音频 40.1s
+   新：`-f segment -c copy` 一次完成，0.6s
+   代价：块长量化到帧边界 ±26ms，19 块累积漂移 < 0.5s（可接受）
    无 re-encode = 无质量损失
+   ⚠️ 2026-08-20 起：copy 前必须 ffprobe 探测 codec，AAC 输入输出 `.m4a`（见下条）
 
-2. **Bilibili view API 去���**  
-   旧：metadata 调一次 `/view`，subtitle 再调一��� `/view` + `/player`  
-   新：metadata + subtitle ���享一次 `/view`，���调 `/player` 拿字���  
-   -352 风���下耗时减半
+2. **Bilibili view API 去重**
+   旧：metadata 调一次 `/view`，subtitle 再调一次 `/view` + `/player`
+   新：metadata + subtitle 共享一次 `/view`，省调 `/player` 拿字幕
+   -352 风控下耗时减半
 
-3. **YouTube cookies 支持文档化**  
-   代码已���持 `config/app.yaml` 的 `youtube_cookies_file`，���生产未���置  
-   ���配 cookies ��� bot-check / 年龄限���视���失败，auto-caption ���可用  
-   配置后需��� `config/youtube_cookies.txt` ���在 `app.yaml` 填���径
+3. **YouTube cookies 支持文档化**
+   代码已支持 `config/app.yaml` 的 `youtube_cookies_file`，但生产未配置
+   无配 cookies → bot-check / 年龄限制视频失败，auto-caption 不可用
+   配置后需放 `config/youtube_cookies.txt` 并在 `app.yaml` 填路径
 
 **2026-08-20 修复小宇宙长音频切片必败（exit 234）**
 
