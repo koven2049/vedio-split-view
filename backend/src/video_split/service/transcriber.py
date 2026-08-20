@@ -52,13 +52,53 @@ def _is_dashscope_funasr() -> bool:
     )
 
 
+def _stderr_tail(stderr: str, *, max_lines: int = 6) -> str:
+    """Keep the meaningful tail of ffmpeg/ffprobe stderr for error messages."""
+    lines = [ln.strip() for ln in stderr.strip().splitlines() if ln.strip()]
+    return " | ".join(lines[-max_lines:]) if lines else "(no stderr)"
+
+
+def _run_checked(cmd: list[str], *, what: str) -> subprocess.CompletedProcess:
+    """Run an ffmpeg/ffprobe command, raising a readable error on failure.
+
+    Never swallow stderr: the muxer/decoder error line is the only clue when
+    a split or probe fails in production (e.g. "Invalid audio stream. Exactly
+    one MP3 audio stream is required"), and a bare exit status forced operators
+    to guess.
+    """
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{what} 失败（exit {result.returncode}）：{_stderr_tail(result.stderr)}"
+        )
+    return result
+
+
 def get_audio_duration(audio_path: Path) -> float:
-    result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+    result = _run_checked(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "csv=p=0", str(audio_path)],
-        capture_output=True, text=True,
+        what=f"探测音频时长（{audio_path.name}）",
     )
-    return float(result.stdout.strip())
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        raise RuntimeError(
+            f"无法解析音频时长（{audio_path.name}），文件可能不完整或损坏"
+        ) from None
+
+
+def probe_audio_codec(audio_path: Path) -> str:
+    """Return the first audio stream's codec name (e.g. 'mp3', 'aac')."""
+    result = _run_checked(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(audio_path)],
+        what=f"探测音频编码（{audio_path.name}）",
+    )
+    codec = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
+    if not codec:
+        raise RuntimeError(f"音频文件不含音频流（{audio_path.name}），文件可能损坏")
+    return codec
 
 
 MIN_TAIL_SECONDS = 30.0
@@ -97,23 +137,41 @@ def split_audio(audio_path: Path, *, chunk_seconds: int | None = None) -> list[P
     chunk_dir = audio_path.parent / "chunks"
     chunk_dir.mkdir(exist_ok=True)
 
-    # Single-pass segment split: 0.6s vs 40s for 5700s audio (67× speedup).
-    # Chunk durations quantize to frame boundaries (±26ms typical), but cumulative
-    # drift stays negligible (< 0.5s over 19 chunks) and re-encode quality loss
-    # is eliminated.
-    pattern = str(chunk_dir / "chunk_%03d.mp3")
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-i", str(audio_path),
-            "-f", "segment", "-segment_time", str(chunk_dur),
-            "-c", "copy",
-            "-v", "quiet",
-            pattern,
-        ],
-        check=True,
-    )
+    # Codec/container routing: `-c copy` keeps the 67× speedup, but the output
+    # container must accept the input codec — an MP3 muxer rejects AAC with
+    # EINVAL (exit 234), which killed every long xiaoyuzhou episode while short
+    # ones (never split) and yt-dlp downloads (transcoded to real MP3) sailed
+    # through. MP3-family input → .mp3 copy; AAC → .m4a copy; anything else →
+    # re-encode to MP3 as a safe universal fallback.
+    codec = probe_audio_codec(audio_path)
+    if codec in ("mp1", "mp2", "mp3"):
+        codec_args, chunk_ext = ["-c", "copy"], "mp3"
+    elif codec == "aac":
+        codec_args, chunk_ext = ["-c", "copy"], "m4a"
+    else:
+        codec_args, chunk_ext = ["-c:a", "libmp3lame"], "mp3"
+        logger.info("[split] codec=%r needs re-encode to mp3 (no stream copy)", codec)
 
-    chunks = sorted(chunk_dir.glob("chunk_*.mp3"))
+    pattern = str(chunk_dir / f"chunk_%03d.{chunk_ext}")
+    try:
+        _run_checked(
+            [
+                "ffmpeg", "-y", "-i", str(audio_path),
+                "-f", "segment", "-segment_time", str(chunk_dur),
+                *codec_args,
+                "-v", "error",
+                pattern,
+            ],
+            what=f"音频切片（{audio_path.name}, codec={codec}）",
+        )
+    except Exception:
+        # Remove partial chunks (e.g. the 0-byte stub the segment muxer leaves
+        # behind) so a later resume never mixes dirty state into a retry.
+        for stub in chunk_dir.glob("chunk_*"):
+            stub.unlink(missing_ok=True)
+        raise
+
+    chunks = sorted(chunk_dir.glob(f"chunk_*.{chunk_ext}"))
     # segment creates a stub for the "next" segment at EOF; remove if corrupt.
     if chunks and chunks[-1].stat().st_size < 1024:
         chunks[-1].unlink()

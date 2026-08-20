@@ -72,3 +72,11 @@ API 文档是**自动派生**的，不要手写端点清单。真相源 = 路由
    代码已���持 `config/app.yaml` 的 `youtube_cookies_file`，���生产未���置  
    ���配 cookies ��� bot-check / 年龄限���视���失败，auto-caption ���可用  
    配置后需��� `config/youtube_cookies.txt` ���在 `app.yaml` 填���径
+
+**2026-08-20 修复小宇宙长音频切片必败（exit 234）**
+
+1. **根因**：小宇宙音频为 AAC/m4a，`split_audio` 用 `-c copy` 灌进 `.mp3` 容器，mp3 muxer 拒绝 AAC → EINVAL（exit 234）。仅"小宇宙 + 时长 > chunk_duration"触发；YouTube/Bilibili 必经 FFmpegExtractAudio 转码 mp3 所以从未中招。
+2. **修复**：切片前 ffprobe 探测 codec 路由——mp3→copy+`.mp3`（保留 67× 加速），aac→copy+`.m4a`（零转码），其它→libmp3lame 转码兜底。chunks glob 按实际扩展名收集。
+3. **报错工程化**：ffmpeg/ffprobe 调用去掉 `-v quiet`，失败时附 stderr 尾部 6 行（如 muxer 报错原文），不再抛裸 exit code。
+4. **防复发**：切片失败清理 chunks 残桩；resume 前用 ffprobe 校验缓存时长（容差 5s），截断缓存降级为重新下载。
+5. **测试**：`test_transcriber_chunking.py` 新增真实 ffmpeg 用例（程序生成 AAC 样本复现线上故障），全量 162 passed。

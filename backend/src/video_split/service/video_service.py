@@ -31,7 +31,7 @@ from video_split.service.task_manager import (
     get_task_temp_dir,
     update_task_status,
 )
-from video_split.service.transcriber import ASRUsage, TranscriptionProgress, transcribe_audio
+from video_split.service.transcriber import ASRUsage, TranscriptionProgress, get_audio_duration, transcribe_audio
 
 logger = logging.getLogger(__name__)
 
@@ -386,6 +386,28 @@ async def run_analysis(
             else:
                 audio_path = task_dir / "audio.mp3"
 
+            if audio_path.exists() and audio_path.stat().st_size >= MIN_AUDIO_BYTES:
+                # Size alone doesn't prove the download finished — an
+                # interrupted stream leaves a large but truncated file that
+                # fails the split/transcribe step every time. Probe it and
+                # compare duration with metadata before trusting the cache.
+                cached_ok = True
+                try:
+                    cached_duration = get_audio_duration(audio_path)
+                    if meta.duration_seconds > 0 and cached_duration < meta.duration_seconds - 5.0:
+                        cached_ok = False
+                        logger.warning(
+                            "[analysis] Task #%d — cached audio truncated (%.0fs of expected %ds), re-downloading",
+                            task.id, cached_duration, meta.duration_seconds,
+                        )
+                except Exception as e:
+                    cached_ok = False
+                    logger.warning(
+                        "[analysis] Task #%d — cached audio unparseable (%s), re-downloading",
+                        task.id, e,
+                    )
+                if not cached_ok:
+                    audio_path.unlink(missing_ok=True)
             if audio_path.exists() and audio_path.stat().st_size >= MIN_AUDIO_BYTES:
                 file_size_mb = audio_path.stat().st_size / (1024 * 1024)
                 logger.info("[analysis] Task #%d — using cached audio (%.1f MB)", task.id, file_size_mb)
@@ -903,6 +925,32 @@ async def resume_analysis(
             reason = "Cached audio file not found" if not audio_files else (
                 f"Cached audio file too small ({audio_files[0].stat().st_size} bytes)"
             )
+            await update_task_status(db, task, "failed_download", reason)
+            yield ProgressEvent(stage="error", progress=0, message=f"{reason}. Please retry to re-download.")
+            return
+
+        # Integrity check: a partial/interrupted download can still be large
+        # enough to pass the size gate above, then fail the split/transcribe
+        # step on every resume — the task would hit the same wall forever.
+        # Probe the file and compare its duration with the metadata; if it is
+        # unparseable or clearly truncated, downgrade to re-download instead.
+        cached_audio = audio_files[0]
+        try:
+            cached_duration = get_audio_duration(cached_audio)
+        except Exception as e:
+            reason = f"Cached audio file is corrupt (ffprobe failed: {e})"
+            logger.warning("[analysis] Task #%d — %s; forcing re-download", task.id, reason)
+            cached_audio.unlink(missing_ok=True)
+            await update_task_status(db, task, "failed_download", reason)
+            yield ProgressEvent(stage="error", progress=0, message=f"{reason}. Please retry to re-download.")
+            return
+        if meta.duration_seconds > 0 and cached_duration < meta.duration_seconds - 5.0:
+            reason = (
+                f"Cached audio is truncated ({cached_duration:.0f}s of "
+                f"expected {meta.duration_seconds}s)"
+            )
+            logger.warning("[analysis] Task #%d — %s; forcing re-download", task.id, reason)
+            cached_audio.unlink(missing_ok=True)
             await update_task_status(db, task, "failed_download", reason)
             yield ProgressEvent(stage="error", progress=0, message=f"{reason}. Please retry to re-download.")
             return

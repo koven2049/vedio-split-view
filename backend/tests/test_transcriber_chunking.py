@@ -34,6 +34,7 @@ def test_short_tail_merged_into_previous_chunk(monkeypatch, tmp_path):
     audio = tmp_path / "audio.mp3"
     audio.write_bytes(b"x" * 2048)
     monkeypatch.setattr(transcriber, "get_audio_duration", lambda p: 5401.0)
+    monkeypatch.setattr(transcriber, "probe_audio_codec", lambda p: "mp3")
 
     chunk_dir = tmp_path / "chunks"
     chunk_dir.mkdir()
@@ -41,7 +42,7 @@ def test_short_tail_merged_into_previous_chunk(monkeypatch, tmp_path):
     def _fake_run(cmd, **kwargs):
         for i in range(18):
             (chunk_dir / f"chunk_{i:03d}.mp3").write_bytes(b"y" * 2048)
-        return None
+        return transcriber.subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(transcriber.subprocess, "run", _fake_run)
     chunks = transcriber.split_audio(audio, chunk_seconds=300)
@@ -54,6 +55,7 @@ def test_long_tail_kept_as_own_chunk(monkeypatch, tmp_path):
     audio = tmp_path / "audio.mp3"
     audio.write_bytes(b"x" * 2048)
     monkeypatch.setattr(transcriber, "get_audio_duration", lambda p: 5850.0)
+    monkeypatch.setattr(transcriber, "probe_audio_codec", lambda p: "mp3")
 
     chunk_dir = tmp_path / "chunks"
     chunk_dir.mkdir()
@@ -61,7 +63,7 @@ def test_long_tail_kept_as_own_chunk(monkeypatch, tmp_path):
     def _fake_run(cmd, **kwargs):
         for i in range(20):
             (chunk_dir / f"chunk_{i:03d}.mp3").write_bytes(b"y" * 2048)
-        return None
+        return transcriber.subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(transcriber.subprocess, "run", _fake_run)
     chunks = transcriber.split_audio(audio, chunk_seconds=300)
@@ -115,3 +117,91 @@ async def test_all_chunks_silent_raises(monkeypatch, tmp_path):
 
     with pytest.raises(RuntimeError, match="个音频块均未识别到语音"):
         await transcriber.transcribe_audio(audio)
+
+
+# ---------------------------------------------------------------------------
+# Real-ffmpeg codec routing tests (the production root cause: AAC→.mp3 copy
+# fails with exit 234). Skipped automatically when ffmpeg/ffprobe is absent.
+# ---------------------------------------------------------------------------
+
+import shutil
+import subprocess as _sp
+
+import pytest
+
+_ffmpeg_available = shutil.which("ffmpeg") and shutil.which("ffprobe")
+requires_ffmpeg = pytest.mark.skipif(not _ffmpeg_available, reason="ffmpeg/ffprobe not installed")
+
+
+def _make_audio(path, duration_s, *, aac: bool):
+    codec_args = ["-c:a", "aac"] if aac else ["-c:a", "libmp3lame"]
+    _sp.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", f"sine=frequency=440:duration={duration_s}",
+         *codec_args, "-v", "error", str(path)],
+        check=True, capture_output=True,
+    )
+
+
+@requires_ffmpeg
+def test_aac_m4a_input_splits_to_m4a_chunks(tmp_path):
+    """AAC in m4a must NOT be stream-copied into an .mp3 container (exit 234)."""
+    # 90s / 30s → exactly 3 chunks (tail == MIN_TAIL_SECONDS is kept, not merged)
+    audio = tmp_path / "audio.m4a"
+    _make_audio(audio, 90, aac=True)
+
+    chunks = transcriber.split_audio(audio, chunk_seconds=30)
+
+    assert len(chunks) == 3, f"90s / 30s → 3 chunks, got {[c.name for c in chunks]}"
+    for chunk in chunks:
+        assert chunk.suffix == ".m4a"
+        assert chunk.stat().st_size > 1024
+        # every chunk must be decodable with a sane duration
+        dur = transcriber.get_audio_duration(chunk)
+        assert 20.0 < dur <= 31.0, f"{chunk.name}: unexpected duration {dur}"
+
+
+@requires_ffmpeg
+def test_mp3_input_still_uses_stream_copy_to_mp3(tmp_path):
+    """The 67× fast path must be preserved for real MP3 input."""
+    audio = tmp_path / "audio.mp3"
+    _make_audio(audio, 90, aac=False)
+
+    chunks = transcriber.split_audio(audio, chunk_seconds=30)
+
+    assert len(chunks) == 3
+    for chunk in chunks:
+        assert chunk.suffix == ".mp3"
+        assert transcriber.probe_audio_codec(chunk) == "mp3", "must stay stream-copied, not re-encoded"
+
+
+@requires_ffmpeg
+def test_failed_split_cleans_stubs_and_reports_stderr(monkeypatch, tmp_path):
+    """On ffmpeg failure: no chunk stubs left behind, error carries stderr detail."""
+    audio = tmp_path / "audio.m4a"
+    _make_audio(audio, 90, aac=True)
+
+    # Force the historical bug: copy AAC into an .mp3 segment muxer.
+    monkeypatch.setattr(transcriber, "probe_audio_codec", lambda p: "mp3")
+
+    with pytest.raises(RuntimeError, match="音频切片"):
+        transcriber.split_audio(audio, chunk_seconds=30)
+
+    chunk_dir = tmp_path / "chunks"
+    leftovers = list(chunk_dir.glob("chunk_*"))
+    assert not leftovers, f"dirty stubs left behind: {leftovers}"
+
+    # the raised error must explain WHY (muxer rejection), not just an exit code
+    try:
+        transcriber.split_audio(audio, chunk_seconds=30)
+    except RuntimeError as e:
+        assert "Invalid audio stream" in str(e) or "exit" in str(e)
+
+
+@requires_ffmpeg
+def test_get_audio_duration_on_garbage_file_raises_readably(tmp_path):
+    """A corrupt cached file must produce a readable error, not ValueError noise."""
+    bad = tmp_path / "audio.m4a"
+    bad.write_bytes(b"not an audio file at all" * 100)
+
+    with pytest.raises(RuntimeError, match="探测音频时长|无法解析音频时长"):
+        transcriber.get_audio_duration(bad)
