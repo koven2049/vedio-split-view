@@ -155,8 +155,9 @@ _db_count() {
 
 # Print DB location, size, mtime and users/videos/tasks row counts.
 # fail-loud: WARN when the DB is missing or users==0 (likely data-source drift/loss).
+# Returns 1 on data red (DB missing / users=0); "n/a" row counts stay tolerated (warn).
 _report_data_health() {
-    local db users videos tasks
+    local db users videos tasks fail=0
     db="$(_db_abs_path)"
     log_step "Data health:"
     echo "  DB path: $db"
@@ -164,7 +165,7 @@ _report_data_health() {
     if [[ ! -f "$db" ]]; then
         log_error "DB file does NOT exist — data source may have drifted or been lost!"
         log_warn  "Expected bind-mount target: $SCRIPT_DIR/data (project-local)."
-        return 0
+        return 1
     fi
 
     # size + mtime (portable-ish: try GNU stat, then BSD stat, then ls fallback)
@@ -181,11 +182,13 @@ _report_data_health() {
 
     if [[ "$users" == "0" ]]; then
         log_error "users=0 — DB is EMPTY. Possible data loss or wrong data directory!"
+        fail=1
     elif [[ "$users" == "n/a" ]]; then
         log_warn "Could not read row counts (no host sqlite3 and backend container not running). Inspect $db manually."
     else
         log_ok "Data present: $users user(s)."
     fi
+    return "$fail"
 }
 
 # Post-rebuild smoke check: wait for /health, log in as admin, print row counts.
@@ -220,7 +223,8 @@ _smoke_check() {
         log_warn "admin.password empty in $CONFIG_FILE — skipping login check."
     fi
 
-    _report_data_health
+    # NON-blocking by contract: data red must not fail rebuild (see docstring above).
+    _report_data_health || true
 }
 
 # ── deploy exclude file ──────────────────────────────────────────────────────
@@ -471,6 +475,7 @@ run_rebuild() {
 run_status() {
     ensure_podman
     export_compose_env
+    local fail=0
     log_step "Container status:"
     "$PODMAN_CMD" ps -a --filter "name=vsplit-"
     echo
@@ -481,6 +486,7 @@ run_status() {
     else
         log_ok "URL: http://localhost:$APP_PORT"
         log_error "Health: FAILED"
+        fail=1
     fi
     if curl -sf --noproxy '*' "http://localhost:$FRONTEND_PORT/" >/dev/null 2>&1; then
         log_ok "URL: http://localhost:$FRONTEND_PORT"
@@ -488,10 +494,12 @@ run_status() {
     else
         log_ok "URL: http://localhost:$FRONTEND_PORT"
         log_error "Health: FAILED"
+        fail=1
     fi
 
     echo
-    _report_data_health
+    _report_data_health || fail=1
+    return "$fail"
 }
 
 run_backup() {
