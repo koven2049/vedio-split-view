@@ -1,4 +1,9 @@
-# API 变更工作流（每次新增/修改/删除 API 后必做）
+# vedio-split-view Agent Instructions
+
+> **先读并遵守公共 harness 约束**：[../../AGENTS.md](../../AGENTS.md) 的「通用约束」章节全部适用。
+> 本文件只写本工程差异，与通用约束冲突时以本文件为准。`CLAUDE.md` 是指向本文件的软链。
+
+## 本工程专属
 
 API 文档是**自动派生**的，不要手写端点清单。真相源 = 路由本身（path + 依赖 + `response_model` + docstring）。
 
