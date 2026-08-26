@@ -1,27 +1,33 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Video } from 'lucide-react'
-import { useLogin } from '../hooks/useAuth'
-import { useT } from '../i18n'
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Video } from 'lucide-react';
+import { useLogin } from '../hooks/useAuth';
+import { useT } from '../i18n';
 
 export default function LoginPage() {
-  const t = useT()
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
+  const t = useT();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
 
-  const navigate = useNavigate()
-  const login = useLogin()
-  const error = login.error?.message || ''
+  const navigate = useNavigate();
+  const login = useLogin();
+  const error = login.error?.message || '';
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    login.mutate({ username, password }, {
-      onSuccess: () => navigate('/'),
-    })
-  }
+    e.preventDefault();
+    login.mutate(
+      { username, password },
+      {
+        onSuccess: () => navigate('/'),
+      },
+    );
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--color-bg-secondary)' }}>
+    <div
+      className="min-h-screen flex items-center justify-center"
+      style={{ background: 'var(--color-bg-secondary)' }}
+    >
       <div
         className="w-full max-w-sm p-8 rounded-2xl shadow-lg"
         style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
@@ -33,7 +39,10 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+            <label
+              className="block text-sm font-medium mb-1.5"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
               {t('login.username')}
             </label>
             <input
@@ -52,7 +61,10 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+            <label
+              className="block text-sm font-medium mb-1.5"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
               {t('login.password')}
             </label>
             <input
@@ -71,7 +83,9 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <p className="text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>
+            <p className="text-sm" style={{ color: 'var(--color-danger)' }}>
+              {error}
+            </p>
           )}
 
           <button
@@ -89,5 +103,5 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
-  )
+  );
 }

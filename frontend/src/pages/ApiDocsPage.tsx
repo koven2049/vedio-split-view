@@ -1,33 +1,33 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Copy, Check, ChevronDown, ChevronRight, BookOpen } from 'lucide-react'
-import { api } from '../lib/api'
-import { useT } from '../i18n'
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Copy, Check, ChevronDown, ChevronRight, BookOpen } from 'lucide-react';
+import { api } from '../lib/api';
+import { useT } from '../i18n';
 
 interface Param {
-  name: string
-  in: string
-  type: string
-  description: string
+  name: string;
+  in: string;
+  type: string;
+  description: string;
 }
 
 interface Endpoint {
-  method: string
-  path: string
-  description: string
-  params: Param[]
-  response: string
+  method: string;
+  path: string;
+  description: string;
+  params: Param[];
+  response: string;
 }
 
 interface DocGroup {
-  group: string
-  endpoints: Endpoint[]
+  group: string;
+  endpoints: Endpoint[];
 }
 
 interface DocsData {
-  auth_header: string
-  base_url: string
-  groups: DocGroup[]
+  auth_header: string;
+  base_url: string;
+  groups: DocGroup[];
 }
 
 const METHOD_COLORS: Record<string, string> = {
@@ -35,17 +35,17 @@ const METHOD_COLORS: Record<string, string> = {
   POST: '#3b82f6',
   PUT: '#f59e0b',
   DELETE: '#ef4444',
-}
+};
 
 function CopyButton({ text }: { text: string }) {
-  const t = useT()
-  const [copied, setCopied] = useState(false)
+  const t = useT();
+  const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <button
@@ -56,46 +56,42 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
     </button>
-  )
+  );
 }
 
 function buildCurlExample(ep: Endpoint, authHeader: string): string {
-  const bodyParams = ep.params.filter((p) => p.in === 'body')
-  const queryParams = ep.params.filter((p) => p.in === 'query')
+  const bodyParams = ep.params.filter((p) => p.in === 'body');
+  const queryParams = ep.params.filter((p) => p.in === 'query');
 
-  let url = ep.path
+  let url = ep.path;
   if (queryParams.length > 0) {
-    const qs = queryParams.map((p) => `${p.name}=<${p.type}>`).join('&')
-    url += `?${qs}`
+    const qs = queryParams.map((p) => `${p.name}=<${p.type}>`).join('&');
+    url += `?${qs}`;
   }
 
-  let cmd = `curl -X ${ep.method} "https://<host>${url}"`
-  cmd += `\n  -H "${authHeader}"`
+  let cmd = `curl -X ${ep.method} "https://<host>${url}"`;
+  cmd += `\n  -H "${authHeader}"`;
 
   if (bodyParams.length > 0) {
-    cmd += `\n  -H "Content-Type: application/json"`
-    const body: Record<string, string> = {}
+    cmd += `\n  -H "Content-Type: application/json"`;
+    const body: Record<string, string> = {};
     bodyParams.forEach((p) => {
-      body[p.name] = `<${p.type}>`
-    })
-    cmd += `\n  -d '${JSON.stringify(body)}'`
+      body[p.name] = `<${p.type}>`;
+    });
+    cmd += `\n  -d '${JSON.stringify(body)}'`;
   }
 
-  return cmd
+  return cmd;
 }
 
 function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) {
-  const t = useT()
-  const [expanded, setExpanded] = useState(false)
-  const curlExample = buildCurlExample(ep, authHeader)
+  const t = useT();
+  const [expanded, setExpanded] = useState(false);
+  const curlExample = buildCurlExample(ep, authHeader);
 
-  const fullSnippet = [
-    `# ${ep.description}`,
-    curlExample,
-    '',
-    `# Response:`,
-    ep.response,
-  ].join('\n')
+  const fullSnippet = [`# ${ep.description}`, curlExample, '', `# Response:`, ep.response].join(
+    '\n',
+  );
 
   return (
     <div
@@ -125,13 +121,19 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
 
           {ep.params.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold uppercase mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+              <h4
+                className="text-xs font-semibold uppercase mb-1"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
                 {t('apiDocs.parameters')}
               </h4>
               <div className="space-y-1">
                 {ep.params.map((p) => (
                   <div key={p.name} className="flex items-baseline gap-2 text-sm">
-                    <code className="font-mono text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
+                    <code
+                      className="font-mono text-xs px-1.5 py-0.5 rounded"
+                      style={{ background: 'var(--color-bg-tertiary)' }}
+                    >
                       {p.name}
                     </code>
                     <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
@@ -146,7 +148,10 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
 
           <div>
             <div className="flex items-center justify-between mb-1">
-              <h4 className="text-xs font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>
+              <h4
+                className="text-xs font-semibold uppercase"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
                 {t('apiDocs.exampleCurl')}
               </h4>
               <CopyButton text={curlExample} />
@@ -160,7 +165,10 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
           </div>
 
           <div>
-            <h4 className="text-xs font-semibold uppercase mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+            <h4
+              className="text-xs font-semibold uppercase mb-1"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
               {t('apiDocs.response')}
             </h4>
             <pre
@@ -173,23 +181,27 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
         </div>
       )}
     </div>
-  )
+  );
 }
 
 export default function ApiDocsPage() {
-  const t = useT()
+  const t = useT();
   const { data, isLoading } = useQuery({
     queryKey: ['api-docs'],
     queryFn: () => api.get<DocsData>('/docs-data'),
-  })
+  });
 
   if (isLoading || !data) {
-    return <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('apiDocs.loading')}</div>
+    return (
+      <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+        {t('apiDocs.loading')}
+      </div>
+    );
   }
 
-  const allEndpoints = data.groups.flatMap((g) =>
-    g.endpoints.map((ep) => buildCurlExample(ep, data.auth_header))
-  ).join('\n\n---\n\n')
+  const allEndpoints = data.groups
+    .flatMap((g) => g.endpoints.map((ep) => buildCurlExample(ep, data.auth_header)))
+    .join('\n\n---\n\n');
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -205,9 +217,7 @@ export default function ApiDocsPage() {
         style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
       >
         <p className="font-medium">{t('apiDocs.authentication')}</p>
-        <p style={{ color: 'var(--color-text-secondary)' }}>
-          {t('apiDocs.authDesc')}
-        </p>
+        <p style={{ color: 'var(--color-text-secondary)' }}>{t('apiDocs.authDesc')}</p>
         <div className="flex items-center gap-2">
           <code
             className="text-xs px-3 py-1.5 rounded font-mono flex-1"
@@ -233,5 +243,5 @@ export default function ApiDocsPage() {
         </div>
       ))}
     </div>
-  )
+  );
 }

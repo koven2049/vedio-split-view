@@ -1,20 +1,20 @@
-import { create } from 'zustand'
-import { createSSE } from '../lib/api'
-import type { MindmapData } from '../components/MindmapView'
+import { create } from 'zustand';
+import { createSSE } from '../lib/api';
+import type { MindmapData } from '../components/MindmapView';
 
 /** Placeholder when the server emits an error without a message; map to i18n in the UI. */
-export const MINDMAP_GENERIC_STREAM_ERROR = '__mindmap_generic_stream_error__'
+export const MINDMAP_GENERIC_STREAM_ERROR = '__mindmap_generic_stream_error__';
 
-const sseHandles = new Map<number, { cancel: () => void }>()
+const sseHandles = new Map<number, { cancel: () => void }>();
 
-type ProgressLabelKey = '' | 'mindmap.analyzingTheme' | 'mindmap.extractingQuotes'
+type ProgressLabelKey = '' | 'mindmap.analyzingTheme' | 'mindmap.extractingQuotes';
 
 export interface MindmapGenerationState {
-  generating: boolean
-  progressLabel: ProgressLabelKey
-  streamError: string
-  data: MindmapData | null
-  videoId: number | null
+  generating: boolean;
+  progressLabel: ProgressLabelKey;
+  streamError: string;
+  data: MindmapData | null;
+  videoId: number | null;
 }
 
 function defaultGen(videoId: number): MindmapGenerationState {
@@ -24,15 +24,15 @@ function defaultGen(videoId: number): MindmapGenerationState {
     streamError: '',
     data: null,
     videoId,
-  }
+  };
 }
 
 interface MindmapStore {
-  generations: Record<number, MindmapGenerationState>
-  startGeneration: (videoId: number, refresh: boolean) => void
+  generations: Record<number, MindmapGenerationState>;
+  startGeneration: (videoId: number, refresh: boolean) => void;
   /** Per-video generation slice; `null` if none yet for this id. */
-  getState: (videoId: number) => MindmapGenerationState | null
-  clearError: (videoId: number) => void
+  getState: (videoId: number) => MindmapGenerationState | null;
+  clearError: (videoId: number) => void;
 }
 
 function patchGeneration(
@@ -40,11 +40,11 @@ function patchGeneration(
   videoId: number,
   patch: Partial<MindmapGenerationState>,
 ): Record<number, MindmapGenerationState> {
-  const prev = generations[videoId] ?? defaultGen(videoId)
+  const prev = generations[videoId] ?? defaultGen(videoId);
   return {
     ...generations,
     [videoId]: { ...prev, ...patch, videoId },
-  }
+  };
 }
 
 export const useMindmapStore = create<MindmapStore>((set, get) => ({
@@ -54,18 +54,18 @@ export const useMindmapStore = create<MindmapStore>((set, get) => ({
 
   clearError: (videoId) => {
     set((s) => {
-      const cur = s.generations[videoId]
-      if (!cur) return s
-      return { generations: patchGeneration(s.generations, videoId, { streamError: '' }) }
-    })
+      const cur = s.generations[videoId];
+      if (!cur) return s;
+      return { generations: patchGeneration(s.generations, videoId, { streamError: '' }) };
+    });
   },
 
   startGeneration: (videoId, refresh) => {
-    sseHandles.get(videoId)?.cancel()
-    sseHandles.delete(videoId)
+    sseHandles.get(videoId)?.cancel();
+    sseHandles.delete(videoId);
 
     set((s) => {
-      const prevGen = s.generations[videoId]
+      const prevGen = s.generations[videoId];
       return {
         generations: patchGeneration(s.generations, videoId, {
           generating: true,
@@ -74,22 +74,22 @@ export const useMindmapStore = create<MindmapStore>((set, get) => ({
           data: prevGen?.data ?? null,
           videoId,
         }),
-      }
-    })
+      };
+    });
 
-    const path = `/videos/${videoId}/mindmap${refresh ? '?refresh=true' : ''}`
+    const path = `/videos/${videoId}/mindmap${refresh ? '?refresh=true' : ''}`;
     const sse = createSSE(path, {}, (evt, raw) => {
       const d = raw as {
-        stage?: string
-        message?: string
-        progress?: number
-        data?: MindmapData
-      }
+        stage?: string;
+        message?: string;
+        progress?: number;
+        data?: MindmapData;
+      };
 
       if (evt === 'error' || d.stage === 'error') {
-        sseHandles.delete(videoId)
-        const raw = typeof d.message === 'string' ? d.message.trim() : ''
-        const streamError = raw || MINDMAP_GENERIC_STREAM_ERROR
+        sseHandles.delete(videoId);
+        const raw = typeof d.message === 'string' ? d.message.trim() : '';
+        const streamError = raw || MINDMAP_GENERIC_STREAM_ERROR;
         set((s) => ({
           generations: patchGeneration(s.generations, videoId, {
             generating: false,
@@ -97,8 +97,8 @@ export const useMindmapStore = create<MindmapStore>((set, get) => ({
             streamError,
             videoId,
           }),
-        }))
-        return
+        }));
+        return;
       }
 
       if (d.stage === 'generating') {
@@ -107,8 +107,8 @@ export const useMindmapStore = create<MindmapStore>((set, get) => ({
             progressLabel: 'mindmap.analyzingTheme',
             videoId,
           }),
-        }))
-        return
+        }));
+        return;
       }
 
       if (d.stage === 'stage1_done') {
@@ -117,12 +117,12 @@ export const useMindmapStore = create<MindmapStore>((set, get) => ({
             progressLabel: 'mindmap.extractingQuotes',
             videoId,
           }),
-        }))
-        return
+        }));
+        return;
       }
 
       if (d.stage === 'complete') {
-        sseHandles.delete(videoId)
+        sseHandles.delete(videoId);
         if (d.data) {
           set((s) => ({
             generations: patchGeneration(s.generations, videoId, {
@@ -132,7 +132,7 @@ export const useMindmapStore = create<MindmapStore>((set, get) => ({
               streamError: '',
               videoId,
             }),
-          }))
+          }));
         } else {
           set((s) => ({
             generations: patchGeneration(s.generations, videoId, {
@@ -141,14 +141,14 @@ export const useMindmapStore = create<MindmapStore>((set, get) => ({
               streamError: MINDMAP_GENERIC_STREAM_ERROR,
               videoId,
             }),
-          }))
+          }));
         }
-        return
+        return;
       }
 
       if (evt === 'done') {
-        sseHandles.delete(videoId)
-        const cur = get().generations[videoId]
+        sseHandles.delete(videoId);
+        const cur = get().generations[videoId];
         if (cur?.generating) {
           set((s) => ({
             generations: patchGeneration(s.generations, videoId, {
@@ -156,11 +156,11 @@ export const useMindmapStore = create<MindmapStore>((set, get) => ({
               progressLabel: '',
               videoId,
             }),
-          }))
+          }));
         }
       }
-    })
+    });
 
-    sseHandles.set(videoId, sse)
+    sseHandles.set(videoId, sse);
   },
-}))
+}));

@@ -1,9 +1,9 @@
-import { cn } from '../lib/utils'
+import { cn } from '../lib/utils';
 
 interface LangToggleProps {
-  lang: 'zh' | 'en'
-  onChange: (lang: 'zh' | 'en') => void
-  className?: string
+  lang: 'zh' | 'en';
+  onChange: (lang: 'zh' | 'en') => void;
+  className?: string;
 }
 
 export default function LangToggle({ lang, onChange, className }: LangToggleProps) {
@@ -37,5 +37,5 @@ export default function LangToggle({ lang, onChange, className }: LangToggleProp
         EN
       </button>
     </div>
-  )
+  );
 }

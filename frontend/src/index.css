@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 :root {
   --color-primary: #3b82f6;
@@ -39,7 +39,13 @@ body {
 }
 
 @keyframes indeterminate {
-  0%   { transform: translateX(-100%); }
-  50%  { transform: translateX(150%); }
-  100% { transform: translateX(250%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(150%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
 }

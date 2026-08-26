@@ -1,28 +1,28 @@
-import type { UsageInfo } from '../stores/analysisStore'
+import type { UsageInfo } from '../stores/analysisStore';
 
 interface UsageDisplayProps {
-  usage: UsageInfo
-  className?: string
+  usage: UsageInfo;
+  className?: string;
 }
 
 export default function UsageDisplay({ usage, className }: UsageDisplayProps) {
-  const items: Array<{ label: string; value: string }> = []
+  const items: Array<{ label: string; value: string }> = [];
 
   if (usage.asr_model && usage.asr_duration_seconds > 0) {
     items.push({
       label: `ASR (${usage.asr_model})`,
       value: `${Math.round(usage.asr_duration_seconds)}s`,
-    })
+    });
   }
 
   if (usage.llm_model && usage.llm_total_tokens > 0) {
     items.push({
       label: `LLM (${usage.llm_model})`,
       value: `${usage.llm_prompt_tokens.toLocaleString()}↑ ${usage.llm_completion_tokens.toLocaleString()}↓ (${usage.llm_total_tokens.toLocaleString()})`,
-    })
+    });
   }
 
-  if (items.length === 0) return null
+  if (items.length === 0) return null;
 
   return (
     <div
@@ -36,5 +36,5 @@ export default function UsageDisplay({ usage, className }: UsageDisplayProps) {
         </span>
       ))}
     </div>
-  )
+  );
 }

@@ -1,10 +1,10 @@
-import type { TranslationKey } from './zh'
+import type { TranslationKey } from './zh';
 
 const en: Record<TranslationKey, string> = {
   // Layout / Nav
   'nav.analyze': 'Analyze',
   'nav.library': 'Library',
-'nav.llmLogs': 'LLM Logs',
+  'nav.llmLogs': 'LLM Logs',
   'nav.apiDocs': 'API Docs',
   'nav.settings': 'Settings',
   'nav.users': 'Users',
@@ -48,7 +48,8 @@ const en: Record<TranslationKey, string> = {
   'analyze.continue': 'Continue',
   'analyze.concurrentLimit': 'Concurrent limit reached',
   'analyze.waitCurrent': 'Please wait for current analysis to complete',
-  'analyze.concurrentLimitFull': 'Concurrent limit reached ({limit}). Please wait for the current analysis to finish.',
+  'analyze.concurrentLimitFull':
+    'Concurrent limit reached ({limit}). Please wait for the current analysis to finish.',
   'analyze.placeholderYoutube': 'https://www.youtube.com/watch?v=...',
   'analyze.placeholderBilibili': 'https://www.bilibili.com/video/BV...',
   'analyze.placeholderXiaoyuzhou': 'https://www.xiaoyuzhoufm.com/episode/...',
@@ -56,16 +57,19 @@ const en: Record<TranslationKey, string> = {
   'analyze.invalidYoutube': 'Please enter a valid YouTube link (youtube.com / youtu.be)',
   'analyze.invalidBilibili': 'Please enter a valid Bilibili link (bilibili.com / b23.tv)',
   'analyze.invalidXiaoyuzhou': 'Please enter a valid Xiaoyuzhou link (xiaoyuzhoufm.com)',
-  'analyze.xiaoyuzhouNotEpisode': 'Episode link required (/episode/...); podcast/user pages are not supported',
+  'analyze.xiaoyuzhouNotEpisode':
+    'Episode link required (/episode/...); podcast/user pages are not supported',
   'analyze.xiaoyuzhouBadFormat': 'Invalid link format — must contain a 24-character episode ID',
   'analyze.xiaoyuzhouTabHint': 'Public episodes only; paid/private content not supported',
   'analyze.xiaoyuzhouErrorCdnExpired': 'Audio link expired. Click retry to fetch a fresh one.',
   'analyze.xiaoyuzhouErrorPaidPrivate': 'Paid/private content is not supported',
-  'analyze.xiaoyuzhouErrorPageChanged': 'Xiaoyuzhou page structure may have changed. Please contact the maintainer.',
+  'analyze.xiaoyuzhouErrorPageChanged':
+    'Xiaoyuzhou page structure may have changed. Please contact the maintainer.',
   'analyze.xiaoyuzhouErrorNotEpisode': 'The link is not a valid episode',
   'analyze.downloadProgressBytes': '{downloaded} / {total} MB',
   'analyze.downloadProgressDownloaded': '{downloaded} MB',
-  'analyze.wrongPlatform': 'Current tab is {current}, but the link belongs to {detected}. Please switch to the correct tab.',
+  'analyze.wrongPlatform':
+    'Current tab is {current}, but the link belongs to {detected}. Please switch to the correct tab.',
   'analyze.cookiesNotConfigured': 'YouTube cookies not configured — some videos may not download',
   'analyze.cookiesFileMissing': 'Cookies file missing: check config/youtube_cookies.txt',
   'analyze.cookiesExpired': 'YouTube cookies expired',
@@ -126,9 +130,9 @@ const en: Record<TranslationKey, string> = {
   'detail.makePrivate': 'Make Private',
   'detail.shareToPublic': 'Share',
   'detail.downloadMarkdown': 'Download MD',
-'detail.essence': 'Essence',
-'detail.downloadEssence': 'Download Essence',
-'detail.downloadEssenceHint': 'Download essence summary as Markdown',
+  'detail.essence': 'Essence',
+  'detail.downloadEssence': 'Download Essence',
+  'detail.downloadEssenceHint': 'Download essence summary as Markdown',
   'detail.downloadMarkdownHint': 'Download full Markdown (summary + segments + transcript)',
   'detail.addTag': 'Add tag',
   'detail.tagPlaceholder': 'Tag name',
@@ -144,7 +148,8 @@ const en: Record<TranslationKey, string> = {
   // Mind Map
   'mindmap.loading': 'Loading mind map…',
   'mindmap.title': 'Mind Map',
-  'mindmap.description': 'AI will reorganize content by theme, extract key points and notable quotes.',
+  'mindmap.description':
+    'AI will reorganize content by theme, extract key points and notable quotes.',
   'mindmap.generate': 'Generate Mind Map',
   'mindmap.regenerate': 'Regenerate mind map',
   'mindmap.regenerateConfirm': 'Regenerate mind map?',
@@ -166,22 +171,27 @@ const en: Record<TranslationKey, string> = {
   'settings.username': 'Username',
   'settings.role': 'Role',
   'settings.youtubeCookies': 'YouTube Cookies',
-  'settings.youtubeCookiesDesc': 'Checks whether the configured cookies are present, unexpired, and still accepted by YouTube.',
+  'settings.youtubeCookiesDesc':
+    'Checks whether the configured cookies are present, unexpired, and still accepted by YouTube.',
   'settings.youtubeCookiesUnavailable': 'YouTube cookies status unavailable.',
-  'settings.youtubeCookiesNotConfiguredDetail': 'YouTube cookies are not configured; some videos may require login verification.',
-  'settings.youtubeCookiesFileMissingDetail': 'YouTube cookies file is missing — check the config directory.',
+  'settings.youtubeCookiesNotConfiguredDetail':
+    'YouTube cookies are not configured; some videos may require login verification.',
+  'settings.youtubeCookiesFileMissingDetail':
+    'YouTube cookies file is missing — check the config directory.',
   'settings.youtubeCookiesExpiredWithDateDetail': 'YouTube cookies expired ({date}).',
   'settings.youtubeCookiesExpiredShort': 'YouTube cookies expired.',
   'settings.cookiesConfiguredButUnavailable': 'Cookies are configured but currently not usable.',
   'settings.cookiesUsableDefaultMsg': 'Cookies work for current YouTube metadata requests.',
-  'settings.cookiesProbeInconclusiveMsg': 'Cookie usability probe did not return a definite result.',
+  'settings.cookiesProbeInconclusiveMsg':
+    'Cookie usability probe did not return a definite result.',
   'settings.cookiesFileConfiguredMsg': 'Cookies file is configured.',
   'settings.cookiesLoadedSummary': '{count} cookies loaded',
   'settings.connectedWithUser': 'Connected — @{username}',
   'settings.defaultValue': 'Default: {duration} ({seconds}s)',
   'settings.unitMinutes': 'min',
   'settings.unitSlots': 'slots',
-  'settings.cleanupRemovedDetail': 'Removed {total} items ({exports} exports, {thumbnails} thumbnails, {tasks} task dirs).',
+  'settings.cleanupRemovedDetail':
+    'Removed {total} items ({exports} exports, {thumbnails} thumbnails, {tasks} task dirs).',
   'settings.modalTotalRemovable': 'Total removable items: {count}',
   'settings.modalExports': 'Exports: {count}',
   'settings.modalThumbnails': 'Thumbnails: {count}',
@@ -206,19 +216,22 @@ const en: Record<TranslationKey, string> = {
   'settings.skipped': 'Skipped',
   'settings.lastChecked': 'Last checked',
   'settings.bilibiliAccount': 'Bilibili Account',
-  'settings.bilibiliDesc': 'Connect your Bilibili account to directly fetch subtitles (faster analysis, no audio download needed).',
+  'settings.bilibiliDesc':
+    'Connect your Bilibili account to directly fetch subtitles (faster analysis, no audio download needed).',
   'settings.disconnect': 'Disconnect',
   'settings.disconnecting': 'Disconnecting...',
   'settings.connectBilibili': 'Connect Bilibili',
   'settings.connecting': 'Connecting...',
   'settings.connected': 'Connected',
-  'settings.notConnected': 'Not connected yet. Connect your Bilibili account before importing videos that rely on subtitle access.',
+  'settings.notConnected':
+    'Not connected yet. Connect your Bilibili account before importing videos that rely on subtitle access.',
   'settings.scanWithApp': 'Scan with Bilibili App',
   'settings.waitingForScan': 'Waiting for scan...',
   'settings.qrExpired': 'QR code expired',
   'settings.generateNewQR': 'Generate new QR code',
   'settings.videoLimits': 'Video Limits',
-  'settings.videoLimitsDesc': 'Adjust the per-account limits used by analysis. The max duration here controls errors like "exceeding the 1h0m limit".',
+  'settings.videoLimitsDesc':
+    'Adjust the per-account limits used by analysis. The max duration here controls errors like "exceeding the 1h0m limit".',
   'settings.save': 'Save',
   'settings.saved': 'Saved',
   'settings.maxDuration': 'Max Video Duration',
@@ -227,7 +240,8 @@ const en: Record<TranslationKey, string> = {
   'settings.default': 'Default',
   'settings.saveFailed': 'Failed to save. Please try again.',
   'settings.cumulativeUsage': 'Cumulative Usage',
-  'settings.cumulativeUsageDesc': 'Total API consumption across all your analyses. This data persists even after videos are deleted.',
+  'settings.cumulativeUsageDesc':
+    'Total API consumption across all your analyses. This data persists even after videos are deleted.',
   'settings.loadingUsage': 'Loading usage...',
   'settings.noUsageData': 'No usage data yet. Complete an analysis to start tracking.',
   'settings.llmModels': 'LLM Models',
@@ -238,9 +252,10 @@ const en: Record<TranslationKey, string> = {
   'settings.requests': 'Requests',
   'settings.totalDuration': 'Total Duration',
   'settings.apiTokens': 'API Tokens',
-  'settings.apiTokensDesc': 'Your browser login uses a session JWT. For scripts and external tools, issue a long-lived API token here.',
+  'settings.apiTokensDesc':
+    'Your browser login uses a session JWT. For scripts and external tools, issue a long-lived API token here.',
   'settings.requestHeader': 'Request Header',
-  'settings.tokenCreated': 'API token created! Copy it now — it won\'t be shown again.',
+  'settings.tokenCreated': "API token created! Copy it now — it won't be shown again.",
   'settings.tokenNamePlaceholder': 'Token name (e.g. automation-bot)',
   'settings.issueToken': 'Issue token',
   'settings.loadingTokens': 'Loading tokens...',
@@ -250,7 +265,8 @@ const en: Record<TranslationKey, string> = {
   'settings.unfinishedTasks': 'Unfinished Tasks',
   'settings.noUnfinishedTasks': 'No unfinished tasks.',
   'settings.adminCleanup': 'Admin Cleanup',
-  'settings.adminCleanupDesc': 'Scan and remove orphaned exports, thumbnails, and task temp directories left behind on disk.',
+  'settings.adminCleanupDesc':
+    'Scan and remove orphaned exports, thumbnails, and task temp directories left behind on disk.',
   'settings.scanningStorage': 'Scanning storage...',
   'settings.orphanExports': 'Orphan exports',
   'settings.orphanThumbnails': 'Orphan thumbnails',
@@ -262,7 +278,8 @@ const en: Record<TranslationKey, string> = {
   'settings.refresh': 'Refresh',
   'settings.cleanResidual': 'Clean residual files',
   'settings.cleanConfirm': 'Clean residual files?',
-  'settings.cleanConfirmDesc': 'This will remove orphaned files that are no longer referenced by the database.',
+  'settings.cleanConfirmDesc':
+    'This will remove orphaned files that are no longer referenced by the database.',
   'settings.confirmCleanup': 'Confirm cleanup',
 
   // Admin Page
@@ -272,7 +289,7 @@ const en: Record<TranslationKey, string> = {
   'admin.createNewUser': 'Create New User',
   'admin.usernamePlaceholder': 'Username',
   'admin.passwordPlaceholder': 'Password',
-    'admin.viewer': 'Viewer',
+  'admin.viewer': 'Viewer',
   'admin.create': 'Create',
   'admin.usernameMinLength': 'Username must be at least 2 characters',
   'admin.passwordMinLength': 'Password must be at least 4 characters',
@@ -303,7 +320,8 @@ const en: Record<TranslationKey, string> = {
   'admin.deleteUserAndFiles': 'Delete user and files',
   'admin.loadingDeleteImpact': 'Loading delete impact...',
   'admin.resetPasswordFor': 'Reset password for "{username}"',
-  'admin.resetPasswordDesc': 'Set a new password for this account. The old password will stop working immediately.',
+  'admin.resetPasswordDesc':
+    'Set a new password for this account. The old password will stop working immediately.',
   'admin.newPassword': 'New password',
   'admin.atLeast4Chars': 'At least 4 characters',
   'admin.saveNewPassword': 'Save new password',
@@ -313,7 +331,8 @@ const en: Record<TranslationKey, string> = {
   'apiDocs.title': 'API Documentation',
   'apiDocs.loading': 'Loading docs...',
   'apiDocs.authentication': 'Authentication',
-  'apiDocs.authDesc': 'For scripts and external tools, add your API token with the following header:',
+  'apiDocs.authDesc':
+    'For scripts and external tools, add your API token with the following header:',
   'apiDocs.createTokens': 'Create tokens in Settings → API Tokens.',
   'apiDocs.parameters': 'Parameters',
   'apiDocs.exampleCurl': 'Example (curl)',
@@ -324,19 +343,19 @@ const en: Record<TranslationKey, string> = {
   'common.delete': 'Delete',
   'common.confirm': 'Confirm',
   'common.loading': 'Loading...',
-'common.error': 'Error',
-'logs.time': 'Time',
-'logs.provider': 'Provider',
-'logs.model': 'Model',
-'logs.purpose': 'Purpose',
-'logs.status': 'Status',
-'logs.tokens': 'Tokens',
-'logs.duration': 'Duration',
-'logs.error': 'Error',
-'logs.empty': 'No LLM call records yet',
+  'common.error': 'Error',
+  'logs.time': 'Time',
+  'logs.provider': 'Provider',
+  'logs.model': 'Model',
+  'logs.purpose': 'Purpose',
+  'logs.status': 'Status',
+  'logs.tokens': 'Tokens',
+  'logs.duration': 'Duration',
+  'logs.error': 'Error',
+  'logs.empty': 'No LLM call records yet',
   'common.save': 'Save',
   'common.copy': 'Copy',
   'common.dismiss': 'Dismiss',
-}
+};
 
-export default en
+export default en;
