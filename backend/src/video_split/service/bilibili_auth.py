@@ -81,12 +81,18 @@ class Fingerprint:
         return out
 
 
-async def generate_qr_code() -> QRCodeData:
-    settings = get_settings()
-    proxy_conf = settings.network.proxy_url
+def _bilibili_httpx_proxy() -> str | None:
+    """Bilibili APIs are domestic — never send them through the YouTube proxy.
 
+    QR login / fingerprint minted on an overseas IP then reused from a home
+    broadband address looks like a stolen session and can trip -352.
+    """
+    return None
+
+
+async def generate_qr_code() -> QRCodeData:
     logger.info("[bilibili] Generating QR code via %s", BILI_QR_GENERATE_URL)
-    async with httpx.AsyncClient(headers=_BILI_HEADERS, proxy=proxy_conf) as client:
+    async with httpx.AsyncClient(headers=_BILI_HEADERS, proxy=_bilibili_httpx_proxy()) as client:
         resp = await client.get(BILI_QR_GENERATE_URL)
         resp.raise_for_status()
         data = resp.json()
@@ -105,10 +111,7 @@ async def generate_qr_code() -> QRCodeData:
 
 
 async def poll_qr_status(qr_key: str) -> QRPollResult:
-    settings = get_settings()
-    proxy_conf = settings.network.proxy_url
-
-    async with httpx.AsyncClient(headers=_BILI_HEADERS, proxy=proxy_conf) as client:
+    async with httpx.AsyncClient(headers=_BILI_HEADERS, proxy=_bilibili_httpx_proxy()) as client:
         resp = await client.get(BILI_QR_POLL_URL, params={"qrcode_key": qr_key})
         resp.raise_for_status()
         data = resp.json()
@@ -221,10 +224,9 @@ async def fetch_fingerprint() -> tuple[str, str]:
 
     Returns ("", "") on any failure (fail loud, degrade).
     """
-    settings = get_settings()
     try:
         async with httpx.AsyncClient(
-            headers=_BILI_HEADERS, proxy=settings.network.proxy_url, timeout=20
+            headers=_BILI_HEADERS, proxy=_bilibili_httpx_proxy(), timeout=20
         ) as client:
             resp = await client.get(BILI_FINGER_SPI_URL)
             resp.raise_for_status()
@@ -272,7 +274,6 @@ async def activate_buvid(buvid3: str, buvid4: str) -> bool:
     """
     if not buvid3:
         return False
-    settings = get_settings()
     headers = dict(_BILI_HEADERS)
     headers["Content-Type"] = "application/json"
     cookies = {"buvid3": buvid3}
@@ -280,7 +281,7 @@ async def activate_buvid(buvid3: str, buvid4: str) -> bool:
         cookies["buvid4"] = buvid4
     try:
         async with httpx.AsyncClient(
-            headers=headers, cookies=cookies, proxy=settings.network.proxy_url, timeout=20
+            headers=headers, cookies=cookies, proxy=_bilibili_httpx_proxy(), timeout=20
         ) as client:
             resp = await client.post(
                 BILI_EXCLIMB_URL, json=_build_exclimb_payload(buvid3)
@@ -310,7 +311,6 @@ async def get_bili_ticket(bili_jct: str = "") -> tuple[str, int]:
 
     Returns ("", 0) on failure (fail loud, degrade).
     """
-    settings = get_settings()
     ts = int(time.time())
     params = {
         "key_id": _TICKET_KEY_ID,
@@ -320,7 +320,7 @@ async def get_bili_ticket(bili_jct: str = "") -> tuple[str, int]:
     }
     try:
         async with httpx.AsyncClient(
-            headers=_BILI_HEADERS, proxy=settings.network.proxy_url, timeout=20
+            headers=_BILI_HEADERS, proxy=_bilibili_httpx_proxy(), timeout=20
         ) as client:
             resp = await client.post(BILI_TICKET_URL, params=params)
             resp.raise_for_status()
@@ -370,3 +370,21 @@ async def refresh_fingerprint(bili_jct: str = "") -> Fingerprint:
 
     save_fingerprint(fp)
     return fp
+
+
+def fingerprint_is_fresh(fp: Fingerprint | None = None) -> bool:
+    """True when a cached buvid3 exists and bili_ticket is not near expiry."""
+    current = fp or load_fingerprint()
+    if not current.buvid3:
+        return False
+    return bool(
+        current.bili_ticket and current.ticket_expires_at > int(time.time()) + 3600
+    )
+
+
+async def ensure_fingerprint(bili_jct: str = "") -> Fingerprint:
+    """Reuse a fresh cached fingerprint; otherwise refresh (best-effort)."""
+    fp = load_fingerprint()
+    if fingerprint_is_fresh(fp):
+        return fp
+    return await refresh_fingerprint(bili_jct)

@@ -43,3 +43,11 @@ API 文档是**自动派生**的，不要手写端点清单。真相源 = 路由
 3. **报错工程化**：ffmpeg/ffprobe 调用去掉 `-v quiet`，失败时附 stderr 尾部 6 行（如 muxer 报错原文），不再抛裸 exit code。
 4. **防复发**：切片失败清理 chunks 残桩；resume 前用 ffprobe 校验缓存时长（容差 5s），截断缓存降级为重新下载。
 5. **测试**：`test_transcriber_chunking.py` 新增真实 ffmpeg 用例（程序生成 AAC 样本复现线上故障），全量 162 passed。
+
+**2026-08-31 抓取路径：家宽直连 + 少依赖 cookie**
+
+1. **YouTube JS 运行时改 Deno**：apt Node 20 < 官方最低 22，n-challenge 解不开会被当成 bot。容器里已装 Deno，代码却锁死 `js_runtimes=node`。
+2. **YouTube 播放客户端 `web_embedded` + `android`**：默认 web/android_vr 能列出格式，媒体 URL 403（缺 PO Token）。这两套客户端当前不需要 PO Token 即可下音频；cookie 仍只给年龄限制/会员片。
+3. **YouTube 字幕优先走 yt-dlp 写 json3**（与 Deno/代理/客户端同一条路），`youtube-transcript-api` 仅兜底。单条字幕 429 用 `ignoreerrors` 不中断整次抓取。
+4. **B 站音频改 playurl API**：yt-dlp 爬网页仍 412；`/x/player/playurl?fnval=16` 在家宽 + buvid 指纹下可拿 DASH 音轨，再 ffmpeg 转 mp3。
+5. **B 站指纹自动 ensure**：首次抓取刷新 buvid3/4 + bili_ticket，登录 SESSDATA 不再是公开稿前提。扫码/指纹请求改为直连，禁止走出海代理（海外登录 + 国内下载会被当成异常会话）。

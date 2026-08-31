@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -133,11 +135,20 @@ def _youtube_cookies_path() -> str | None:
 
 
 def _apply_youtube_opts(ydl_opts: dict[str, Any]) -> None:
-    """Add YouTube-specific yt-dlp options (cookies + JS runtime for n-challenge)."""
+    """Add YouTube-specific yt-dlp options (optional cookies + Deno for n-challenge).
+
+    Deno is yt-dlp's default JS runtime (Node needs >=22; Debian apt ships 20).
+    Cookies stay optional for age-restricted / members-only videos — they are
+    not the 2026 fix for bot-check. Do not pair them with a PO Token plugin.
+    """
     ck = _youtube_cookies_path()
     if ck:
         ydl_opts["cookiefile"] = ck
-    ydl_opts["js_runtimes"] = {"node": {}}
+    ydl_opts["js_runtimes"] = {"deno": {}}
+    # web_embedded / android currently yield GVS URLs without a PO Token.
+    # Default web/android_vr clients list formats then 403 on the media fetch.
+    youtube_args = ydl_opts.setdefault("extractor_args", {}).setdefault("youtube", {})
+    youtube_args.setdefault("player_client", ["web_embedded", "android"])
 
 
 _BILI_UA = (
@@ -149,6 +160,46 @@ _BILI_UA = (
 # sequential API calls) — conservative default to avoid -352 frequency
 # risk-control on data-center IPs.
 _BILI_SLEEP_REQUESTS = 1.0
+
+_YT_SUB_LANGS = ["zh-Hans", "zh", "zh-CN", "en", "ja", "ko", "es"]
+
+
+async def _ensure_bilibili_fingerprint(bili_jct: str = "") -> None:
+    """Best-effort device-fingerprint refresh before Bilibili API calls."""
+    try:
+        from video_split.service.bilibili_auth import ensure_fingerprint
+
+        await ensure_fingerprint(bili_jct)
+    except Exception:
+        logger.warning("[bilibili] fingerprint ensure failed", exc_info=True)
+
+
+def _parse_youtube_json3(data: dict[str, Any]) -> list[SubtitleEntry]:
+    """Parse YouTube json3 timedtext into SubtitleEntry rows."""
+    entries: list[SubtitleEntry] = []
+    for event in data.get("events") or []:
+        text = "".join(seg.get("utf8", "") for seg in event.get("segs") or []).strip()
+        if not text:
+            continue
+        entries.append(
+            SubtitleEntry(
+                start=event.get("tStartMs", 0) / 1000.0,
+                duration=event.get("dDurationMs", 0) / 1000.0,
+                text=text,
+            )
+        )
+    return entries
+
+
+def _pick_youtube_subtitle_url(tracks: list[dict[str, Any]]) -> str | None:
+    """Prefer json3 (easy parse) over vtt/srv3."""
+    if not tracks:
+        return None
+    for ext in ("json3", "srv3", "vtt"):
+        for track in tracks:
+            if track.get("ext") == ext and track.get("url"):
+                return str(track["url"])
+    return tracks[0].get("url") or None
 
 
 def _bilibili_headers(sessdata: str = "", bili_jct: str = "", buvid3: str = "") -> dict[str, str]:
@@ -335,9 +386,9 @@ async def extract_metadata(
     import yt_dlp
 
     platform, vid = detect_platform(url)
-    settings = get_settings()
 
     if platform == "bilibili":
+        await _ensure_bilibili_fingerprint(bili_jct)
         headers = _bilibili_headers(sessdata, bili_jct, buvid3)
         logger.info("[metadata] Bilibili via API: bvid=%s", vid)
         try:
@@ -432,38 +483,96 @@ async def download_thumbnail(meta: VideoMeta) -> str:
         return meta.thumbnail_url
 
 
-async def fetch_youtube_subtitles(video_id: str) -> list[SubtitleEntry]:
-    """Fetch YouTube subtitles, retrying once without proxy when appropriate."""
+def _pick_youtube_subtitle_file(files: list[Path], video_id: str) -> Path | None:
+    """Prefer a written json3 file in the same language order as _YT_SUB_LANGS."""
+    by_name = {path.name: path for path in files}
+    for lang in _YT_SUB_LANGS:
+        match = by_name.get(f"{video_id}.{lang}.json3")
+        if match:
+            return match
+    return files[0] if files else None
+
+
+async def _fetch_youtube_subtitles_via_ytdlp(video_id: str) -> list[SubtitleEntry]:
+    """Fetch captions through yt-dlp so Deno / proxy / cookies stay in one path."""
+    import tempfile
+
+    import yt_dlp
+
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    with tempfile.TemporaryDirectory() as tmp:
+        ydl_opts: dict[str, Any] = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": list(_YT_SUB_LANGS),
+            "subtitlesformat": "json3",
+            "ignoreerrors": True,
+            "outtmpl": str(Path(tmp) / "%(id)s.%(ext)s"),
+        }
+        ydl_opts["proxy"] = _proxy_for_platform("youtube") or ""
+        _apply_youtube_opts(ydl_opts)
+
+        logger.info("[subtitle] YouTube via yt-dlp: %s", video_id)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        chosen = _pick_youtube_subtitle_file(
+            sorted(Path(tmp).glob(f"{video_id}*.json3")), video_id
+        )
+        if not chosen:
+            logger.info("[subtitle] yt-dlp wrote no json3 captions for %s", video_id)
+            return []
+        return _parse_youtube_json3(json.loads(chosen.read_text(encoding="utf-8")))
+
+
+async def _fetch_youtube_subtitles_legacy(video_id: str) -> list[SubtitleEntry]:
+    """Fallback when yt-dlp cannot list caption tracks."""
     from youtube_transcript_api import YouTubeTranscriptApi
     from youtube_transcript_api.proxies import GenericProxyConfig
 
-    languages = ["zh-Hans", "zh", "zh-CN", "en", "ja", "ko", "es"]
     proxy_url = _proxy_for_platform("youtube")
     configs: list[GenericProxyConfig | None] = []
     if proxy_url:
         configs.append(GenericProxyConfig(http_url=proxy_url, https_url=proxy_url))
     configs.append(None)
 
-    logger.info("[subtitle] Fetching YouTube subtitles for %s", video_id)
     for index, proxy_config in enumerate(configs):
         try:
             kwargs: dict[str, Any] = {}
             if proxy_config:
                 kwargs["proxy_config"] = proxy_config
-            transcript = YouTubeTranscriptApi(**kwargs).fetch(video_id, languages=languages)
-            entries = [
+            transcript = YouTubeTranscriptApi(**kwargs).fetch(video_id, languages=_YT_SUB_LANGS)
+            return [
                 SubtitleEntry(start=snip.start, duration=snip.duration, text=snip.text)
                 for snip in transcript.snippets
                 if snip.text.strip()
             ]
-            logger.info("[subtitle] YouTube subtitles: %d entries for %s", len(entries), video_id)
-            return entries
         except Exception:
             if index + 1 < len(configs):
-                logger.warning("[subtitle] YouTube fetch via proxy failed; retrying direct")
+                logger.warning("[subtitle] YouTube legacy fetch via proxy failed; retrying direct")
             else:
-                logger.exception("[subtitle] YouTube subtitle fetch failed for %s", video_id)
+                logger.exception("[subtitle] YouTube legacy subtitle fetch failed for %s", video_id)
     return []
+
+
+async def fetch_youtube_subtitles(video_id: str) -> list[SubtitleEntry]:
+    """Fetch YouTube subtitles via yt-dlp, falling back to youtube-transcript-api."""
+    logger.info("[subtitle] Fetching YouTube subtitles for %s", video_id)
+    try:
+        entries = await _fetch_youtube_subtitles_via_ytdlp(video_id)
+        if entries:
+            logger.info("[subtitle] YouTube yt-dlp subtitles: %d entries for %s", len(entries), video_id)
+            return entries
+    except Exception:
+        logger.warning("[subtitle] yt-dlp caption path failed for %s; trying legacy API", video_id, exc_info=True)
+
+    entries = await _fetch_youtube_subtitles_legacy(video_id)
+    if entries:
+        logger.info("[subtitle] YouTube legacy subtitles: %d entries for %s", len(entries), video_id)
+    return entries
 
 
 async def fetch_bilibili_subtitles(
@@ -472,6 +581,7 @@ async def fetch_bilibili_subtitles(
     """Fetch subtitles for requested Bilibili page via API."""
     _, bvid = detect_platform(url)
     page_number = _bilibili_page_number(url)
+    await _ensure_bilibili_fingerprint(bili_jct)
     headers = _bilibili_headers(sessdata, bili_jct, buvid3)
     logger.info("[subtitle] Bilibili via API: bvid=%s page=%d", bvid, page_number)
     try:
@@ -493,6 +603,7 @@ async def fetch_bilibili_metadata_and_subtitles(
     """
     _, bvid = detect_platform(url)
     page_number = _bilibili_page_number(url)
+    await _ensure_bilibili_fingerprint(bili_jct)
     headers = _bilibili_headers(sessdata, bili_jct, buvid3)
     logger.info("[bilibili] fetching metadata + subtitles: bvid=%s page=%d", bvid, page_number)
 
@@ -504,6 +615,108 @@ async def fetch_bilibili_metadata_and_subtitles(
     except Exception:
         logger.exception("[bilibili] combined fetch failed for %s", url)
         return None, []
+
+
+def _pick_bilibili_audio_url(play: dict[str, Any]) -> str:
+    """Choose the highest-bandwidth DASH audio URL, with durl fallback."""
+    dash = play.get("dash") or {}
+    audios = list(dash.get("audio") or [])
+    if audios:
+        best = max(audios, key=lambda item: item.get("bandwidth") or 0)
+        url = best.get("baseUrl") or best.get("base_url") or ""
+        if url:
+            return str(url)
+    durl = play.get("durl") or []
+    if durl and durl[0].get("url"):
+        return str(durl[0]["url"])
+    raise RuntimeError("Bilibili playurl returned no audio stream")
+
+
+def _ffmpeg_to_mp3(src: Path, dest: Path) -> None:
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", str(src), "-codec:a", "libmp3lame", "-b:a", "128k", str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stderr or "").splitlines()[-6:])
+        raise RuntimeError(f"ffmpeg mp3 convert failed (exit {proc.returncode}): {tail}")
+
+
+def _validate_audio_file(result: Path) -> Path:
+    if result.stat().st_size < MIN_AUDIO_BYTES:
+        actual = result.stat().st_size
+        raise RuntimeError(
+            f"Audio download produced an invalid file ({actual} bytes). "
+            "The source may be unavailable or region-restricted."
+        )
+    size_mb = result.stat().st_size / (1024 * 1024)
+    logger.info("[download] Audio saved: %s (%.1f MB)", result, size_mb)
+    return result
+
+
+async def _download_bilibili_audio_via_api(
+    url: str,
+    output_dir: Path,
+    progress_callback: Callable[[DownloadProgress], None] | None = None,
+    *,
+    sessdata: str = "",
+    bili_jct: str = "",
+    buvid3: str = "",
+) -> Path:
+    """Download Bilibili audio via playurl API (webpage scrape gets 412)."""
+    import asyncio
+
+    await _ensure_bilibili_fingerprint(bili_jct)
+    headers = _bilibili_headers(sessdata, bili_jct, buvid3)
+    _, bvid = detect_platform(url)
+    page_number = _bilibili_page_number(url)
+    view = await _fetch_bilibili_view_once(bvid, headers)
+    cid = _bilibili_cid(view, page_number)
+    if not cid:
+        raise RuntimeError(f"Bilibili playurl: no cid for {bvid} page={page_number}")
+
+    await asyncio.sleep(_BILI_SLEEP_REQUESTS)
+    play_api = (
+        f"https://api.bilibili.com/x/player/playurl?bvid={bvid}&cid={cid}"
+        "&fnval=16&fnver=0&fourk=1"
+    )
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        resp = await client.get(play_api)
+        resp.raise_for_status()
+        payload = resp.json()
+    if payload.get("code") != 0:
+        raise RuntimeError(f"Bilibili playurl error: {payload.get('message', 'unknown')}")
+
+    audio_url = _pick_bilibili_audio_url(payload.get("data") or {})
+    raw_path = output_dir / "audio.m4a"
+    mp3_path = output_dir / "audio.mp3"
+    download_headers = dict(headers)
+    download_headers["Referer"] = "https://www.bilibili.com"
+
+    logger.info("[download] Bilibili via playurl API: bvid=%s cid=%s", bvid, cid)
+    async with httpx.AsyncClient(
+        headers=download_headers, timeout=120, follow_redirects=True
+    ) as client:
+        async with client.stream("GET", audio_url) as stream:
+            stream.raise_for_status()
+            total = int(stream.headers.get("content-length") or 0)
+            downloaded = 0
+            with raw_path.open("wb") as fh:
+                async for chunk in stream.aiter_bytes():
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback:
+                        ratio = downloaded / total if total > 0 else 0.0
+                        progress_callback({
+                            "ratio": ratio,
+                            "downloaded_bytes": downloaded,
+                            "total_bytes": total,
+                        })
+
+    _ffmpeg_to_mp3(raw_path, mp3_path)
+    raw_path.unlink(missing_ok=True)
+    return _validate_audio_file(mp3_path)
 
 
 async def download_audio(
@@ -518,7 +731,6 @@ async def download_audio(
     """Download audio-only stream. Returns path to audio file."""
     import yt_dlp
 
-    settings = get_settings()
     output_dir.mkdir(parents=True, exist_ok=True)
     output_template = str(output_dir / "audio.%(ext)s")
 
@@ -553,11 +765,15 @@ async def download_audio(
     ydl_opts["proxy"] = _proxy_for_platform(platform) or ""
 
     if platform == "bilibili":
-        ydl_opts["http_headers"] = _bilibili_headers(sessdata, bili_jct, buvid3)
-        # Conservative pacing to avoid tripping -352 frequency risk-control.
-        ydl_opts["sleep_interval_requests"] = _BILI_SLEEP_REQUESTS
-        logger.info("[download] Bilibili headers attached (cookies=%s)", bool(sessdata))
-    elif platform == "youtube":
+        return await _download_bilibili_audio_via_api(
+            url,
+            output_dir,
+            progress_callback,
+            sessdata=sessdata,
+            bili_jct=bili_jct,
+            buvid3=buvid3,
+        )
+    if platform == "youtube":
         _apply_youtube_opts(ydl_opts)
 
     try:
@@ -570,17 +786,7 @@ async def download_audio(
     audio_files = list(output_dir.glob("audio.*"))
     if not audio_files:
         raise RuntimeError("Audio download failed: no output file found")
-
-    result = audio_files[0]
-    if result.stat().st_size < MIN_AUDIO_BYTES:
-        actual = result.stat().st_size
-        raise RuntimeError(
-            f"Audio download produced an invalid file ({actual} bytes). "
-            "The source may be unavailable or region-restricted."
-        )
-    size_mb = result.stat().st_size / (1024 * 1024)
-    logger.info("[download] Audio saved: %s (%.1f MB)", result, size_mb)
-    return result
+    return _validate_audio_file(audio_files[0])
 
 
 def generate_playback_url(platform: str, video_id: str, start_seconds: int) -> str:
