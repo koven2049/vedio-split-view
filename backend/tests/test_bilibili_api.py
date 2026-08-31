@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from video_split.config import set_config_path
 from video_split.service.downloader import (
     SubtitleEntry,
     VideoMeta,
@@ -12,6 +13,11 @@ from video_split.service.downloader import (
     extract_metadata,
     fetch_bilibili_subtitles,
 )
+
+
+@pytest.fixture(autouse=True)
+def _app_config(test_config_path):
+    set_config_path(test_config_path)
 
 
 class MockResponse:
@@ -215,7 +221,13 @@ _BILI_HEADERS = {
 
 class TestExtractMetadataUsesApiForBilibili:
     async def test_bilibili_uses_api(self):
-        with patch("video_split.service.downloader._fetch_bilibili_metadata_via_api") as mock_api:
+        with (
+            patch(
+                "video_split.service.downloader._ensure_bilibili_fingerprint",
+                new_callable=AsyncMock,
+            ) as ensure,
+            patch("video_split.service.downloader._fetch_bilibili_metadata_via_api") as mock_api,
+        ):
             mock_api.return_value = VideoMeta(
                 url="https://www.bilibili.com/video/BV1xx411c7mD",
                 platform="bilibili",
@@ -227,6 +239,7 @@ class TestExtractMetadataUsesApiForBilibili:
 
             meta = await extract_metadata("https://www.bilibili.com/video/BV1xx411c7mD")
 
+        ensure.assert_awaited_once()
         mock_api.assert_awaited_once_with("BV1xx411c7mD", _BILI_HEADERS)
         assert meta.title == "API Title"
 
@@ -251,11 +264,18 @@ class TestExtractMetadataUsesApiForBilibili:
 
 class TestFetchBilibiliSubtitlesUsesApi:
     async def test_uses_api(self):
-        with patch("video_split.service.downloader._fetch_bilibili_subtitles_via_api") as mock_api:
+        with (
+            patch(
+                "video_split.service.downloader._ensure_bilibili_fingerprint",
+                new_callable=AsyncMock,
+            ) as ensure,
+            patch("video_split.service.downloader._fetch_bilibili_subtitles_via_api") as mock_api,
+        ):
             mock_api.return_value = [SubtitleEntry(start=0, duration=1, text="Hello")]
 
             entries = await fetch_bilibili_subtitles("https://www.bilibili.com/video/BV1xx411c7mD")
 
+        ensure.assert_awaited_once()
         mock_api.assert_awaited_once_with("BV1xx411c7mD", _BILI_HEADERS)
         assert len(entries) == 1
         assert entries[0].text == "Hello"

@@ -8,12 +8,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from video_split.config import set_config_path
 from video_split.service import bilibili_auth as ba
 from video_split.service.bilibili_auth import (
     Fingerprint,
+    _bilibili_httpx_proxy,
     _build_exclimb_payload,
     _ticket_hexsign,
     activate_buvid,
+    ensure_fingerprint,
     fetch_fingerprint,
     get_bili_ticket,
     load_fingerprint,
@@ -21,6 +24,11 @@ from video_split.service.bilibili_auth import (
     save_fingerprint,
 )
 from video_split.service.downloader import _bilibili_headers
+
+
+@pytest.fixture(autouse=True)
+def _app_config(test_config_path):
+    set_config_path(test_config_path)
 
 
 class MockResponse:
@@ -220,6 +228,45 @@ class TestRefreshFingerprint:
         fp = await refresh_fingerprint()
         get_ticket.assert_not_called()
         assert fp.bili_ticket == "KEEP"
+
+
+class TestEnsureFingerprint:
+    async def test_skips_network_when_fresh(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ba, "_fingerprint_path", lambda: tmp_path / "fp.json")
+        save_fingerprint(Fingerprint(
+            buvid3="B3", buvid4="B4", bili_ticket="KEEP",
+            ticket_expires_at=int(time.time()) + 100000,
+        ))
+        refresh = AsyncMock(side_effect=AssertionError("should not refresh"))
+        monkeypatch.setattr(ba, "refresh_fingerprint", refresh)
+        fp = await ensure_fingerprint()
+        refresh.assert_not_called()
+        assert fp.buvid3 == "B3"
+        assert fp.bili_ticket == "KEEP"
+
+    async def test_refreshes_when_buvid_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ba, "_fingerprint_path", lambda: tmp_path / "fp.json")
+        refresh = AsyncMock(return_value=Fingerprint(buvid3="NEW"))
+        monkeypatch.setattr(ba, "refresh_fingerprint", refresh)
+        fp = await ensure_fingerprint("csrf")
+        refresh.assert_awaited_once_with("csrf")
+        assert fp.buvid3 == "NEW"
+
+
+class TestBilibiliNeverUsesProxy:
+    def test_helper_is_always_none_even_when_proxy_enabled(self, monkeypatch):
+        from video_split.config import get_settings
+        s = get_settings()
+        monkeypatch.setattr(s.network, "proxy_enabled", True)
+        monkeypatch.setattr(s.network, "http_proxy", "http://127.0.0.1:7890")
+        assert _bilibili_httpx_proxy() is None
+        assert s.network.proxy_url == "http://127.0.0.1:7890"
+
+    async def test_spi_constructs_client_without_proxy(self):
+        resp = MockResponse(200, {"code": 0, "data": {"b_3": "X", "b_4": "Y"}})
+        with patch("httpx.AsyncClient", return_value=_mock_client(resp)) as ctor:
+            await fetch_fingerprint()
+        assert ctor.call_args.kwargs.get("proxy") is None
 
 
 # --- Cookie assembly in downloader ----------------------------------------
