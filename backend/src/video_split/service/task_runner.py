@@ -41,6 +41,11 @@ class TaskRunner:
 
     def __init__(self) -> None:
         self._tasks: dict[int, RunningTask] = {}
+        self._listeners: list[Callable[[RunningTask, dict[str, Any]], None]] = []
+
+    def add_event_listener(self, cb: Callable[[RunningTask, dict[str, Any]], None]) -> None:
+        if cb not in self._listeners:
+            self._listeners.append(cb)
 
     def get(self, task_id: int) -> RunningTask | None:
         return self._tasks.get(task_id)
@@ -60,6 +65,11 @@ class TaskRunner:
                 q.put_nowait(entry)
             except asyncio.QueueFull:
                 pass
+        for cb in list(self._listeners):
+            try:
+                cb(rt, entry)
+            except Exception:
+                logger.exception("[runner] event listener failed")
 
     def start(
         self,

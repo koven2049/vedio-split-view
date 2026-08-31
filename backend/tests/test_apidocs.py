@@ -66,6 +66,8 @@ async def test_internal_endpoints_hidden(client: AsyncClient):
     paths = _all_paths(data)
     assert not any(p.startswith("/api/debug") for p in paths)
     assert not any(p.startswith("/api/admin") for p in paths)
+    assert not any(p.startswith("/api/hooks") for p in paths)
+    assert not any(p.startswith("/api/public") for p in paths)
 
 
 async def test_external_endpoints_present(client: AsyncClient):

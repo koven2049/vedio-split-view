@@ -1,0 +1,7 @@
+# Copy to config/feishu.yaml and chmod 0600. Do not commit the real file.
+# Secret fields are rewritten to enc:v1:… on first load (KEK: config/secret.key).
+
+app_id: ""
+app_secret: ""
+verification_token: ""
+encrypt_key: ""

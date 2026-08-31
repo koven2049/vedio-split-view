@@ -82,27 +82,10 @@ def _start_background_analysis(
     runner.start(task_id, user_id, platform, url, gen_factory)
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_video(
-    body: AnalyzeRequest,
-    user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    """Start analyzing a video. Asynchronous — returns a task_id, not the result.
-
-    Two-step flow:
-
-    1. POST here with a video URL → returns `{task_id, platform}` immediately;
-       analysis (download + transcribe + LLM segmentation) runs in the background.
-    2. Stream progress from `GET /api/videos/tasks/{task_id}/stream` (SSE), then
-       fetch the structured result (summary, segments, subtitles with timestamps)
-       from `GET /api/videos/{video_id}` once the task completes.
-
-    Supported URLs: YouTube, Bilibili, 小宇宙 (xiaoyuzhou). Admin only —
-    viewer accounts get 403.
-    """
-    body.url = normalize_url(body.url)
-    platform, video_id = detect_platform(body.url)
+async def start_analysis_for_user(db: AsyncSession, user: User, url: str) -> dict:
+    """Create or resume an analysis task for ``user``. Raises HTTPException."""
+    url = normalize_url(url)
+    platform, video_id = detect_platform(url)
     if platform == "unknown":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported video URL")
 
@@ -123,7 +106,7 @@ async def analyze_video(
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(e))
 
         _start_background_analysis(
-            retryable_task.id, user.id, platform, body.url,
+            retryable_task.id, user.id, platform, url,
             cred_kw=cred_kw, user_limits=limits, is_resume=True,
         )
         return {"task_id": retryable_task.id, "platform": platform, "resumed": True}
@@ -138,13 +121,35 @@ async def analyze_video(
     except VideoLimitError as e:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(e))
 
-    task = await create_task(db, user.id, body.url, platform)
+    task = await create_task(db, user.id, url, platform)
 
     _start_background_analysis(
-        task.id, user.id, platform, body.url,
+        task.id, user.id, platform, url,
         cred_kw=cred_kw, user_limits=limits,
     )
     return {"task_id": task.id, "platform": platform}
+
+
+@router.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_video(
+    body: AnalyzeRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Start analyzing a video. Asynchronous — returns a task_id, not the result.
+
+    Two-step flow:
+
+    1. POST here with a video URL → returns `{task_id, platform}` immediately;
+       analysis (download + transcribe + LLM segmentation) runs in the background.
+    2. Stream progress from `GET /api/videos/tasks/{task_id}/stream` (SSE), then
+       fetch the structured result (summary, segments, subtitles with timestamps)
+       from `GET /api/videos/{video_id}` once the task completes.
+
+    Supported URLs: YouTube, Bilibili, 小宇宙 (xiaoyuzhou). Admin only —
+    viewer accounts get 403.
+    """
+    return await start_analysis_for_user(db, user, body.url)
 
 
 @router.delete("/tasks/{task_id}/cancel")

@@ -59,3 +59,9 @@ transcription:
 # logging:
 #   level: "INFO"
 #   dir: "logs"
+#
+# feishu:
+#   enabled: false
+#   result_base_url: ""          # e.g. "https://video.example.com"
+#   allowed_open_ids: []         # Feishu open_id whitelist; empty = deny all
+#   secrets_file: feishu.yaml    # credentials file under config/ (0600, not git)

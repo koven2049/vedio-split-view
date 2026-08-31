@@ -114,6 +114,15 @@ class VideoConfig(BaseModel):
     min_segment_duration_seconds: int = 60
 
 
+class FeishuConfig(BaseModel):
+    """Non-secret Feishu bot settings. Credentials live in secrets_file."""
+
+    enabled: bool = False
+    result_base_url: str = ""
+    allowed_open_ids: list[str] = []
+    secrets_file: str = "feishu.yaml"
+
+
 class Settings(BaseModel):
     app: AppConfig = AppConfig()
     admin: AdminConfig = AdminConfig()
@@ -126,6 +135,7 @@ class Settings(BaseModel):
     backup: BackupConfig = BackupConfig()
     llm_backup: LLMBackupConfig = LLMBackupConfig()
     logging: LoggingConfig = LoggingConfig()
+    feishu: FeishuConfig = FeishuConfig()
 
     @field_validator("admin")
     @classmethod

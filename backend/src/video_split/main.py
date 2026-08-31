@@ -59,6 +59,8 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     from video_split.api.videos import router as videos_router
     from video_split.api.youtube import router as youtube_router
     from video_split.api.mindmap import router as mindmap_router
+    from video_split.api.feishu_hook import router as feishu_hook_router
+    from video_split.api.public_notes import router as public_notes_router
 
     app.include_router(auth_router)
     app.include_router(tasks_router)
@@ -72,6 +74,8 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     app.include_router(api_keys_router)
     app.include_router(apidocs_router)
     app.include_router(debug_router)
+    app.include_router(feishu_hook_router)
+    app.include_router(public_notes_router)
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-def]

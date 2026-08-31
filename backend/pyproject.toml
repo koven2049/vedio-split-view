@@ -28,6 +28,7 @@ dependencies = [
     "qrcode[pil]>=7.4.0",
     "python-multipart>=0.0.9",
     "oss2>=2.18.0",
+    "pycryptodome>=3.20.0",
 ]
 
 [project.optional-dependencies]

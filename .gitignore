@@ -16,6 +16,8 @@ config/app.yaml
 config/deploy.cfg
 config/certs/
 config/*_cookies.txt
+config/feishu.yaml
+config/secret.key
 
 # Runtime data — keep the directory (bind-mount target) but never commit DB / contents.
 # The tracked data/.gitkeep guarantees the dir exists on fresh clones so the

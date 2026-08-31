@@ -37,6 +37,7 @@ config/app.yaml
 config/deploy.cfg
 config/certs/
 config/*_cookies.txt
+config/feishu.yaml
 config/*.pem
 config/*.key
 

@@ -116,6 +116,26 @@ class SegmentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PublicNoteSegmentOut(BaseModel):
+    segment_index: int
+    title: str
+    summary: str
+    start_seconds: int
+    end_seconds: int
+
+
+class PublicNoteOut(BaseModel):
+    id: int
+    title: str
+    url: str
+    platform: str
+    duration_seconds: int
+    summary: str
+    essence: str = ""
+    transcript: str = ""
+    segments: list[PublicNoteSegmentOut] = []
+
+
 class TagOut(BaseModel):
     id: int
     name: str

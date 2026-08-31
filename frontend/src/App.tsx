@@ -9,6 +9,7 @@ import SettingsPage from './pages/SettingsPage';
 import ApiDocsPage from './pages/ApiDocsPage';
 import AdminPage from './pages/AdminPage';
 import LLMLogsPage from './pages/LLMLogsPage';
+import ShareNotePage from './pages/ShareNotePage';
 
 function ProtectedRoute({
   children,
@@ -35,6 +36,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/share/:id" element={<ShareNotePage />} />
       <Route
         element={
           <ProtectedRoute>
