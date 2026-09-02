@@ -114,6 +114,7 @@ const en: Record<TranslationKey, string> = {
   'library.makePublic': 'Click to share to public',
   'library.makePrivate': 'Click to make private',
   'library.deleteNamed': 'Delete {title}?',
+  'library.deleteFailed': 'Delete failed: {message}',
   'library.usageAsrPrefix': 'ASR ({model}):',
   'library.usageLlmPrefix': 'LLM ({model}):',
   'library.tokensUnit': 'tokens',

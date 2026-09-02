@@ -398,13 +398,15 @@ export default function LibraryPage() {
               isGlobalAnalyzing={storeAnalyzing}
               onAnalyze={() => handleAnalyzeTask(item.data)}
               onViewProgress={handleViewProgress}
-              onDelete={() =>
+              onDelete={() => {
+                deleteMutation.reset();
+                discardTaskMutation.reset();
                 setConfirmDelete({
                   type: 'task',
                   id: item.data.id,
                   title: item.data.video_title || item.data.url,
-                })
-              }
+                });
+              }}
             />
           ) : (
             <VideoCard
@@ -413,9 +415,11 @@ export default function LibraryPage() {
               isMine={activeTab === 'mine'}
               isViewer={isViewer}
               onShare={(share) => shareMutation.mutate({ id: item.data.id, share })}
-              onDelete={() =>
-                setConfirmDelete({ type: 'video', id: item.data.id, title: item.data.title })
-              }
+              onDelete={() => {
+                deleteMutation.reset();
+                discardTaskMutation.reset();
+                setConfirmDelete({ type: 'video', id: item.data.id, title: item.data.title });
+              }}
             />
           ),
         )}
@@ -431,11 +435,15 @@ export default function LibraryPage() {
       {confirmDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center"
-          onClick={() => setConfirmDelete(null)}
+          onClick={() => {
+            if (!deleteMutation.isPending && !discardTaskMutation.isPending) {
+              setConfirmDelete(null);
+            }
+          }}
         >
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-none" />
           <div
-            className="relative w-full max-w-sm mx-4 rounded-2xl shadow-2xl p-6 space-y-4"
+            className="relative z-10 w-full max-w-sm mx-4 rounded-2xl shadow-2xl p-6 space-y-4"
             style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -450,10 +458,22 @@ export default function LibraryPage() {
               {confirmDelete.type === 'task' && ` ${t('library.deleteTaskConfirm')}`}
               {confirmDelete.type === 'video' && ` ${t('library.deleteVideoConfirm')}`}
             </p>
+            {(deleteMutation.isError || discardTaskMutation.isError) && (
+              <p className="text-sm" style={{ color: 'var(--color-danger)' }}>
+                {t('library.deleteFailed', {
+                  message:
+                    (deleteMutation.error as Error | null)?.message ||
+                    (discardTaskMutation.error as Error | null)?.message ||
+                    '',
+                })}
+              </p>
+            )}
             <div className="flex justify-end gap-2 pt-2">
               <button
+                type="button"
                 onClick={() => setConfirmDelete(null)}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
+                disabled={deleteMutation.isPending || discardTaskMutation.isPending}
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80 disabled:opacity-50"
                 style={{
                   background: 'var(--color-bg-secondary)',
                   border: '1px solid var(--color-border)',
@@ -462,14 +482,23 @@ export default function LibraryPage() {
                 {t('library.cancel')}
               </button>
               <button
+                type="button"
+                disabled={deleteMutation.isPending || discardTaskMutation.isPending}
                 onClick={() => {
                   if (confirmDelete.type === 'video') deleteMutation.mutate(confirmDelete.id);
                   else discardTaskMutation.mutate(confirmDelete.id);
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-60"
                 style={{ background: 'var(--color-danger)' }}
               >
-                {t('library.delete')}
+                {deleteMutation.isPending || discardTaskMutation.isPending ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 size={14} className="animate-spin" />
+                    {t('library.delete')}
+                  </span>
+                ) : (
+                  t('library.delete')
+                )}
               </button>
             </div>
           </div>

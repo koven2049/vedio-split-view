@@ -466,9 +466,9 @@ export function AnalysisSlotCard({
       {/* Confirm Modal */}
       {pendingConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-none" />
           <div
-            className="relative w-full max-w-sm mx-4 rounded-2xl shadow-2xl p-6 space-y-4"
+            className="relative z-10 w-full max-w-sm mx-4 rounded-2xl shadow-2xl p-6 space-y-4"
             style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
             onClick={(e) => e.stopPropagation()}
           >

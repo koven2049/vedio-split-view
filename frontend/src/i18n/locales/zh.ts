@@ -108,6 +108,7 @@ const zh = {
   'library.makePublic': '点击公开到广场',
   'library.makePrivate': '点击设为私有',
   'library.deleteNamed': '删除 {title}？',
+  'library.deleteFailed': '删除失败：{message}',
   'library.usageAsrPrefix': 'ASR ({model})：',
   'library.usageLlmPrefix': 'LLM ({model})：',
   'library.tokensUnit': 'Token',

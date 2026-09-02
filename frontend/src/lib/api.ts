@@ -29,10 +29,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.detail || `Request failed: ${res.status}`);
+    const detail = (body as { detail?: unknown }).detail;
+    const message = typeof detail === 'string' ? detail : `Request failed: ${res.status}`;
+    throw new ApiError(res.status, message);
   }
   if (res.status === 204) return undefined as T;
-  return res.json();
+  const text = await res.text();
+  if (!text.trim()) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export const api = {
