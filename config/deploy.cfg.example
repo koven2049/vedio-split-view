@@ -16,5 +16,14 @@ remote_path = ai/vedio-split-view
 # 构建源（registry / apt / pypi）见 config/build.cfg —— 本文件被 rsync 排除，
 # 远端拿不到，放构建参数会让远端 rebuild 退回不可达的默认源。
 
+# rsync 额外排除（可多行）。叠在仓库根 .rsync-exclude 之上。
+# 软链也要写无尾斜线的名字，否则 rsync 会当文件拷走（frontend/node_modules）。
+exclude = frontend/node_modules
+exclude = config/feishu.yaml
+exclude = config/secret.key
+exclude = config/app.yaml
+exclude = config/*.key
+exclude = config/*_cookies.txt
+
 # rsync 额外选项（可选）
 # rsync_opts = -e "ssh -p 22"

@@ -253,6 +253,7 @@ __pycache__/
 .pytest_cache/
 
 # ── frontend cache / build ───────────────────────────────────────────────────
+frontend/node_modules
 frontend/node_modules/
 frontend/dist/
 
@@ -270,6 +271,7 @@ config/app.yaml
 config/deploy.cfg
 config/certs/
 config/*_cookies.txt
+config/feishu.yaml
 config/*.pem
 config/*.key
 
@@ -625,6 +627,14 @@ run_deploy() {
     ssh_target="$(grep '^ssh_target' "${cfg}" | head -1 | cut -d '=' -f2 | xargs || true)"
     remote_path="$(grep '^remote_path' "${cfg}" | head -1 | cut -d '=' -f2 | xargs || true)"
     rsync_opts="$(grep '^rsync_opts' "${cfg}" | head -1 | cut -d '=' -f2- | xargs || true)"
+    local extra_excludes=()
+    local raw val
+    while IFS= read -r raw; do
+        val="${raw#*=}"
+        val="${val#"${val%%[![:space:]]*}"}"
+        val="${val%"${val##*[![:space:]]}"}"
+        [[ -n "$val" ]] && extra_excludes+=("$val")
+    done < <(grep -E '^exclude[[:space:]]*=' "${cfg}" || true)
 
     if [[ -z "${ssh_target}" || -z "${remote_path}" ]]; then
         log_error "deploy.cfg 中 ssh_target 或 remote_path 未配置"
@@ -636,6 +646,10 @@ run_deploy() {
     _ensure_deploy_exclude
 
     local rsync_args=(-avz --progress --delete --exclude-from="$DEPLOY_EXCLUDE_FILE")
+    local pat
+    for pat in "${extra_excludes[@]+"${extra_excludes[@]}"}"; do
+        rsync_args+=(--exclude="$pat")
+    done
     if [[ "$dry_run" == true ]]; then
         rsync_args+=(--dry-run)
         log_step "[DRY RUN] Deploying code → ${ssh_target}:${remote_path} …"
