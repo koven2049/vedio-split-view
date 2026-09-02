@@ -2,6 +2,7 @@
 
 > **先读并遵守公共 harness 约束**：[../AGENTS.md](../AGENTS.md) 的「通用约束」章节全部适用。
 > 本文件只写本工程差异，与通用约束冲突时以本文件为准。`CLAUDE.md` 是指向本文件的软链。
+> harness AGENTS.md 中的 `.workflow/` 路径从本目录看是 `../.workflow/`；本目录若有同名 `.workflow/` 文件则优先用本目录的。
 
 ## 本工程专属
 
