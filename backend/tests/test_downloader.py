@@ -61,6 +61,25 @@ class TestDetectPlatform:
         assert platform == "youtube"
         assert vid == "dQw4w9WgXcQ"
 
+    def test_youtube_share_suffix(self):
+        platform, vid = detect_platform("https://youtu.be/dQw4w9WgXcQ?si=abc123&t=30")
+        assert platform == "youtube"
+        assert vid == "dQw4w9WgXcQ"
+
+    def test_bilibili_with_tracking_query(self):
+        platform, vid = detect_platform(
+            "https://www.bilibili.com/video/BV1xx411c7mD?spm_id_from=333.1007&vd_source=deadbeef"
+        )
+        assert platform == "bilibili"
+        assert vid == "BV1xx411c7mD"
+
+    def test_xiaoyuzhou_with_query(self):
+        platform, vid = detect_platform(
+            "https://www.xiaoyuzhoufm.com/episode/507f1f77bcf86cd799439011?s=eyJ1IjoieHh4In0"
+        )
+        assert platform == "xiaoyuzhou"
+        assert vid == "507f1f77bcf86cd799439011"
+
 
 class TestGeneratePlaybackUrl:
     def test_youtube(self):

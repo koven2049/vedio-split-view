@@ -236,6 +236,105 @@ async def test_unsupported_url_gets_help(db_session, enable_feishu, monkeypatch)
     assert replies[0]["header"]["title"]["content"] == "发一个视频链接"
 
 
+async def test_already_analyzed_replies_success_card(db_session, enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    from sqlalchemy import select
+    from video_split.models import User, Video
+    from video_split.service.auth_service import ensure_admin_user
+
+    await ensure_admin_user(db_session)
+    admin = (await db_session.execute(select(User).where(User.username == "admin"))).scalar_one()
+    video = Video(
+        user_id=admin.id,
+        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        platform="youtube",
+        video_id="dQw4w9WgXcQ",
+        title="旧笔记标题",
+        summary="一段已有摘要",
+    )
+    db_session.add(video)
+    await db_session.commit()
+    await db_session.refresh(video)
+
+    replies: list[dict] = []
+    started: list[str] = []
+
+    async def fake_reply(_creds, _mid, card):
+        replies.append(card)
+
+    follow = AsyncMock()
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    monkeypatch.setattr("video_split.service.feishu.follow_task", follow)
+    # 走真实 start_analysis_for_user，确认按 video_id 去重而不是整段 URL
+    monkeypatch.setattr(
+        "video_split.api.analysis._start_background_analysis",
+        lambda *args, **kwargs: started.append("bg"),
+    )
+
+    await handle_message_event(
+        _message_payload(
+            "https://youtu.be/dQw4w9WgXcQ?si=tracking-suffix&t=90",
+            message_id="om_reuse",
+        ),
+        db_session,
+    )
+    assert started == []
+    follow.assert_not_awaited()
+    assert replies[0]["header"]["title"]["content"] == "分析完成"
+    assert "旧笔记标题" in replies[0]["elements"][0]["text"]["content"]
+    actions = replies[0]["elements"][1]["actions"]
+    assert actions[0]["text"]["content"] == "查看全文"
+    assert f"/share/{video.id}?sig=" in actions[0]["url"]
+
+
+async def test_deleted_video_starts_new_analysis(db_session, enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    from sqlalchemy import select
+    from video_split.models import User, Video
+    from video_split.service.auth_service import ensure_admin_user
+
+    await ensure_admin_user(db_session)
+    admin = (await db_session.execute(select(User).where(User.username == "admin"))).scalar_one()
+    video = Video(
+        user_id=admin.id,
+        url="https://www.bilibili.com/video/BV1xx411c7mD",
+        platform="bilibili",
+        video_id="BV1xx411c7mD",
+        title="已删笔记",
+        summary="不该再被找到",
+    )
+    db_session.add(video)
+    await db_session.commit()
+    await db_session.delete(video)
+    await db_session.commit()
+
+    replies: list[dict] = []
+    started: list[int] = []
+
+    async def fake_reply(_creds, _mid, card):
+        replies.append(card)
+
+    def fake_bg(task_id, *_args, **_kwargs):
+        started.append(task_id)
+
+    follow = AsyncMock()
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    monkeypatch.setattr("video_split.service.feishu.follow_task", follow)
+    monkeypatch.setattr("video_split.api.analysis._start_background_analysis", fake_bg)
+
+    await handle_message_event(
+        _message_payload(
+            "https://www.bilibili.com/video/BV1xx411c7mD?spm_id_from=333",
+            message_id="om_fresh",
+        ),
+        db_session,
+    )
+    assert started
+    assert replies[0]["header"]["title"]["content"] == "已开始分析"
+    await asyncio.sleep(0)
+    follow.assert_awaited()
+
+
 async def test_handle_message_starts_analysis(db_session, enable_feishu, monkeypatch):
     reset_feishu_runtime_state()
     from video_split.service.auth_service import ensure_admin_user

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from video_split.models import Task, User
+from video_split.models import Task, User, Video
 from video_split.service.auth_service import hash_password
 from video_split.service.task_manager import (
+    DuplicateVideoError,
+    check_duplicate,
     check_task_quota,
     count_pending_tasks,
     create_task,
@@ -75,3 +77,27 @@ async def test_discard_task(db_session):
     from sqlalchemy import select
     result = await db_session.execute(select(Task).where(Task.id == task_id))
     assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_check_duplicate_matches_video_id_not_raw_url(db_session):
+    user = await _create_test_user(db_session, "dup_user")
+    video = Video(
+        user_id=user.id,
+        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        platform="youtube",
+        video_id="dQw4w9WgXcQ",
+        title="已分析",
+    )
+    db_session.add(video)
+    await db_session.commit()
+    await db_session.refresh(video)
+
+    with pytest.raises(DuplicateVideoError) as exc:
+        await check_duplicate(db_session, user.id, "youtube", "dQw4w9WgXcQ")
+    assert exc.value.existing_type == "video"
+    assert exc.value.existing_id == video.id
+
+    await db_session.delete(video)
+    await db_session.commit()
+    assert await check_duplicate(db_session, user.id, "youtube", "dQw4w9WgXcQ") is None

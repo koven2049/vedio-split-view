@@ -632,17 +632,22 @@ async def follow_task(
         runner.unsubscribe(task_id, queue)
 
 
+async def _note_blurb(db: AsyncSession, video_id: int) -> tuple[str, str]:
+    from video_split.models import Video
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+    if video is None:
+        return "", ""
+    return video.title or "", video.summary or video.essence or ""
+
+
 async def _load_video_blurb(video_id: int) -> tuple[str, str]:
     from video_split.database import _get_session_factory
-    from video_split.models import Video
 
     factory = _get_session_factory()
     async with factory() as db:
-        result = await db.execute(select(Video).where(Video.id == video_id))
-        video = result.scalar_one_or_none()
-        if video is None:
-            return "", ""
-        return video.title or "", video.summary or video.essence or ""
+        return await _note_blurb(db, video_id)
 
 
 async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> None:
@@ -684,6 +689,7 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
 
     from video_split.api.analysis import start_analysis_for_user
     from video_split.models import User
+    from video_split.service.task_manager import DuplicateVideoError
     from fastapi import HTTPException
 
     result = await db.execute(select(User).where(User.username == "admin", User.role == "admin"))
@@ -694,6 +700,14 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
 
     try:
         started = await start_analysis_for_user(db, admin, url)
+    except DuplicateVideoError as e:
+        if e.existing_type == "video":
+            title, summary = await _note_blurb(db, e.existing_id)
+            note_url = result_note_url(e.existing_id)
+            await _reply(creds, message_id, chat_id, card_result(title, summary, note_url))
+            return
+        await _reply(creds, message_id, chat_id, card_error(str(e)))
+        return
     except HTTPException as e:
         await _reply(creds, message_id, chat_id, card_error(str(e.detail)))
         return

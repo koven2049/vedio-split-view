@@ -83,7 +83,11 @@ def _start_background_analysis(
 
 
 async def start_analysis_for_user(db: AsyncSession, user: User, url: str) -> dict:
-    """Create or resume an analysis task for ``user``. Raises HTTPException."""
+    """Create or resume an analysis task for ``user``.
+
+    Raises ``DuplicateVideoError`` when the same platform + video_id already
+    exists (completed note or in-progress task). Other failures raise HTTPException.
+    """
     url = normalize_url(url)
     platform, video_id = detect_platform(url)
     if platform == "unknown":
@@ -94,10 +98,7 @@ async def start_analysis_for_user(db: AsyncSession, user: User, url: str) -> dic
         await _get_bilibili_cred(db, user.id) if platform == "bilibili" else None
     )
 
-    try:
-        retryable_task = await check_duplicate(db, user.id, platform, video_id)
-    except DuplicateVideoError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    retryable_task = await check_duplicate(db, user.id, platform, video_id)
 
     if retryable_task is not None:
         try:
@@ -149,7 +150,10 @@ async def analyze_video(
     Supported URLs: YouTube, Bilibili, 小宇宙 (xiaoyuzhou). Admin only —
     viewer accounts get 403.
     """
-    return await start_analysis_for_user(db, user, body.url)
+    try:
+        return await start_analysis_for_user(db, user, body.url)
+    except DuplicateVideoError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
 
 
 @router.delete("/tasks/{task_id}/cancel")
