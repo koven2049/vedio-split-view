@@ -9,7 +9,7 @@
 # 容器镜像仓库（拉取 python / node / nginx 基础镜像）
 registry = docker.io
 
-# podman 构建/运行 DNS，留空则用系统默认
+# podman 构建 DNS（拉镜像 / apt），留空则用系统默认。不要用于运行容器。
 podman_dns =
 
 # Debian apt 镜像域名

@@ -307,10 +307,6 @@ _ensure_podman_network() {
     "$PODMAN_CMD" network exists "$NETWORK_NAME" 2>/dev/null || "$PODMAN_CMD" network create "$NETWORK_NAME" >/dev/null
 }
 
-_podman_dns_args() {
-    [[ -n "$PODMAN_DNS" ]] && printf '%s' "--dns=$PODMAN_DNS"
-}
-
 _ensure_images_exist() {
     ensure_podman
     local missing=()
@@ -360,8 +356,11 @@ run_start() {
     _remove_container_if_exists "$FRONTEND_CONTAINER"
     _remove_container_if_exists "$BACKEND_CONTAINER"
 
+    # Do not pass --dns here. On a dns-enabled network it never reaches
+    # resolv.conf; aardvark swallows it as the *only* upstream, so one UDP/53
+    # blip becomes EAI_AGAIN for every outbound host. Unset --dns lets
+    # aardvark forward via pasta (169.254.1.1) then the VM resolver.
     "$PODMAN_CMD" run -d \
-        $(_podman_dns_args) \
         --name "$BACKEND_CONTAINER" \
         --network "$NETWORK_NAME" \
         --network-alias backend \
@@ -378,7 +377,6 @@ run_start() {
         "$BACKEND_IMAGE" >/dev/null
 
     "$PODMAN_CMD" run -d \
-        $(_podman_dns_args) \
         --name "$FRONTEND_CONTAINER" \
         --network "$NETWORK_NAME" \
         --network-alias frontend \
@@ -679,6 +677,7 @@ run_deploy() {
         echo
         echo "On the remote:"
         echo "  cd ${remote_path} && ./manage.sh rebuild"
+        echo "  cd ${remote_path} && ./manage.sh install-launchd   # once, needs sudo"
     fi
 }
 
@@ -810,6 +809,45 @@ run_clean() {
     log_ok "Clean complete."
 }
 
+# Bake SCRIPT_DIR / current user into the LaunchDaemon plist and install it
+# under /Library/LaunchDaemons (needs sudo). Without passwordless sudo, print
+# the commands — same one-shot pattern as com.koven.multica.
+run_install_launchd() {
+    local label="com.koven.vedio-split-view"
+    local src="$SCRIPT_DIR/scripts/${label}.plist"
+    local dest="/Library/LaunchDaemons/${label}.plist"
+    local generated="$SCRIPT_DIR/logs/${label}.plist"
+    local user
+    user="$(whoami)"
+
+    [[ -f "$src" ]] || { log_error "missing $src"; exit 1; }
+    mkdir -p "$SCRIPT_DIR/logs"
+    sed \
+        -e "s|/Users/admin/Services/vedio-split-view|${SCRIPT_DIR}|g" \
+        -e "s|<string>admin</string>|<string>${user}</string>|" \
+        "$src" > "$generated"
+    chmod +x "$SCRIPT_DIR/scripts/launchd-start.sh"
+    log_info "Plist: $generated"
+
+    if sudo -n true 2>/dev/null; then
+        sudo cp "$generated" "$dest"
+        sudo chown root:wheel "$dest"
+        sudo chmod 644 "$dest"
+        sudo launchctl bootout "system/${label}" 2>/dev/null || true
+        sudo launchctl bootstrap system "$dest"
+        log_ok "LaunchDaemon ${label} installed"
+        return 0
+    fi
+
+    log_warn "需要 sudo 才能写入 /Library/LaunchDaemons/。在本机执行："
+    echo "  sudo cp $generated $dest"
+    echo "  sudo chown root:wheel $dest"
+    echo "  sudo chmod 644 $dest"
+    echo "  sudo launchctl bootout system/${label} 2>/dev/null || true"
+    echo "  sudo launchctl bootstrap system $dest"
+    return 1
+}
+
 # ── usage ─────────────────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
@@ -824,6 +862,7 @@ Lifecycle:
     -n, --no-cache             Ignore layer cache
     -p, --pull                 Re-pull base images
   status                     Show container status + health check
+  install-launchd            Install macOS LaunchDaemon (needs sudo once)
   clean                      Remove dangling images / build cache
 
 Data:
@@ -859,7 +898,8 @@ main() {
         stop)        run_stop ;;
         restart)     run_restart ;;
         rebuild)     run_rebuild "$@" ;;
-        status)      run_status ;;
+        status)           run_status ;;
+        install-launchd)  run_install_launchd ;;
         export)      run_export "$@" ;;
         import)      run_import "$@" ;;
         backup)      run_backup "$@" ;;

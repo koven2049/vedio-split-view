@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- vedio-split-view 开机自启，与 com.podman.machine 配套。
+     安装（管理员终端，路径以本机 SCRIPT_DIR 为准；生产是 ~/Services/vedio-split-view）:
+       cd ~/Services/vedio-split-view && ./manage.sh install-launchd
+     日志: ~/Services/vedio-split-view/logs/launchd.log -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.koven.vedio-split-view</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/admin/Services/vedio-split-view/scripts/launchd-start.sh</string>
+    </array>
+    <key>UserName</key>
+    <string>admin</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/admin/Services/vedio-split-view/logs/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/admin/Services/vedio-split-view/logs/launchd.log</string>
+</dict>
+</plist>
