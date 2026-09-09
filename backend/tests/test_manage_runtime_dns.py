@@ -32,3 +32,12 @@ def test_rebuild_still_passes_dns_to_build() -> None:
     body = _func_body("run_rebuild")
     assert "--dns" in body
     assert "PODMAN_DNS" in body
+
+
+def test_launchd_start_is_health_watchdog() -> None:
+    text = (Path(__file__).resolve().parents[2] / "scripts" / "launchd-start.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "while true" in text
+    assert "/health" in text
+    assert "exec ./manage.sh start" not in text

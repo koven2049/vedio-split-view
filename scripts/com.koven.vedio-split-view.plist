@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- vedio-split-view 开机自启，与 com.podman.machine 配套。
-     安装（管理员终端，路径以本机 SCRIPT_DIR 为准；生产是 ~/Services/vedio-split-view）:
-       cd ~/Services/vedio-split-view && ./manage.sh install-launchd
+<!-- vedio-split-view 常驻巡检，与 com.podman.machine / com.koven.multica 配套。
+     start.sh 不退出：VM 崩溃后 Exited(0) 的容器 unless-stopped 不会拉，靠循环 health。
+     安装: cd ~/Services/vedio-split-view && ./manage.sh install-launchd
      日志: ~/Services/vedio-split-view/logs/launchd.log -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
