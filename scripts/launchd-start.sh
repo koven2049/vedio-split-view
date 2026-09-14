@@ -1,15 +1,13 @@
 #!/bin/bash
 # LaunchDaemon com.koven.vedio-split-view 常驻巡检。
-# 根因：Podman VM 崩溃后容器 Exited(0)，unless-stopped 不拉起。
-# 误杀：单次 3s health 超时就 manage.sh start（删容器），会把正在分析的任务打断。
-# 规则：容器没在跑 → 立刻拉；容器在跑但 health 失败 → 连续 NEED 次才重建。
+# VM 崩溃后容器 Exited(0)，unless-stopped 不拉 → 只在「容器没在跑」时 manage.sh start。
+# 禁止用 HTTP /health 超时当死亡信号：分析一忙事件循环卡住，health 失败不等于挂了，
+# start 会删容器，把正在跑的任务打死。
 # 不 hard-restart machine（交给 com.koven.multica）。
-# 日志: logs/launchd.log（只记失败与拉起）
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 INTERVAL=30
-NEED=4
 BACKEND=vsplit-backend
 FRONTEND=vsplit-frontend
 mkdir -p "$DIR/logs"
@@ -72,7 +70,7 @@ bring_up() {
     ./manage.sh start
     local i
     for i in $(seq 1 30); do
-        if health_ok; then
+        if containers_up; then
             return 0
         fi
         sleep 2
@@ -81,7 +79,7 @@ bring_up() {
 }
 
 log "watchdog 启动"
-if health_ok && containers_up; then
+if containers_up; then
     log "栈已就绪"
 else
     if bring_up; then
@@ -91,23 +89,19 @@ else
     fi
 fi
 
-fails=0
+health_fails=0
 while true; do
-    if health_ok && containers_up; then
-        fails=0
-    elif ! containers_up; then
-        fails=0
+    if containers_up; then
+        if health_ok; then
+            health_fails=0
+        else
+            health_fails=$((health_fails + 1))
+            log "health 失败 (#${health_fails}), 容器仍在跑, 不重建"
+        fi
+    else
+        health_fails=0
         log "容器未在跑, 拉起栈"
         bring_up || true
-    else
-        fails=$((fails + 1))
-        if [[ "$fails" -ge "$NEED" ]]; then
-            log "health 连续失败 (#${fails}/${NEED}), 重建容器"
-            fails=0
-            bring_up || true
-        else
-            log "health 失败 (#${fails}/${NEED}), 容器仍在跑, 再等"
-        fi
     fi
     sleep "$INTERVAL"
 done

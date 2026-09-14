@@ -41,6 +41,6 @@ def test_launchd_start_is_health_watchdog() -> None:
     assert "while true" in text
     assert "/health" in text
     assert "exec ./manage.sh start" not in text
-    assert "NEED=4" in text
     assert "containers_up" in text
-    assert "容器仍在跑, 再等" in text
+    assert "容器仍在跑, 不重建" in text
+    assert "NEED=" not in text
