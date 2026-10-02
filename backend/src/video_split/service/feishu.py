@@ -136,7 +136,11 @@ def compute_signature(timestamp: str, nonce: str, encrypt_key: str, body: bytes)
 
 
 def verify_signature(
-    timestamp: str, nonce: str, encrypt_key: str, body: bytes, signature: str,
+    timestamp: str,
+    nonce: str,
+    encrypt_key: str,
+    body: bytes,
+    signature: str,
 ) -> bool:
     if not signature:
         return False
@@ -324,8 +328,8 @@ async def forward_to_vfav(url: str) -> str:
         )
     if resp.status_code >= 400:
         try:
-            detail = str(resp.json().get("detail") or resp.text)
-        except ValueError:
+            detail = str(resp.json()["detail"])
+        except (ValueError, KeyError):
             detail = resp.text
         raise RuntimeError(f"视频收藏返回 {resp.status_code}：{detail[:200]}")
     return resp.text.strip()
@@ -351,7 +355,9 @@ def already_seen(message_id: str) -> bool:
     return False
 
 
-def _md_card(title: str, body: str, *, color: str = "blue", buttons: list[dict] | None = None) -> dict:
+def _md_card(
+    title: str, body: str, *, color: str = "blue", buttons: list[dict] | None = None
+) -> dict:
     elements: list[dict] = [{"tag": "div", "text": {"tag": "lark_md", "content": body}}]
     if buttons:
         elements.append({"tag": "action", "actions": buttons})
@@ -394,12 +400,14 @@ def card_result(title: str, summary: str, note_url: str) -> dict:
         body += f"\n{clip}"
     buttons = []
     if note_url:
-        buttons.append({
-            "tag": "button",
-            "text": {"tag": "plain_text", "content": "查看全文"},
-            "type": "primary",
-            "url": note_url,
-        })
+        buttons.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "查看全文"},
+                "type": "primary",
+                "url": note_url,
+            }
+        )
     return _md_card("分析完成", body, color="green", buttons=buttons)
 
 
@@ -410,12 +418,14 @@ def card_confirm(task_id: int, message: str, title: str) -> dict:
         "需要确认",
         body,
         color="orange",
-        buttons=[{
-            "tag": "button",
-            "text": {"tag": "plain_text", "content": "确认继续"},
-            "type": "primary",
-            "value": {"action": "confirm", "task_id": str(task_id)},
-        }],
+        buttons=[
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "确认继续"},
+                "type": "primary",
+                "value": {"action": "confirm", "task_id": str(task_id)},
+            }
+        ],
     )
 
 
@@ -523,7 +533,10 @@ class FeishuClient:
             resp = await client.post(
                 url,
                 headers={"Authorization": f"Bearer {token}"},
-                json={"content": json.dumps({"text": text}, ensure_ascii=False), "msg_type": "text"},
+                json={
+                    "content": json.dumps({"text": text}, ensure_ascii=False),
+                    "msg_type": "text",
+                },
             )
             if resp.status_code >= 400:
                 logger.error("[feishu] reply text failed status=%s", resp.status_code)
@@ -646,7 +659,10 @@ async def _reply(creds: FeishuCredentials, message_id: str, chat_id: str, card: 
 
 
 async def follow_task(
-    task_id: int, creds: FeishuCredentials, message_id: str, chat_id: str,
+    task_id: int,
+    creds: FeishuCredentials,
+    message_id: str,
+    chat_id: str,
 ) -> None:
     sub = runner.subscribe(task_id)
     if sub is None:
@@ -668,7 +684,9 @@ async def follow_task(
         if stage == "confirm_required" and not sent_confirm:
             sent_confirm = True
             await _reply(
-                creds, message_id, chat_id,
+                creds,
+                message_id,
+                chat_id,
                 card_confirm(
                     int(detail.get("task_id") or task_id),
                     str(data.get("message") or "视频较长，确认继续？"),
