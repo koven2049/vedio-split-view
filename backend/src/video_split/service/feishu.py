@@ -32,6 +32,10 @@ SECRET_FIELDS = frozenset({"app_secret", "verification_token", "encrypt_key"})
 _DEDUP_TTL = 600.0
 _TOKEN_SKEW = 60.0
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
+_X_URL_RE = re.compile(
+    r"https?://(?:(?:www|mobile|m)\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx|fixvx)\.com/\S+",
+    re.IGNORECASE,
+)
 _MD_LINK_RE = re.compile(r"\[([^\]]*)\]\((https?://[^)]+)\)")
 _FEISHU_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 _FEISHU_REPLY_URL = "https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reply"
@@ -62,6 +66,7 @@ def reset_feishu_runtime_state() -> None:
     _token_cache["token"] = ""
     _token_cache["exp"] = 0.0
     load_feishu_credentials.cache_clear()
+    load_vfav_forward.cache_clear()
 
 
 def remember_origin(task_id: int, message_id: str, chat_id: str, open_id: str) -> None:
@@ -266,6 +271,66 @@ def extract_urls_from_message(message_type: str, content: str) -> list[str]:
     return urls
 
 
+def pick_x_url(urls: list[str]) -> str | None:
+    """The first X (Twitter) link in the list, if any."""
+    for raw in urls:
+        if _X_URL_RE.match(raw):
+            return raw
+    return None
+
+
+@lru_cache
+def load_vfav_forward() -> tuple[str, str] | None:
+    """(share_url, token) for the vedio-favorate library, or None when unset.
+
+    Keys live beside the bot secrets in feishu.yaml: ``vfav_base_url`` (plain)
+    and ``vfav_token`` (auto-encrypted at rest like the other secrets).
+    """
+    path = _secrets_path()
+    if not path.exists():
+        return None
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        return None
+    base = str(raw.get("vfav_base_url") or "").rstrip("/")
+    token = str(raw.get("vfav_token") or "")
+    if not token:
+        return None
+    kek = load_or_create_kek(_kek_path())
+    if is_encrypted(token):
+        token = decrypt(token, kek)
+    else:
+        stored = dict(raw)
+        stored["vfav_token"] = encrypt(token, kek)
+        try:
+            _write_secrets_file(path, stored)
+        except OSError as e:
+            # Read-only config mount (container): use the token, skip the upgrade.
+            logger.warning("[feishu] cannot encrypt vfav_token at rest (%s)", e)
+    if not base:
+        return None
+    return f"{base}/api/share?format=text", token
+
+
+async def forward_to_vfav(url: str) -> str:
+    """Hand an X link to the video library; returns its human reply text."""
+    fwd = load_vfav_forward()
+    if fwd is None:
+        raise RuntimeError("视频收藏转发未配置")
+    share_url, token = fwd
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.post(
+            share_url, json={"url": url}, headers={"Authorization": f"Bearer {token}"}
+        )
+    if resp.status_code >= 400:
+        try:
+            detail = str(resp.json().get("detail") or resp.text)
+        except ValueError:
+            detail = resp.text
+        raise RuntimeError(f"视频收藏返回 {resp.status_code}：{detail[:200]}")
+    return resp.text.strip()
+
+
 def pick_supported_url(urls: list[str]) -> tuple[str, str] | None:
     for raw in urls:
         url = normalize_url(raw)
@@ -302,11 +367,14 @@ def card_started(url: str, platform: str) -> dict:
 
 
 def card_help() -> dict:
-    return _md_card(
-        "发一个视频链接",
-        "只支持 YouTube / B站 / 小宇宙。私聊直接粘贴；群里先 @ 我再贴链接。",
-        color="grey",
-    )
+    body = "只支持 YouTube / B站 / 小宇宙。私聊直接粘贴；群里先 @ 我再贴链接。"
+    if load_vfav_forward() is not None:
+        body += "\nX（推特）链接会存入视频收藏。"
+    return _md_card("发一个视频链接", body, color="grey")
+
+
+def card_saved(url: str, message: str) -> dict:
+    return _md_card("已存入视频收藏", f"{message}\n{url}", color="green")
 
 
 def card_unauthorized() -> dict:
@@ -678,6 +746,15 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
     urls = extract_urls_from_message(msg_type, content)
     picked = pick_supported_url(urls)
     if picked is None:
+        x_url = pick_x_url(urls)
+        if x_url is not None and load_vfav_forward() is not None:
+            try:
+                saved = await forward_to_vfav(x_url)
+                await _reply(creds, message_id, chat_id, card_saved(x_url, saved))
+            except Exception as e:
+                logger.exception("[feishu] vfav forward failed")
+                await _reply(creds, message_id, chat_id, card_error(f"存入视频收藏失败：{e}"))
+            return
         if _is_confirm_text(_message_plain_text(msg_type, content)):
             task_id = pending_confirm_task_id(open_id)
             if task_id is not None and runner.confirm(task_id):

@@ -81,7 +81,9 @@ def _signed(body: bytes, encrypt_key: str = ENCRYPT_KEY) -> dict[str, str]:
     }
 
 
-def _message_payload(text: str, *, open_id: str = ALLOWED_OPEN_ID, message_id: str = "om_1") -> dict:
+def _message_payload(
+    text: str, *, open_id: str = ALLOWED_OPEN_ID, message_id: str = "om_1"
+) -> dict:
     return {
         "schema": "2.0",
         "header": {
@@ -105,7 +107,9 @@ def _message_payload(text: str, *, open_id: str = ALLOWED_OPEN_ID, message_id: s
 
 
 async def test_disabled_hook_is_404(client: AsyncClient):
-    resp = await client.post("/api/hooks/feishu", json={"type": "url_verification", "challenge": "x"})
+    resp = await client.post(
+        "/api/hooks/feishu", json={"type": "url_verification", "challenge": "x"}
+    )
     assert resp.status_code == 404
     assert APP_SECRET not in resp.text
 
@@ -139,9 +143,13 @@ async def test_unsigned_plaintext_challenge(client: AsyncClient, enable_feishu):
 
 
 async def test_unsigned_encrypted_challenge(client: AsyncClient, enable_feishu):
-    inner = json.dumps({"challenge": "enc-unsigned", "token": VERIFICATION, "type": "url_verification"})
+    inner = json.dumps(
+        {"challenge": "enc-unsigned", "token": VERIFICATION, "type": "url_verification"}
+    )
     body = json.dumps({"encrypt": encrypt_event(inner, ENCRYPT_KEY)}).encode()
-    resp = await client.post("/api/hooks/feishu", content=body, headers={"Content-Type": "application/json"})
+    resp = await client.post(
+        "/api/hooks/feishu", content=body, headers={"Content-Type": "application/json"}
+    )
     assert resp.status_code == 200
     assert resp.json() == {"challenge": "enc-unsigned"}
 
@@ -155,9 +163,13 @@ async def test_invalid_signature(client: AsyncClient, enable_feishu):
 
 
 async def test_invalid_token(client: AsyncClient, enable_feishu):
-    body = json.dumps({
-        "challenge": "x", "token": "wrong-token", "type": "url_verification",
-    }).encode()
+    body = json.dumps(
+        {
+            "challenge": "x",
+            "token": "wrong-token",
+            "type": "url_verification",
+        }
+    ).encode()
     resp = await client.post("/api/hooks/feishu", content=body, headers=_signed(body))
     assert resp.status_code == 401
 
@@ -170,10 +182,19 @@ def test_extract_urls_text_and_markdown():
 
 
 def test_extract_urls_from_post():
-    content = json.dumps({
-        "title": "",
-        "content": [[{"tag": "a", "href": "https://www.xiaoyuzhoufm.com/episode/507f1f77bcf86cd799439011"}]],
-    })
+    content = json.dumps(
+        {
+            "title": "",
+            "content": [
+                [
+                    {
+                        "tag": "a",
+                        "href": "https://www.xiaoyuzhoufm.com/episode/507f1f77bcf86cd799439011",
+                    }
+                ]
+            ],
+        }
+    )
     urls = extract_urls_from_message("post", content)
     picked = pick_supported_url(urls)
     assert picked is not None
@@ -370,7 +391,9 @@ async def test_handle_message_starts_analysis(db_session, enable_feishu, monkeyp
 
 async def test_text_confirm_pending_task(db_session, enable_feishu, monkeypatch):
     reset_feishu_runtime_state()
-    rt = RunningTask(task_id=9, user_id=1, platform="bilibili", url="https://bilibili.com/video/BVxxxxxxxx")
+    rt = RunningTask(
+        task_id=9, user_id=1, platform="bilibili", url="https://bilibili.com/video/BVxxxxxxxx"
+    )
     rt.last_progress = {"event": "confirm_required"}
     runner._tasks[9] = rt
     remember_origin(9, "om_old", "oc_1", ALLOWED_OPEN_ID)
@@ -477,11 +500,15 @@ async def test_follow_task_confirm_then_complete(enable_feishu, monkeypatch):
 
     async def gen(_cancel, _confirm):
         yield ProgressEvent(
-            stage="confirm_required", progress=10, message="超过阈值",
+            stage="confirm_required",
+            progress=10,
+            message="超过阈值",
             detail={"task_id": 88, "title": "长视频"},
         )
         yield ProgressEvent(
-            stage="complete", progress=100, message="done",
+            stage="complete",
+            progress=100,
+            message="done",
             detail={"video_id": 5},
         )
 
@@ -571,3 +598,141 @@ def test_settings_do_not_hold_feishu_secrets(enable_feishu):
     assert APP_SECRET not in dumped
     assert ENCRYPT_KEY not in dumped
     assert VERIFICATION not in dumped
+
+
+# ---- X links forwarded to vedio-favorate -------------------------------------
+
+
+def _enable_vfav(fixture, base_url="http://vfav.example", token="vft-secret-token"):
+    secrets = fixture["secrets"]
+    secrets.write_text(
+        secrets.read_text() + f'\nvfav_base_url: "{base_url}"\nvfav_token: {token}\n'
+    )
+    from video_split.service.feishu import load_vfav_forward
+
+    load_vfav_forward.cache_clear()
+    return load_vfav_forward()
+
+
+async def test_x_link_forwarded_to_vfav(db_session, enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    assert _enable_vfav(enable_feishu) is not None
+    forwarded: list[str] = []
+    replies: list[dict] = []
+
+    async def fake_forward(url):
+        forwarded.append(url)
+        return "已加入下载队列：@momoflilbit"
+
+    async def fake_reply(_creds, _mid, card):
+        replies.append(card)
+
+    monkeypatch.setattr("video_split.service.feishu.forward_to_vfav", fake_forward)
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    started = AsyncMock()
+    monkeypatch.setattr("video_split.api.analysis.start_analysis_for_user", started)
+
+    link = "https://x.com/momoflilbit/status/2105276821214532096/video/1"
+    await handle_message_event(_message_payload(f"看看 {link} 好玩"), db_session)
+
+    assert forwarded == [link]
+    assert started.await_count == 0
+    assert replies[0]["header"]["title"]["content"] == "已存入视频收藏"
+    assert "@momoflilbit" in replies[0]["elements"][0]["text"]["content"]
+
+
+async def test_x_link_without_vfav_config_keeps_help(db_session, enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    replies: list[dict] = []
+
+    async def fake_reply(_creds, _mid, card):
+        replies.append(card)
+
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    await handle_message_event(
+        _message_payload("https://x.com/momoflilbit/status/2105276821214532096"), db_session
+    )
+    assert replies[0]["header"]["title"]["content"] == "发一个视频链接"
+    assert "视频收藏" not in replies[0]["elements"][0]["text"]["content"]
+
+
+async def test_youtube_link_still_analyzed_with_vfav_on(db_session, enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    from video_split.service.auth_service import ensure_admin_user
+
+    await ensure_admin_user(db_session)
+    _enable_vfav(enable_feishu)
+    started: list[str] = []
+
+    async def fake_start(_db, _user, url):
+        started.append(url)
+        return {"task_id": 9, "platform": "youtube"}
+
+    monkeypatch.setattr("video_split.api.analysis.start_analysis_for_user", fake_start)
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", AsyncMock())
+    monkeypatch.setattr("video_split.service.feishu.follow_task", AsyncMock())
+    forward = AsyncMock()
+    monkeypatch.setattr("video_split.service.feishu.forward_to_vfav", forward)
+
+    both = "https://www.youtube.com/watch?v=dQw4w9WgXcQ 和 https://x.com/a/status/1"
+    await handle_message_event(_message_payload(both), db_session)
+    assert started == ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]
+    assert forward.await_count == 0
+
+
+async def test_forward_failure_replies_error_card(db_session, enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    _enable_vfav(enable_feishu)
+    replies: list[dict] = []
+
+    async def broken(_url):
+        raise RuntimeError("视频收藏返回 401：token 失效")
+
+    async def fake_reply(_creds, _mid, card):
+        replies.append(card)
+
+    monkeypatch.setattr("video_split.service.feishu.forward_to_vfav", broken)
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    await handle_message_event(_message_payload("https://x.com/a/status/2"), db_session)
+    assert replies[0]["header"]["title"]["content"] == "分析失败"
+    assert "存入视频收藏失败" in replies[0]["elements"][0]["text"]["content"]
+
+
+async def test_vfav_token_encrypted_at_rest(enable_feishu):
+    reset_feishu_runtime_state()
+    assert _enable_vfav(enable_feishu, token="vft-plain-secret") == (
+        "http://vfav.example/api/share?format=text",
+        "vft-plain-secret",
+    )
+    text = enable_feishu["secrets"].read_text()
+    assert "vft-plain-secret" not in text
+    assert "vfav_token: enc:v1:" in text
+
+
+def test_vfav_forward_works_with_readonly_config(enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    from video_split.service import feishu as feishu_module
+
+    def readonly(*_args, **_kwargs):
+        raise OSError(30, "Read-only file system")
+
+    monkeypatch.setattr(feishu_module, "_write_secrets_file", readonly)
+    secrets = enable_feishu["secrets"]
+    secrets.write_text(
+        secrets.read_text() + '\nvfav_base_url: "http://vfav.example"\nvfav_token: vft-ro-secret\n'
+    )
+    feishu_module.load_vfav_forward.cache_clear()
+    assert feishu_module.load_vfav_forward() == (
+        "http://vfav.example/api/share?format=text",
+        "vft-ro-secret",
+    )
+
+
+def test_pick_x_url_variants():
+    from video_split.service.feishu import pick_x_url
+
+    assert pick_x_url(["https://example.com/x"]) is None
+    assert pick_x_url([]) is None
+    assert pick_x_url(["https://x.com/a/status/1", "b"]) == "https://x.com/a/status/1"
+    assert pick_x_url(["https://mobile.twitter.com/a/status/2?s=20"]) is not None
+    assert pick_x_url(["https://fxtwitter.com/a/status/3"]) is not None

@@ -5,3 +5,8 @@ app_id: ""
 app_secret: ""
 verification_token: ""
 encrypt_key: ""
+
+# 把 X（推特）链接转存到 vedio-favorate 视频收藏（可选；两行都填才生效）。
+# token 在视频收藏网页的 设置 → 访问令牌 创建；写入后落盘时自动加密。
+vfav_base_url: "http://127.0.0.1:8796"
+vfav_token: ""
