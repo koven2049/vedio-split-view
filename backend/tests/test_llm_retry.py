@@ -4,6 +4,7 @@ Why: BigModel returns 429 on rate limits after a long (expensive) transcription
 has already succeeded; failing the whole task wastes the transcription. A short
 exponential backoff usually rides out the limit window.
 """
+
 from __future__ import annotations
 
 import json
@@ -57,6 +58,7 @@ def _fast_sleep(monkeypatch):
 
     async def _no_sleep(_s):
         return None
+
     # analyzer/brainstorm 各自模块内的 asyncio.sleep；brainstorm 若未 import asyncio
     # (实现补重试时会加)，则退回 patch 全局 asyncio.sleep
     for mod in (analyzer_mod, brainstorm_mod):
@@ -68,6 +70,7 @@ def _fast_sleep(monkeypatch):
 @pytest.fixture
 def _llm_config(test_config_path):
     from video_split.config import set_config_path
+
     set_config_path(test_config_path)
 
 
@@ -75,7 +78,8 @@ def _llm_config(test_config_path):
 async def test_analyzer_retries_429_then_succeeds(monkeypatch, _llm_config):
     calls: list[int] = []
     monkeypatch.setattr(
-        analyzer_mod.httpx, "AsyncClient",
+        analyzer_mod.httpx,
+        "AsyncClient",
         lambda **kw: _FlakyClient(failures=2, calls=calls),
     )
     subs = [SubtitleEntry(start=0.0, duration=5.0, text="hello")]
@@ -90,7 +94,8 @@ async def test_analyzer_retries_429_then_succeeds(monkeypatch, _llm_config):
 async def test_analyzer_429_exhausts_and_raises(monkeypatch, _llm_config):
     calls: list[int] = []
     monkeypatch.setattr(
-        analyzer_mod.httpx, "AsyncClient",
+        analyzer_mod.httpx,
+        "AsyncClient",
         lambda **kw: _FlakyClient(failures=99, calls=calls),
     )
     subs = [SubtitleEntry(start=0.0, duration=5.0, text="hello")]
@@ -105,7 +110,8 @@ async def test_analyzer_429_exhausts_and_raises(monkeypatch, _llm_config):
 async def test_brainstorm_retries_429_then_succeeds(monkeypatch, _llm_config):
     calls: list[int] = []
     monkeypatch.setattr(
-        brainstorm_mod.httpx, "AsyncClient",
+        brainstorm_mod.httpx,
+        "AsyncClient",
         lambda **kw: _FlakyClient(failures=2, calls=calls),
     )
 
@@ -123,7 +129,8 @@ async def test_analyzer_insufficient_balance_does_not_retry(monkeypatch, _llm_co
     calls: list[int] = []
     body = '{"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}'
     monkeypatch.setattr(
-        analyzer_mod.httpx, "AsyncClient",
+        analyzer_mod.httpx,
+        "AsyncClient",
         lambda **kw: _FlakyClient(failures=99, calls=calls, fail_body=body),
     )
     subs = [SubtitleEntry(start=0.0, duration=5.0, text="hello")]

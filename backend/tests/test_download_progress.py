@@ -6,6 +6,7 @@ Covers:
 - exception propagation from download coroutine
 - total unknown (ratio=0 fallback path doesn't crash)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,11 +29,13 @@ def _factory_streaming(ratios: list[float]):
     async def download_coro(*, progress_callback=None):
         for r in ratios_iter:
             if progress_callback:
-                progress_callback({
-                    "ratio": r,
-                    "downloaded_bytes": int(r * total),
-                    "total_bytes": total,
-                })
+                progress_callback(
+                    {
+                        "ratio": r,
+                        "downloaded_bytes": int(r * total),
+                        "total_bytes": total,
+                    }
+                )
             await asyncio.sleep(0)
         return "ok"
 
@@ -48,7 +51,10 @@ async def test_relay_progressive():
 
     events: list[ProgressEvent] = []
     async for ev in _relay_download_progress(
-        "audio_download", base_pct=15, span_pct=40, factory=factory,
+        "audio_download",
+        base_pct=15,
+        span_pct=40,
+        factory=factory,
     ):
         events.append(ev)
 
@@ -75,7 +81,10 @@ async def test_relay_throttle():
 
     yields = 0
     async for _ in _relay_download_progress(
-        "audio_download", base_pct=15, span_pct=40, factory=factory,
+        "audio_download",
+        base_pct=15,
+        span_pct=40,
+        factory=factory,
     ):
         yields += 1
 
@@ -101,7 +110,10 @@ async def test_relay_propagates_exception():
 
     with pytest.raises(RuntimeError, match="download exploded"):
         async for _ in _relay_download_progress(
-            "audio_download", base_pct=15, span_pct=40, factory=factory,
+            "audio_download",
+            base_pct=15,
+            span_pct=40,
+            factory=factory,
         ):
             pass
 
@@ -110,6 +122,7 @@ async def test_relay_propagates_exception():
 async def test_relay_total_unknown():
     """When total bytes unknown (ratio stays 0 / no callbacks), relay still
     terminates cleanly and emits the closing event at base+span."""
+
     # download completes without ever invoking callback (e.g. content-length missing
     # and downloader skips callbacks)
     async def download_coro(*, progress_callback=None):
@@ -120,7 +133,10 @@ async def test_relay_total_unknown():
 
     events: list[ProgressEvent] = []
     async for ev in _relay_download_progress(
-        "audio_download", base_pct=15, span_pct=40, factory=factory,
+        "audio_download",
+        base_pct=15,
+        span_pct=40,
+        factory=factory,
         label="下载音频",
     ):
         events.append(ev)

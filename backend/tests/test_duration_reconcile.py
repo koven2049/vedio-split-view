@@ -5,6 +5,7 @@
 and the progress bar are derived from it, so the tail of every episode got
 cut off. The transcript is ground truth for "audio that exists".
 """
+
 from __future__ import annotations
 
 from video_split.service.downloader import SubtitleEntry, VideoMeta

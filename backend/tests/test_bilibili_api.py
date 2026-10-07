@@ -51,17 +51,20 @@ def _mock_async_client(responses: list[MockResponse]) -> MagicMock:
 
 class TestFetchBilibiliMetadataViaApi:
     async def test_success(self):
-        resp = MockResponse(200, {
-            "code": 0,
-            "data": {
-                "bvid": "BV1xx411c7mD",
-                "title": "Test Title",
-                "duration": 123,
-                "pic": "https://example.com/pic.jpg",
-                "pubdate": 1609459200,
-                "owner": {"name": "Test Uploader"},
+        resp = MockResponse(
+            200,
+            {
+                "code": 0,
+                "data": {
+                    "bvid": "BV1xx411c7mD",
+                    "title": "Test Title",
+                    "duration": 123,
+                    "pic": "https://example.com/pic.jpg",
+                    "pubdate": 1609459200,
+                    "owner": {"name": "Test Uploader"},
+                },
             },
-        })
+        )
 
         with patch("httpx.AsyncClient", return_value=_mock_async_client([resp])):
             meta = await _fetch_bilibili_metadata_via_api("BV1xx411c7mD", {})
@@ -83,17 +86,20 @@ class TestFetchBilibiliMetadataViaApi:
                 await _fetch_bilibili_metadata_via_api("BV1xx411c7mD", {})
 
     async def test_no_pubdate(self):
-        resp = MockResponse(200, {
-            "code": 0,
-            "data": {
-                "bvid": "BV1xx411c7mD",
-                "title": "Test",
-                "duration": 60,
-                "pic": "",
-                "pubdate": 0,
-                "owner": {"name": ""},
+        resp = MockResponse(
+            200,
+            {
+                "code": 0,
+                "data": {
+                    "bvid": "BV1xx411c7mD",
+                    "title": "Test",
+                    "duration": 60,
+                    "pic": "",
+                    "pubdate": 0,
+                    "owner": {"name": ""},
+                },
             },
-        })
+        )
 
         with patch("httpx.AsyncClient", return_value=_mock_async_client([resp])):
             meta = await _fetch_bilibili_metadata_via_api("BV1xx411c7mD", {})
@@ -103,32 +109,43 @@ class TestFetchBilibiliMetadataViaApi:
 
 class TestFetchBilibiliSubtitlesViaApi:
     async def test_success(self):
-        view_resp = MockResponse(200, {
-            "code": 0,
-            "data": {"cid": 12345},
-        })
-        player_resp = MockResponse(200, {
-            "code": 0,
-            "data": {
-                "subtitle": {
-                    "subtitles": [
-                        {
-                            "lan": "zh-CN",
-                            "lan_doc": "中文（中国）",
-                            "subtitle_url": "//example.com/sub.json",
-                        }
-                    ]
-                }
+        view_resp = MockResponse(
+            200,
+            {
+                "code": 0,
+                "data": {"cid": 12345},
             },
-        })
-        sub_resp = MockResponse(200, {
-            "body": [
-                {"from": 0.0, "to": 2.5, "content": "Hello"},
-                {"from": 2.5, "to": 5.0, "content": "World"},
-            ]
-        })
+        )
+        player_resp = MockResponse(
+            200,
+            {
+                "code": 0,
+                "data": {
+                    "subtitle": {
+                        "subtitles": [
+                            {
+                                "lan": "zh-CN",
+                                "lan_doc": "中文（中国）",
+                                "subtitle_url": "//example.com/sub.json",
+                            }
+                        ]
+                    }
+                },
+            },
+        )
+        sub_resp = MockResponse(
+            200,
+            {
+                "body": [
+                    {"from": 0.0, "to": 2.5, "content": "Hello"},
+                    {"from": 2.5, "to": 5.0, "content": "World"},
+                ]
+            },
+        )
 
-        with patch("httpx.AsyncClient", return_value=_mock_async_client([view_resp, player_resp, sub_resp])):
+        with patch(
+            "httpx.AsyncClient", return_value=_mock_async_client([view_resp, player_resp, sub_resp])
+        ):
             entries = await _fetch_bilibili_subtitles_via_api("BV1xx411c7mD", {})
 
         assert len(entries) == 2
@@ -137,10 +154,13 @@ class TestFetchBilibiliSubtitlesViaApi:
 
     async def test_no_subtitles(self):
         view_resp = MockResponse(200, {"code": 0, "data": {"cid": 12345}})
-        player_resp = MockResponse(200, {
-            "code": 0,
-            "data": {"subtitle": {"subtitles": []}},
-        })
+        player_resp = MockResponse(
+            200,
+            {
+                "code": 0,
+                "data": {"subtitle": {"subtitles": []}},
+            },
+        )
 
         with patch("httpx.AsyncClient", return_value=_mock_async_client([view_resp, player_resp])):
             entries = await _fetch_bilibili_subtitles_via_api("BV1xx411c7mD", {})
@@ -167,20 +187,25 @@ class TestFetchBilibiliSubtitlesViaApi:
     async def test_lan_preference_zh_hans(self):
         """zh-Hans should be preferred over en."""
         view_resp = MockResponse(200, {"code": 0, "data": {"cid": 1}})
-        player_resp = MockResponse(200, {
-            "code": 0,
-            "data": {
-                "subtitle": {
-                    "subtitles": [
-                        {"lan": "en", "subtitle_url": "//e.com/en.json"},
-                        {"lan": "zh-Hans", "subtitle_url": "//e.com/zh.json"},
-                    ]
-                }
+        player_resp = MockResponse(
+            200,
+            {
+                "code": 0,
+                "data": {
+                    "subtitle": {
+                        "subtitles": [
+                            {"lan": "en", "subtitle_url": "//e.com/en.json"},
+                            {"lan": "zh-Hans", "subtitle_url": "//e.com/zh.json"},
+                        ]
+                    }
+                },
             },
-        })
+        )
         sub_resp = MockResponse(200, {"body": [{"from": 0, "to": 1, "content": "中文"}]})
 
-        with patch("httpx.AsyncClient", return_value=_mock_async_client([view_resp, player_resp, sub_resp])):
+        with patch(
+            "httpx.AsyncClient", return_value=_mock_async_client([view_resp, player_resp, sub_resp])
+        ):
             entries = await _fetch_bilibili_subtitles_via_api("BV1xx411c7mD", {})
 
         assert len(entries) == 1
@@ -189,16 +214,19 @@ class TestFetchBilibiliSubtitlesViaApi:
     async def test_https_protocol_added(self):
         """Subtitle URLs starting with // should get https: prefix."""
         view_resp = MockResponse(200, {"code": 0, "data": {"cid": 1}})
-        player_resp = MockResponse(200, {
-            "code": 0,
-            "data": {
-                "subtitle": {
-                    "subtitles": [
-                        {"lan": "zh-CN", "subtitle_url": "//example.com/sub.json"},
-                    ]
-                }
+        player_resp = MockResponse(
+            200,
+            {
+                "code": 0,
+                "data": {
+                    "subtitle": {
+                        "subtitles": [
+                            {"lan": "zh-CN", "subtitle_url": "//example.com/sub.json"},
+                        ]
+                    }
+                },
             },
-        })
+        )
         sub_resp = MockResponse(200, {"body": [{"from": 0, "to": 1, "content": "hi"}]})
 
         mock_client = _mock_async_client([view_resp, player_resp, sub_resp])

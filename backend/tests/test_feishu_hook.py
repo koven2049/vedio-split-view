@@ -728,11 +728,70 @@ def test_vfav_forward_works_with_readonly_config(enable_feishu, monkeypatch):
     )
 
 
-def test_pick_x_url_variants():
-    from video_split.service.feishu import pick_x_url
+def test_pick_x_urls_variants():
+    from video_split.service.feishu import pick_x_urls
 
-    assert pick_x_url(["https://example.com/x"]) is None
-    assert pick_x_url([]) is None
-    assert pick_x_url(["https://x.com/a/status/1", "b"]) == "https://x.com/a/status/1"
-    assert pick_x_url(["https://mobile.twitter.com/a/status/2?s=20"]) is not None
-    assert pick_x_url(["https://fxtwitter.com/a/status/3"]) is not None
+    assert pick_x_urls(["https://example.com/x"]) == []
+    assert pick_x_urls([]) == []
+    assert pick_x_urls(["https://x.com/a/status/1", "b", "https://x.com/a/status/1"]) == [
+        "https://x.com/a/status/1"
+    ]
+    assert pick_x_urls(["https://x.com/a/status/1", "https://x.com/b/status/2"]) == [
+        "https://x.com/a/status/1",
+        "https://x.com/b/status/2",
+    ]
+    assert pick_x_urls(["https://mobile.twitter.com/a/status/2?s=20"]) != []
+    assert pick_x_urls(["https://fxtwitter.com/a/status/3"]) != []
+
+
+async def test_multiple_x_links_forwarded_in_order(db_session, enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    assert _enable_vfav(enable_feishu) is not None
+    forwarded: list[str] = []
+    replies: list[dict] = []
+
+    async def fake_forward(url):
+        forwarded.append(url)
+        return f"已加入下载队列：@u{len(forwarded)}"
+
+    async def fake_reply(_creds, _mid, card):
+        replies.append(card)
+
+    monkeypatch.setattr("video_split.service.feishu.forward_to_vfav", fake_forward)
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    started = AsyncMock()
+    monkeypatch.setattr("video_split.api.analysis.start_analysis_for_user", started)
+
+    links = "https://x.com/a/status/1 然后 https://x.com/b/status/2 最后 https://x.com/c/status/3"
+    await handle_message_event(_message_payload(links), db_session)
+
+    assert forwarded == [
+        "https://x.com/a/status/1",
+        "https://x.com/b/status/2",
+        "https://x.com/c/status/3",
+    ]
+    assert started.await_count == 0
+    body = replies[0]["elements"][0]["text"]["content"]
+    assert "@u1" in body and "@u3" in body and "x.com/b/status/2" in body
+
+
+async def test_multiple_x_links_partial_failure_shows_count(db_session, enable_feishu, monkeypatch):
+    reset_feishu_runtime_state()
+    _enable_vfav(enable_feishu)
+    replies: list[dict] = []
+
+    async def flaky(url):
+        if "/b/" in url:
+            raise RuntimeError("视频收藏返回 401")
+        return "已加入下载队列：@ok"
+
+    async def fake_reply(_creds, _mid, card):
+        replies.append(card)
+
+    monkeypatch.setattr("video_split.service.feishu.forward_to_vfav", flaky)
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    await handle_message_event(
+        _message_payload("https://x.com/a/status/1 https://x.com/b/status/2"), db_session
+    )
+    assert replies[0]["header"]["title"]["content"] == "存入视频收藏（1/2）"
+    assert replies[0]["header"]["template"] == "orange"

@@ -75,6 +75,7 @@ video:
 async def db_engine(test_config_path, tmp_path):
     set_config_path(test_config_path)
     from video_split import models  # noqa: F401  register tables on Base.metadata
+
     db_file = tmp_path / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}", echo=False)
     async with engine.begin() as conn:
@@ -107,6 +108,7 @@ async def client(db_engine, test_config_path):
 
     async with factory() as setup_session:
         from video_split.service.auth_service import ensure_admin_user
+
         await ensure_admin_user(setup_session)
 
     transport = ASGITransport(app=app)
@@ -115,12 +117,17 @@ async def client(db_engine, test_config_path):
 
 
 async def get_admin_token(client: AsyncClient) -> str:
-    resp = await client.post("/api/auth/login", json={"username": "admin", "password": "test-admin-pass"})
+    resp = await client.post(
+        "/api/auth/login", json={"username": "admin", "password": "test-admin-pass"}
+    )
     return resp.json()["access_token"]
 
 
 async def admin_create_user(
-    client: AsyncClient, username: str, password: str = "pass123", role: str = "viewer",
+    client: AsyncClient,
+    username: str,
+    password: str = "pass123",
+    role: str = "viewer",
 ) -> str:
     """Create a viewer account via the admin API and log in. Returns access token.
 
@@ -132,5 +139,7 @@ async def admin_create_user(
         json={"username": username, "password": password, "role": role},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    login_resp = await client.post("/api/auth/login", json={"username": username, "password": password})
+    login_resp = await client.post(
+        "/api/auth/login", json={"username": username, "password": password}
+    )
     return login_resp.json()["access_token"]

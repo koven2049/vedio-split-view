@@ -3,6 +3,7 @@
 These tests do not hit the network: httpx.AsyncClient is monkeypatched to
 return fixture HTML so classification is purely driven by page content.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,8 +18,14 @@ from video_split.schemas import ProgressEvent
 VALID_EPISODE_URL = "https://www.xiaoyuzhoufm.com/episode/67d32a01f4f4f4f4f4f4f4f4"
 
 
-def _build_html(*, title: str = "", audio: str = "", description: str = "",
-                json_ld: dict | None = None, body_text: str = "") -> str:
+def _build_html(
+    *,
+    title: str = "",
+    audio: str = "",
+    description: str = "",
+    json_ld: dict | None = None,
+    body_text: str = "",
+) -> str:
     """Construct a synthetic 小宇宙 episode page for testing."""
     parts = ["<html><head>"]
     if title:
@@ -29,19 +36,20 @@ def _build_html(*, title: str = "", audio: str = "", description: str = "",
     if description:
         parts.append(f'<meta property="og:description" content="{description}"/>')
     if json_ld is not None:
-        parts.append(
-            '<script type="application/ld+json">'
-            + json.dumps(json_ld)
-            + '</script>'
-        )
+        parts.append('<script type="application/ld+json">' + json.dumps(json_ld) + "</script>")
     parts.append("</head><body>")
     parts.append(body_text or "")
     parts.append("</body></html>")
     return "".join(parts)
 
 
-def _podcast_episode_ld(*, name: str = "Ep", duration: str = "PT30M",
-                        content_url: str = "", date_published: str = "2026-03-19") -> dict:
+def _podcast_episode_ld(
+    *,
+    name: str = "Ep",
+    duration: str = "PT30M",
+    content_url: str = "",
+    date_published: str = "2026-03-19",
+) -> dict:
     obj: dict = {
         "@type": "PodcastEpisode",
         "name": name,
@@ -62,8 +70,11 @@ class _FakeResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             import httpx
+
             raise httpx.HTTPStatusError(
-                "fake status", request=None, response=self,  # type: ignore[arg-type]
+                "fake status",
+                request=None,
+                response=self,  # type: ignore[arg-type]
             )
 
 
@@ -109,6 +120,7 @@ def _patch_async_client(monkeypatch, *, html: str, status_code: int = 200):
         def __await__(self):
             async def _coro():
                 return self._resp
+
             return _coro().__await__()
 
     monkeypatch.setattr(xy.httpx, "AsyncClient", _FakeClient)
@@ -117,6 +129,7 @@ def _patch_async_client(monkeypatch, *, html: str, status_code: int = 200):
 # ---------------------------------------------------------------------------
 # extract_xiaoyuzhou_metadata classification
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_cdn_expired_no_og_audio(monkeypatch):
@@ -155,7 +168,9 @@ async def test_paid_private_not_triggered_when_audio_present(monkeypatch):
     html = _build_html(
         title="公开单集：讨论付费内容产业",
         audio="https://cdn.xiaoyuzhoufm.com/audio.m4a",
-        json_ld=_podcast_episode_ld(duration="PT45M", content_url="https://cdn.xiaoyuzhoufm.com/audio.m4a"),
+        json_ld=_podcast_episode_ld(
+            duration="PT45M", content_url="https://cdn.xiaoyuzhoufm.com/audio.m4a"
+        ),
         body_text="<p>本期聊聊付费墙、VIP 会员经济</p>",
     )
     _patch_async_client(monkeypatch, html=html)
@@ -207,6 +222,7 @@ async def test_valid_metadata_returns_meta(monkeypatch):
 # download_xiaoyuzhou_audio classification
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_download_cdn_expired_on_http_403(monkeypatch, tmp_path):
     """403 from CDN → XiaoyuzhouError(cdn_expired)."""
@@ -223,6 +239,7 @@ async def test_download_cdn_expired_on_http_403(monkeypatch, tmp_path):
 
         def stream(self, method, url):
             import httpx
+
             req = httpx.Request("GET", url)
 
             class _Resp:
@@ -231,7 +248,9 @@ async def test_download_cdn_expired_on_http_403(monkeypatch, tmp_path):
 
                 def raise_for_status(self):
                     raise httpx.HTTPStatusError(
-                        "forbidden", request=req, response=httpx.Response(403, request=req),
+                        "forbidden",
+                        request=req,
+                        response=httpx.Response(403, request=req),
                     )
 
             class _StreamCtx:
@@ -251,7 +270,8 @@ async def test_download_cdn_expired_on_http_403(monkeypatch, tmp_path):
 
     with pytest.raises(xy.XiaoyuzhouError) as ei:
         await xy.download_xiaoyuzhou_audio(
-            "https://cdn.example.com/expired.m4a", tmp_path,
+            "https://cdn.example.com/expired.m4a",
+            tmp_path,
         )
     assert ei.value.code == "cdn_expired"
 
@@ -259,6 +279,7 @@ async def test_download_cdn_expired_on_http_403(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # task_runner integration: error_code propagation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_task_runner_propagates_error_code(monkeypatch):
@@ -270,12 +291,16 @@ async def test_task_runner_propagates_error_code(monkeypatch):
 
     runner = TaskRunner()
     rt = runner.start(
-        task_id=99001, user_id=1, platform="xiaoyuzhou",
-        url=VALID_EPISODE_URL, gen_factory=_gen_factory,
+        task_id=99001,
+        user_id=1,
+        platform="xiaoyuzhou",
+        url=VALID_EPISODE_URL,
+        gen_factory=_gen_factory,
     )
 
     # Wait until background task finishes (event injected into rt.events).
     import asyncio as _asyncio
+
     for _ in range(100):
         if rt.finished:
             break
@@ -299,11 +324,15 @@ async def test_task_runner_no_error_code_for_generic_exception():
 
     runner = TaskRunner()
     rt = runner.start(
-        task_id=99002, user_id=1, platform="xiaoyuzhou",
-        url=VALID_EPISODE_URL, gen_factory=_gen_factory,
+        task_id=99002,
+        user_id=1,
+        platform="xiaoyuzhou",
+        url=VALID_EPISODE_URL,
+        gen_factory=_gen_factory,
     )
 
     import asyncio as _asyncio
+
     for _ in range(100):
         if rt.finished:
             break
@@ -330,11 +359,15 @@ async def test_task_runner_duration_exceeded_error_code():
 
     runner = TaskRunner()
     rt = runner.start(
-        task_id=99003, user_id=1, platform="youtube",
-        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", gen_factory=_gen_factory,
+        task_id=99003,
+        user_id=1,
+        platform="youtube",
+        url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        gen_factory=_gen_factory,
     )
 
     import asyncio as _asyncio
+
     for _ in range(100):
         if rt.finished:
             break
@@ -388,10 +421,12 @@ async def test_duration_picks_matching_episode_not_sibling(monkeypatch):
         title="Vol.229",
         audio="https://cdn.xiaoyuzhoufm.com/a.m4a",
         json_ld=_podcast_episode_ld(duration="PT95M"),
-    ) + _next_data([
-        {"eid": "0" * 24, "title": "Vol.228", "duration": 5905},
-        {"eid": eid, "title": "Vol.229", "duration": 5709},
-    ])
+    ) + _next_data(
+        [
+            {"eid": "0" * 24, "title": "Vol.228", "duration": 5905},
+            {"eid": eid, "title": "Vol.229", "duration": 5709},
+        ]
+    )
     _patch_async_client(monkeypatch, html=html)
 
     meta, _ = await xiaoyuzhou.extract_xiaoyuzhou_metadata(

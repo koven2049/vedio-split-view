@@ -4,6 +4,7 @@ WHY: ai-learning needs the joined full text ready-to-use, without having to
 fetch subtitle fragments and reassemble them. This endpoint exposes the
 pre-joined raw_transcript directly.
 """
+
 from __future__ import annotations
 
 import pytest

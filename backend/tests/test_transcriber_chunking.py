@@ -13,6 +13,7 @@ WHY: production repeatedly lost whole 1.5-hour podcasts to
 These tests encode all three, plus the timeline invariant that offsets come
 from split boundaries rather than the previous chunk's last sentence.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -136,9 +137,20 @@ requires_ffmpeg = pytest.mark.skipif(not _ffmpeg_available, reason="ffmpeg/ffpro
 def _make_audio(path, duration_s, *, aac: bool):
     codec_args = ["-c:a", "aac"] if aac else ["-c:a", "libmp3lame"]
     _sp.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", f"sine=frequency=440:duration={duration_s}",
-         *codec_args, "-v", "error", str(path)],
-        check=True, capture_output=True,
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=440:duration={duration_s}",
+            *codec_args,
+            "-v",
+            "error",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
     )
 
 
@@ -171,7 +183,9 @@ def test_mp3_input_still_uses_stream_copy_to_mp3(tmp_path):
     assert len(chunks) == 3
     for chunk in chunks:
         assert chunk.suffix == ".mp3"
-        assert transcriber.probe_audio_codec(chunk) == "mp3", "must stay stream-copied, not re-encoded"
+        assert transcriber.probe_audio_codec(chunk) == "mp3", (
+            "must stay stream-copied, not re-encoded"
+        )
 
 
 @requires_ffmpeg

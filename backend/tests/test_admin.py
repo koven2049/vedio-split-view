@@ -78,7 +78,9 @@ async def test_admin_create_viewer(client):
     assert resp.json()["role"] == "viewer"
     assert resp.json()["is_active"] is True
 
-    login_resp = await client.post("/api/auth/login", json={"username": "new_viewer", "password": "pass123"})
+    login_resp = await client.post(
+        "/api/auth/login", json={"username": "new_viewer", "password": "pass123"}
+    )
     assert login_resp.status_code == 200
     assert login_resp.json()["role"] == "viewer"
 
@@ -103,7 +105,10 @@ async def test_admin_toggle_user(client):
     target = next(u for u in resp.json() if u["username"] == "toggle_user")
     assert target["is_active"] is True
 
-    resp2 = await client.put(f"/api/admin/users/{target['id']}/toggle", headers={"Authorization": f"Bearer {admin_token}"})
+    resp2 = await client.put(
+        f"/api/admin/users/{target['id']}/toggle",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
     assert resp2.status_code == 200
     assert resp2.json()["is_active"] is False
 
@@ -113,7 +118,9 @@ async def test_admin_reset_user_password(client):
     admin_token = await get_admin_token(client)
     await admin_create_user(client, "reset_password_user", password="oldpass123", role="viewer")
 
-    users_resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
+    users_resp = await client.get(
+        "/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"}
+    )
     target = next(u for u in users_resp.json() if u["username"] == "reset_password_user")
 
     reset_resp = await client.put(
@@ -144,12 +151,16 @@ async def test_admin_delete_user(client):
     resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
     target = next(u for u in resp.json() if u["username"] == "delete_admin_user")
 
-    resp2 = await client.delete(f"/api/admin/users/{target['id']}", headers={"Authorization": f"Bearer {admin_token}"})
+    resp2 = await client.delete(
+        f"/api/admin/users/{target['id']}", headers={"Authorization": f"Bearer {admin_token}"}
+    )
     assert resp2.status_code == 204
 
 
 @pytest.mark.asyncio
-async def test_admin_delete_user_preview_and_cleanup_files(client, db_session, monkeypatch, tmp_path):
+async def test_admin_delete_user_preview_and_cleanup_files(
+    client, db_session, monkeypatch, tmp_path
+):
     from video_split.service import admin_cleanup as cleanup_service
     from video_split.service import data_sync
 
@@ -161,7 +172,9 @@ async def test_admin_delete_user_preview_and_cleanup_files(client, db_session, m
     admin_token = await get_admin_token(client)
     await admin_create_user(client, "delete_with_files", role="viewer")
 
-    users_resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
+    users_resp = await client.get(
+        "/api/admin/users", headers={"Authorization": f"Bearer {admin_token}"}
+    )
     target = next(u for u in users_resp.json() if u["username"] == "delete_with_files")
     user_id = target["id"]
 
@@ -176,23 +189,27 @@ async def test_admin_delete_user_preview_and_cleanup_files(client, db_session, m
     export_path.write_text("{}", encoding="utf-8")
     thumb_path.write_text("thumb", encoding="utf-8")
 
-    db_session.add(Video(
-        user_id=user_id,
-        url="https://www.youtube.com/watch?v=abc123",
-        platform="youtube",
-        video_id="abc123",
-        title="Cleanup target",
-        thumbnail_url="/api/thumbnails/youtube_abc123.jpg",
-        duration_seconds=120,
-        is_public=True,
-    ))
-    db_session.add(Task(
-        user_id=user_id,
-        url="https://www.youtube.com/watch?v=abc123",
-        platform="youtube",
-        status="failed_transcribe",
-        temp_dir=str(task_dir),
-    ))
+    db_session.add(
+        Video(
+            user_id=user_id,
+            url="https://www.youtube.com/watch?v=abc123",
+            platform="youtube",
+            video_id="abc123",
+            title="Cleanup target",
+            thumbnail_url="/api/thumbnails/youtube_abc123.jpg",
+            duration_seconds=120,
+            is_public=True,
+        )
+    )
+    db_session.add(
+        Task(
+            user_id=user_id,
+            url="https://www.youtube.com/watch?v=abc123",
+            platform="youtube",
+            status="failed_transcribe",
+            temp_dir=str(task_dir),
+        )
+    )
     await db_session.commit()
 
     preview_resp = await client.get(

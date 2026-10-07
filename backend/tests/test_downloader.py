@@ -125,9 +125,7 @@ class TestProxyForPlatform:
 
 class TestApplyYoutubeOpts:
     def test_uses_deno_not_node(self, monkeypatch):
-        monkeypatch.setattr(
-            "video_split.service.downloader._youtube_cookies_path", lambda: None
-        )
+        monkeypatch.setattr("video_split.service.downloader._youtube_cookies_path", lambda: None)
         opts: dict = {}
         _apply_youtube_opts(opts)
         assert opts["js_runtimes"] == {"deno": {}}

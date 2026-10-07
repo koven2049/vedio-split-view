@@ -22,9 +22,7 @@ def _func_body(name: str) -> str:
 def test_run_start_does_not_pass_dns_to_containers() -> None:
     body = _func_body("run_start")
     assert "_podman_dns_args" not in body
-    code = "\n".join(
-        line for line in body.splitlines() if not line.lstrip().startswith("#")
-    )
+    code = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
     assert "--dns" not in code
 
 

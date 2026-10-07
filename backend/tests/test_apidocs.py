@@ -7,6 +7,7 @@ at all. These tests pin the contract the frontend ApiDocsPage depends on
 AND guard against that drift by asserting facts only a live-schema source
 can satisfy.
 """
+
 from __future__ import annotations
 
 from httpx import AsyncClient

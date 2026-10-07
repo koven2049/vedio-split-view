@@ -14,22 +14,43 @@ async def _admin_user(db: AsyncSession) -> User:
     return result.scalar_one()
 
 
-async def _create_video(db: AsyncSession, user_id: int, title: str = "Test Video", is_public: bool = False) -> Video:
+async def _create_video(
+    db: AsyncSession, user_id: int, title: str = "Test Video", is_public: bool = False
+) -> Video:
     video = Video(
-        user_id=user_id, url="https://youtube.com/watch?v=abc", platform="youtube",
-        video_id="abc", title=title, thumbnail_url="", duration_seconds=600,
-        summary="A test video.", raw_transcript="...", is_public=is_public,
+        user_id=user_id,
+        url="https://youtube.com/watch?v=abc",
+        platform="youtube",
+        video_id="abc",
+        title=title,
+        thumbnail_url="",
+        duration_seconds=600,
+        summary="A test video.",
+        raw_transcript="...",
+        is_public=is_public,
     )
     db.add(video)
     await db.flush()
-    db.add(Segment(
-        video_id=video.id, segment_index=0, title="Intro",
-        summary="Introduction", start_seconds=0, end_seconds=300,
-    ))
-    db.add(Segment(
-        video_id=video.id, segment_index=1, title="Main",
-        summary="Main content", start_seconds=300, end_seconds=600,
-    ))
+    db.add(
+        Segment(
+            video_id=video.id,
+            segment_index=0,
+            title="Intro",
+            summary="Introduction",
+            start_seconds=0,
+            end_seconds=300,
+        )
+    )
+    db.add(
+        Segment(
+            video_id=video.id,
+            segment_index=1,
+            title="Main",
+            summary="Main content",
+            start_seconds=300,
+            end_seconds=600,
+        )
+    )
     await db.commit()
     await db.refresh(video)
     return video
@@ -213,7 +234,9 @@ async def test_viewer_cannot_modify_tags(client, db_session):
     viewer_token = await admin_create_user(client, "viewer_no_tag", role="viewer")
     headers = {"Authorization": f"Bearer {viewer_token}"}
 
-    resp = await client.post(f"/api/tags/{video.id}/tags", json={"name": "NoPerms"}, headers=headers)
+    resp = await client.post(
+        f"/api/tags/{video.id}/tags", json={"name": "NoPerms"}, headers=headers
+    )
     assert resp.status_code == 403
 
 

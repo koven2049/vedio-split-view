@@ -275,12 +275,15 @@ def extract_urls_from_message(message_type: str, content: str) -> list[str]:
     return urls
 
 
-def pick_x_url(urls: list[str]) -> str | None:
-    """The first X (Twitter) link in the list, if any."""
+def pick_x_urls(urls: list[str]) -> list[str]:
+    """Every distinct X (Twitter) link in the list, in order of appearance."""
+    seen: set[str] = set()
+    ordered: list[str] = []
     for raw in urls:
-        if _X_URL_RE.match(raw):
-            return raw
-    return None
+        if _X_URL_RE.match(raw) and raw not in seen:
+            seen.add(raw)
+            ordered.append(raw)
+    return ordered
 
 
 @lru_cache
@@ -379,8 +382,16 @@ def card_help() -> dict:
     return _md_card("发一个视频链接", body, color="grey")
 
 
-def card_saved(url: str, message: str) -> dict:
-    return _md_card("已存入视频收藏", f"{message}\n{url}", color="green")
+def card_saved(entries: list[tuple[str, str | None]]) -> dict:
+    """One card for a whole message: each link with its reply (or error)."""
+    failed = [e for e in entries if e[1] is None]
+    lines = []
+    for url, message in entries:
+        lines.append(f"{message or '❌ 存入失败'}\n{url}")
+    if len(entries) == 1 and not failed:
+        return _md_card("已存入视频收藏", lines[0], color="green")
+    title = "已存入视频收藏" if not failed else f"存入视频收藏（{len(entries) - len(failed)}/{len(entries)}）"
+    return _md_card(title, "\n\n".join(lines), color="green" if not failed else "orange")
 
 
 def card_unauthorized() -> dict:
@@ -764,14 +775,21 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
     urls = extract_urls_from_message(msg_type, content)
     picked = pick_supported_url(urls)
     if picked is None:
-        x_url = pick_x_url(urls)
-        if x_url is not None and load_vfav_forward() is not None:
-            try:
-                saved = await forward_to_vfav(x_url)
-                await _reply(creds, message_id, chat_id, card_saved(x_url, saved))
-            except Exception as e:
-                logger.exception("[feishu] vfav forward failed")
-                await _reply(creds, message_id, chat_id, card_error(f"存入视频收藏失败：{e}"))
+        x_urls = pick_x_urls(urls)
+        if x_urls and load_vfav_forward() is not None:
+            entries: list[tuple[str, str | None]] = []
+            for x_url in x_urls:  # 按出现顺序逐条存入，一条失败不影响其余
+                try:
+                    entries.append((x_url, await forward_to_vfav(x_url)))
+                except Exception as e:
+                    logger.exception("[feishu] vfav forward failed for %s", x_url)
+                    entries.append((x_url, None))
+                    if len(entries) <= 1 and len(x_urls) == 1:
+                        await _reply(
+                            creds, message_id, chat_id, card_error(f"存入视频收藏失败：{e}")
+                        )
+                        return
+            await _reply(creds, message_id, chat_id, card_saved(entries))
             return
         if _is_confirm_text(_message_plain_text(msg_type, content)):
             task_id = pending_confirm_task_id(open_id)

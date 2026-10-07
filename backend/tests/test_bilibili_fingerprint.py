@@ -65,6 +65,7 @@ def _mock_client(response=None, *, raise_exc=None, capture=None):
 
 # --- fingerprint acquisition (finger/spi) ---------------------------------
 
+
 class TestFetchFingerprint:
     async def test_parses_b3_b4(self):
         resp = MockResponse(200, {"code": 0, "data": {"b_3": "BV3XX", "b_4": "BV4YY"}})
@@ -86,6 +87,7 @@ class TestFetchFingerprint:
 
 
 # --- ExClimbWuzhi activation ----------------------------------------------
+
 
 class TestExClimbPayload:
     def test_payload_is_wrapped_json_string(self):
@@ -128,6 +130,7 @@ class TestActivateBuvid:
 
 # --- bili_ticket -----------------------------------------------------------
 
+
 class TestTicketSign:
     def test_hexsign_matches_hmac_sha256(self):
         ts = 1700000000
@@ -138,10 +141,13 @@ class TestTicketSign:
 class TestGetBiliTicket:
     async def test_success_computes_expiry(self):
         cap: dict = {}
-        resp = MockResponse(200, {
-            "code": 0,
-            "data": {"ticket": "JWT123", "ttl": 259200, "created_at": 1700000000},
-        })
+        resp = MockResponse(
+            200,
+            {
+                "code": 0,
+                "data": {"ticket": "JWT123", "ttl": 259200, "created_at": 1700000000},
+            },
+        )
         with patch("httpx.AsyncClient", return_value=_mock_client(resp, capture=cap)):
             ticket, expires_at = await get_bili_ticket("csrf123")
         assert ticket == "JWT123"
@@ -158,11 +164,13 @@ class TestGetBiliTicket:
 
 # --- persistence -----------------------------------------------------------
 
+
 class TestPersistence:
     def test_roundtrip(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ba, "_fingerprint_path", lambda: tmp_path / "fp.json")
-        fp = Fingerprint(buvid3="b3", buvid4="b4", b_nut="123", bili_ticket="t",
-                         ticket_expires_at=999)
+        fp = Fingerprint(
+            buvid3="b3", buvid4="b4", b_nut="123", bili_ticket="t", ticket_expires_at=999
+        )
         save_fingerprint(fp)
         loaded = load_fingerprint()
         assert loaded == fp
@@ -174,6 +182,7 @@ class TestPersistence:
 
 # --- as_cookie_dict expiry gating -----------------------------------------
 
+
 class TestCookieDict:
     def test_expired_ticket_omitted(self):
         fp = Fingerprint(buvid3="b3", bili_ticket="t", ticket_expires_at=1)  # long past
@@ -182,21 +191,28 @@ class TestCookieDict:
         assert d["buvid3"] == "b3"
 
     def test_valid_ticket_included(self):
-        fp = Fingerprint(buvid3="b3", buvid4="b4", b_nut="9",
-                         bili_ticket="t", ticket_expires_at=int(time.time()) + 10_000)
+        fp = Fingerprint(
+            buvid3="b3",
+            buvid4="b4",
+            b_nut="9",
+            bili_ticket="t",
+            ticket_expires_at=int(time.time()) + 10_000,
+        )
         d = fp.as_cookie_dict()
         assert d == {"buvid3": "b3", "buvid4": "b4", "b_nut": "9", "bili_ticket": "t"}
 
 
 # --- refresh orchestration -------------------------------------------------
 
+
 class TestRefreshFingerprint:
     async def test_full_refresh_persists_all_fields(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ba, "_fingerprint_path", lambda: tmp_path / "fp.json")
         monkeypatch.setattr(ba, "fetch_fingerprint", AsyncMock(return_value=("B3", "B4")))
         monkeypatch.setattr(ba, "activate_buvid", AsyncMock(return_value=True))
-        monkeypatch.setattr(ba, "get_bili_ticket",
-                            AsyncMock(return_value=("TICKET", int(time.time()) + 259200)))
+        monkeypatch.setattr(
+            ba, "get_bili_ticket", AsyncMock(return_value=("TICKET", int(time.time()) + 259200))
+        )
         fp = await refresh_fingerprint("csrf")
         assert fp.buvid3 == "B3"
         assert fp.buvid4 == "B4"
@@ -211,8 +227,9 @@ class TestRefreshFingerprint:
         monkeypatch.setattr(ba, "fetch_fingerprint", AsyncMock(return_value=("", "")))
         activate = AsyncMock(return_value=True)
         monkeypatch.setattr(ba, "activate_buvid", activate)
-        monkeypatch.setattr(ba, "get_bili_ticket",
-                            AsyncMock(return_value=("NEWTICKET", int(time.time()) + 100000)))
+        monkeypatch.setattr(
+            ba, "get_bili_ticket", AsyncMock(return_value=("NEWTICKET", int(time.time()) + 100000))
+        )
         fp = await refresh_fingerprint()
         assert fp.buvid3 == "OLD"  # cached retained
         activate.assert_not_called()  # no activation without a fresh buvid3
@@ -220,8 +237,11 @@ class TestRefreshFingerprint:
 
     async def test_valid_cached_ticket_not_refetched(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ba, "_fingerprint_path", lambda: tmp_path / "fp.json")
-        save_fingerprint(Fingerprint(buvid3="B3", bili_ticket="KEEP",
-                                     ticket_expires_at=int(time.time()) + 100000))
+        save_fingerprint(
+            Fingerprint(
+                buvid3="B3", bili_ticket="KEEP", ticket_expires_at=int(time.time()) + 100000
+            )
+        )
         monkeypatch.setattr(ba, "fetch_fingerprint", AsyncMock(return_value=("", "")))
         get_ticket = AsyncMock(return_value=("SHOULD_NOT_USE", 0))
         monkeypatch.setattr(ba, "get_bili_ticket", get_ticket)
@@ -233,10 +253,14 @@ class TestRefreshFingerprint:
 class TestEnsureFingerprint:
     async def test_skips_network_when_fresh(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ba, "_fingerprint_path", lambda: tmp_path / "fp.json")
-        save_fingerprint(Fingerprint(
-            buvid3="B3", buvid4="B4", bili_ticket="KEEP",
-            ticket_expires_at=int(time.time()) + 100000,
-        ))
+        save_fingerprint(
+            Fingerprint(
+                buvid3="B3",
+                buvid4="B4",
+                bili_ticket="KEEP",
+                ticket_expires_at=int(time.time()) + 100000,
+            )
+        )
         refresh = AsyncMock(side_effect=AssertionError("should not refresh"))
         monkeypatch.setattr(ba, "refresh_fingerprint", refresh)
         fp = await ensure_fingerprint()
@@ -256,6 +280,7 @@ class TestEnsureFingerprint:
 class TestBilibiliNeverUsesProxy:
     def test_helper_is_always_none_even_when_proxy_enabled(self, monkeypatch):
         from video_split.config import get_settings
+
         s = get_settings()
         monkeypatch.setattr(s.network, "proxy_enabled", True)
         monkeypatch.setattr(s.network, "http_proxy", "http://127.0.0.1:7890")
@@ -271,11 +296,19 @@ class TestBilibiliNeverUsesProxy:
 
 # --- Cookie assembly in downloader ----------------------------------------
 
+
 class TestBilibiliHeadersCookie:
     def test_includes_fingerprint_fields(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ba, "_fingerprint_path", lambda: tmp_path / "fp.json")
-        save_fingerprint(Fingerprint(buvid3="B3", buvid4="B4", b_nut="777",
-                                     bili_ticket="TK", ticket_expires_at=int(time.time()) + 9999))
+        save_fingerprint(
+            Fingerprint(
+                buvid3="B3",
+                buvid4="B4",
+                b_nut="777",
+                bili_ticket="TK",
+                ticket_expires_at=int(time.time()) + 9999,
+            )
+        )
         headers = _bilibili_headers(sessdata="S", bili_jct="J", buvid3="")
         cookie = headers["Cookie"]
         assert "buvid4=B4" in cookie

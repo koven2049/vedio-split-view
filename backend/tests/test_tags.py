@@ -21,7 +21,9 @@ async def test_tag_crud(client):
     tags = resp2.json()
     assert any(t["name"] == "AI" for t in tags)
 
-    resp3 = await client.put(f"/api/tags/{tag_id}", json={"name": "Machine Learning"}, headers=headers)
+    resp3 = await client.put(
+        f"/api/tags/{tag_id}", json={"name": "Machine Learning"}, headers=headers
+    )
     assert resp3.status_code == 200
     assert resp3.json()["name"] == "Machine Learning"
 
@@ -42,7 +44,11 @@ async def test_duplicate_tag(client):
 @pytest.mark.asyncio
 async def test_viewer_can_list_tags(client):
     admin_token = await get_admin_token(client)
-    await client.post("/api/tags", json={"name": "ViewerVisible"}, headers={"Authorization": f"Bearer {admin_token}"})
+    await client.post(
+        "/api/tags",
+        json={"name": "ViewerVisible"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
 
     viewer_token = await admin_create_user(client, "tag_viewer_list", role="viewer")
     resp = await client.get("/api/tags", headers={"Authorization": f"Bearer {viewer_token}"})
@@ -53,7 +59,9 @@ async def test_viewer_can_list_tags(client):
 @pytest.mark.asyncio
 async def test_viewer_cannot_create_tags(client):
     viewer_token = await admin_create_user(client, "tag_viewer_create", role="viewer")
-    resp = await client.post("/api/tags", json={"name": "NoPerms"}, headers={"Authorization": f"Bearer {viewer_token}"})
+    resp = await client.post(
+        "/api/tags", json={"name": "NoPerms"}, headers={"Authorization": f"Bearer {viewer_token}"}
+    )
     assert resp.status_code == 403
 
 

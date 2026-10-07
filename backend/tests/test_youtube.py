@@ -14,21 +14,27 @@ async def test_youtube_cookies_status_reports_probe_failure(client, test_config_
     config_dir = Path(test_config_path).parent
     cookie_file = config_dir / "test-youtube-cookies.txt"
     cookie_file.write_text(
-        "\n".join([
-            "# Netscape HTTP Cookie File",
-            ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tSID\ttest-sid",
-            ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tLOGIN_INFO\ttest-login",
-        ]),
+        "\n".join(
+            [
+                "# Netscape HTTP Cookie File",
+                ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tSID\ttest-sid",
+                ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tLOGIN_INFO\ttest-login",
+            ]
+        ),
         encoding="utf-8",
     )
 
     from video_split.config import get_settings
+
     monkeypatch.setattr(get_settings().network, "youtube_cookies_file", str(cookie_file))
 
     monkeypatch.setattr(
         youtube_api,
         "_probe_youtube_cookiefile",
-        lambda: (False, "Configured cookies are present, but YouTube still requires bot/login verification."),
+        lambda: (
+            False,
+            "Configured cookies are present, but YouTube still requires bot/login verification.",
+        ),
     )
 
     token = await get_admin_token(client)
@@ -54,15 +60,18 @@ async def test_youtube_cookies_status_allows_admin(client, test_config_path, mon
     config_dir = Path(test_config_path).parent
     cookie_file = config_dir / "test-youtube-cookies.txt"
     cookie_file.write_text(
-        "\n".join([
-            "# Netscape HTTP Cookie File",
-            ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tSID\ttest-sid",
-            ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tLOGIN_INFO\ttest-login",
-        ]),
+        "\n".join(
+            [
+                "# Netscape HTTP Cookie File",
+                ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tSID\ttest-sid",
+                ".youtube.com\tTRUE\t/\tTRUE\t1893456000\tLOGIN_INFO\ttest-login",
+            ]
+        ),
         encoding="utf-8",
     )
 
     from video_split.config import get_settings
+
     monkeypatch.setattr(get_settings().network, "youtube_cookies_file", str(cookie_file))
 
     monkeypatch.setattr(

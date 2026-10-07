@@ -66,7 +66,9 @@ async def test_task_quota_exceeded(db_session):
 @pytest.mark.asyncio
 async def test_discard_task(db_session):
     user = await _create_test_user(db_session, "discard_user")
-    task = Task(user_id=user.id, url="url", platform="youtube", status="failed_transcribe", temp_dir="")
+    task = Task(
+        user_id=user.id, url="url", platform="youtube", status="failed_transcribe", temp_dir=""
+    )
     db_session.add(task)
     await db_session.commit()
     await db_session.refresh(task)
@@ -75,6 +77,7 @@ async def test_discard_task(db_session):
     await discard_task(db_session, task)
 
     from sqlalchemy import select
+
     result = await db_session.execute(select(Task).where(Task.id == task_id))
     assert result.scalar_one_or_none() is None
 

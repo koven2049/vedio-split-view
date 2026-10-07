@@ -71,7 +71,7 @@ class TestParseLLMResponse:
         string values — e.g. summary_en: '... like the "trap theory" ...'.
         Strict json.loads fails; the parser must fall back to a tolerant
         repair so a 2-hour transcription isn't wasted on a stray quote."""
-        raw = '''```json
+        raw = """```json
 {
   "summary": "测试。",
   "segments": [
@@ -84,7 +84,7 @@ class TestParseLLMResponse:
     }
   ]
 }
-```'''
+```"""
         result = _parse_llm_response(raw)
         assert len(result.segments) == 1
         assert "trap theory" in result.segments[0].summary_en

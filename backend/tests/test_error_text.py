@@ -3,6 +3,7 @@
 WHY: a blank Task.error_message renders in the UI as a generic "network error",
 which is what hid a real LLM ReadTimeout behind a misleading 小宇宙/网络 story.
 """
+
 import httpx
 import pytest
 
@@ -13,12 +14,15 @@ def _req() -> httpx.Request:
     return httpx.Request("POST", "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions")
 
 
-@pytest.mark.parametrize("exc", [
-    httpx.ReadTimeout("", request=_req()),
-    httpx.ConnectTimeout("", request=_req()),
-    httpx.ConnectError("", request=_req()),
-    httpx.RemoteProtocolError("", request=_req()),
-])
+@pytest.mark.parametrize(
+    "exc",
+    [
+        httpx.ReadTimeout("", request=_req()),
+        httpx.ConnectTimeout("", request=_req()),
+        httpx.ConnectError("", request=_req()),
+        httpx.RemoteProtocolError("", request=_req()),
+    ],
+)
 def test_blank_httpx_errors_get_readable_text(exc):
     assert str(exc) == ""
     msg = describe_error(exc)
@@ -32,7 +36,9 @@ def test_read_timeout_points_at_the_timeout_knob():
 
 
 def test_http_status_error_includes_status_and_body():
-    resp = httpx.Response(429, text='{"error":{"code":"1308","message":"已达到 5 小时的使用上限。"}}', request=_req())
+    resp = httpx.Response(
+        429, text='{"error":{"code":"1308","message":"已达到 5 小时的使用上限。"}}', request=_req()
+    )
     msg = describe_error(httpx.HTTPStatusError("", request=_req(), response=resp))
     assert "429" in msg
     assert "5 小时的使用上限" in msg
