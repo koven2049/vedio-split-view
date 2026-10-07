@@ -307,6 +307,24 @@ _ensure_podman_network() {
     "$PODMAN_CMD" network exists "$NETWORK_NAME" 2>/dev/null || "$PODMAN_CMD" network create "$NETWORK_NAME" >/dev/null
 }
 
+# Backend 固定 IP：frontend 的 nginx 在启动时把 proxy_pass 的主机名解析成 IP 后不再重查，
+# backend 单独重启（崩溃自动拉起）会换 IP，nginx 就永远 502。钉在同一子网的 .2 上，
+# 重启多少次 IP 都不变；解析失败则退回默认行为。
+backend_fixed_ip() {
+    local subnet
+    subnet="$("$PODMAN_CMD" network inspect "$NETWORK_NAME" --format '{{(index .Subnets 0).Subnet}}' 2>/dev/null | head -1)"
+    local ip
+    ip="$(echo "$subnet" | awk -F'/' '{n=split($1,a,"."); print a[1]"."a[2]"."a[3]".2"}')"
+    [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.2$ ]] || ip=""
+    echo "$ip"
+}
+
+# shellcheck disable=SC2046 # 空结果应展开为零个参数
+ip_opt() {
+    local ip; ip="$(backend_fixed_ip)"
+    [[ -n "$ip" ]] && echo "--ip $ip" || true
+}
+
 _ensure_images_exist() {
     ensure_podman
     local missing=()
@@ -364,6 +382,7 @@ run_start() {
         --name "$BACKEND_CONTAINER" \
         --network "$NETWORK_NAME" \
         --network-alias backend \
+        $(ip_opt) \
         -p "$APP_PORT:8080" \
         -v "$SCRIPT_DIR/config:/app/config:ro" \
         -v "$SCRIPT_DIR/data:/app/data" \
