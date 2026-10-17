@@ -253,17 +253,21 @@ async def format_dialogue(
     uploader: str,
     title: str,
     duration_seconds: int,
-) -> dict:
+) -> tuple[dict, dict]:
     """Format a subtitle stream into the stored dialogue structure.
 
-    Returns ``{"speakers": [...], "blocks": [...], "sections": [...],
-    "fallback": bool}`` where blocks carry subtitle index ranges (``f``..``t``
-    inclusive) — never rendered text. Any LLM/validation failure degrades to
-    the deterministic single-speaker fallback; this function never raises.
+    Returns ``(dialogue, usage)`` where dialogue is ``{"speakers": [...],
+    "blocks": [...], "sections": [...], "fallback": bool}`` with blocks
+    carrying subtitle index ranges (``f``..``t`` inclusive) — never rendered
+    text — and usage is ``{"llm_model", "llm_prompt_tokens",
+    "llm_completion_tokens", "llm_total_tokens"}`` for caller-side cost
+    accounting (all zeros on the fallback path). Any LLM/validation failure
+    degrades to the deterministic single-speaker fallback; this function
+    never raises.
     """
     n = len(subtitles)
     if n == 0:
-        return {"speakers": [], "blocks": [], "sections": [], "fallback": True}
+        return {"speakers": [], "blocks": [], "sections": [], "fallback": True}, {}
 
     settings = get_settings()
     prompt = _build_prompt(
@@ -289,7 +293,7 @@ async def format_dialogue(
     except Exception as primary_err:  # noqa: BLE001 — any failure must fall back
         if not settings.llm_backup.enabled:
             await _log_dialogue_call("primary", settings.llm.model, "error", str(primary_err), t0)
-            return _fallback_dialogue(subtitles)
+            return _fallback_dialogue(subtitles), {}
         logger.warning(
             "[dialogue] primary failed (%s), switching to backup (%s)",
             str(primary_err)[:80],
@@ -309,12 +313,16 @@ async def format_dialogue(
             await _log_dialogue_call(
                 "backup", settings.llm_backup.model, "error", str(backup_err), t0
             )
-            return _fallback_dialogue(subtitles)
+            return _fallback_dialogue(subtitles), {}
 
-    content = result["choices"][0]["message"]["content"]
-    usage = result.get("usage", {})
+    usage: dict = {}
     llm_model = settings.llm.model if provider == "primary" else settings.llm_backup.model
     try:
+        # A gateway can answer 200 with a body that has no usable "choices"
+        # shape (wrapped error, content filter) — extraction must stay inside
+        # the guard so format_dialogue keeps its never-raises contract.
+        content = result["choices"][0]["message"]["content"]
+        usage = result.get("usage") or {}
         speakers, blocks, sections = _validate_blocks(_parse_llm_response(content), n)
     except Exception as parse_err:  # noqa: BLE001 — any failure must fall back
         logger.warning("[dialogue] LLM output invalid (%s), falling back", str(parse_err)[:120])
@@ -328,8 +336,14 @@ async def format_dialogue(
             completion_tokens=usage.get("completion_tokens", 0),
             total_tokens=usage.get("total_tokens", 0),
         )
-        return _fallback_dialogue(subtitles)
+        return _fallback_dialogue(subtitles), {}
 
+    usage_payload = {
+        "llm_model": llm_model,
+        "llm_prompt_tokens": int(usage.get("prompt_tokens") or 0),
+        "llm_completion_tokens": int(usage.get("completion_tokens") or 0),
+        "llm_total_tokens": int(usage.get("total_tokens") or 0),
+    }
     await _log_dialogue_call(
         provider,
         llm_model,
@@ -343,7 +357,10 @@ async def format_dialogue(
     logger.info(
         "[dialogue] formatted %d lines into %d blocks, %d speakers", n, len(blocks), len(speakers)
     )
-    return {"speakers": speakers, "blocks": blocks, "sections": sections, "fallback": False}
+    return (
+        {"speakers": speakers, "blocks": blocks, "sections": sections, "fallback": False},
+        usage_payload,
+    )
 
 
 async def _log_dialogue_call(

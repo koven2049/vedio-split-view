@@ -83,7 +83,7 @@ def _mock_llm(monkeypatch, payload_or_exc, calls: list | None = None) -> None:
 async def test_format_dialogue_llm_ok(monkeypatch, _config):
     _mock_llm(monkeypatch, _VALID_PAYLOAD)
     subs = _ten_subs()
-    result = await format_dialogue(
+    result, usage = await format_dialogue(
         subs,
         platform="xiaoyuzhou",
         uploader="某播客",
@@ -94,11 +94,31 @@ async def test_format_dialogue_llm_ok(monkeypatch, _config):
     assert result["speakers"] == _SPEAKERS
     assert result["blocks"] == _VALID_PAYLOAD["blocks"]
     assert result["sections"] == [{"i": 0, "title": "开场"}, {"i": 1, "title": "嘉宾分享"}]
+    # LLM usage is surfaced for caller-side cost accounting (mock: 10/20/30).
+    assert usage["llm_prompt_tokens"] == 10
+    assert usage["llm_completion_tokens"] == 20
+    assert usage["llm_total_tokens"] == 30
+    assert usage["llm_model"]
+
+
+@pytest.mark.asyncio
+async def test_fallback_on_malformed_llm_body(monkeypatch, _config):
+    """Gateway 200 with no usable "choices" shape must degrade, never raise."""
+
+    async def _fake_post_chat(url, payload, headers, timeout):
+        return {"error": "wrapped failure"}  # 200 body without choices
+
+    monkeypatch.setattr(dialogue_mod, "post_chat", _fake_post_chat)
+    result, usage = await format_dialogue(
+        _ten_subs(), platform="youtube", uploader="u", title="t", duration_seconds=60
+    )
+    assert result["fallback"] is True
+    assert usage == {}
 
 
 @pytest.mark.asyncio
 async def test_format_dialogue_empty_subtitles():
-    result = await format_dialogue(
+    result, usage = await format_dialogue(
         [],
         platform="youtube",
         uploader="u",
@@ -106,13 +126,16 @@ async def test_format_dialogue_empty_subtitles():
         duration_seconds=0,
     )
     assert result == {"speakers": [], "blocks": [], "sections": [], "fallback": True}
+    assert usage == {}
 
 
 # ─── format_dialogue: validation fallbacks ───
 
 
-def _assert_fallback(result: dict, subs: list[SubtitleEntry]) -> None:
+def _assert_fallback(result_and_usage: tuple[dict, dict], subs: list[SubtitleEntry]) -> None:
+    result, usage = result_and_usage
     assert result["fallback"] is True
+    assert usage == {}  # fallback path carries no LLM usage
     assert result["speakers"] == [{"id": "A", "name": "讲述者", "role": ""}]
     # Fallback blocks must still cover every index exactly once.
     covered = [i for b in result["blocks"] for i in range(b["f"], b["t"] + 1)]
@@ -187,7 +210,7 @@ async def test_fallback_cuts_paragraphs_by_punctuation(monkeypatch, _config):
     _mock_llm(monkeypatch, RuntimeError("boom"))
     # Two sentence-final marks per paragraph → block per 2 subtitle lines.
     subs = _subs(["第一句。", "第二句！", "第三句？", "第四句。", "第五句？", "没有标点"])
-    result = await format_dialogue(
+    result, _usage = await format_dialogue(
         subs,
         platform="youtube",
         uploader="u",
@@ -291,6 +314,7 @@ async def _create_video_with_subs(
     *,
     dialogue: dict | None = None,
     takeaways: list | None = None,
+    uploader: str = "测试播客",
 ) -> Video:
     video = Video(
         user_id=user_id,
@@ -301,6 +325,7 @@ async def _create_video_with_subs(
         thumbnail_url="",
         duration_seconds=60,
         summary="s",
+        uploader=uploader,
         raw_transcript="...",
         subtitle_json=json.dumps(
             [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles],
@@ -373,6 +398,12 @@ async def test_post_dialogue_generates_and_get_returns(client, db_session, monke
     # Stored in DB and surfaced on the video detail.
     await db_session.refresh(video)
     assert video.dialogue_json
+    # Dialogue tokens are folded into the video's usage accounting (mock: 10/20/30).
+    usage_data = json.loads(video.usage_json)
+    assert usage_data["llm_prompt_tokens"] == 10
+    assert usage_data["llm_completion_tokens"] == 20
+    assert usage_data["llm_total_tokens"] == 30
+    assert usage_data["llm_model"]
     detail = await client.get(f"/api/videos/{video.id}", headers=headers)
     assert detail.json()["has_dialogue"] is True
 
@@ -463,4 +494,5 @@ async def test_video_detail_returns_takeaways_and_intro(client, db_session):
     data = resp.json()
     assert json.loads(data["takeaways_json"]) == takeaways
     assert data["show_intro"] == "一期关于测试的节目。"
+    assert data["uploader"] == "测试播客"
     assert data["has_dialogue"] is False

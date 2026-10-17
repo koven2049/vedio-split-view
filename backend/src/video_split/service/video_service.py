@@ -144,6 +144,24 @@ async def accumulate_usage(db: AsyncSession, user_id: int, usage_data: dict) -> 
     await db.commit()
 
 
+def merge_llm_usage(video: Video, usage: dict) -> None:
+    """Fold an extra LLM call's tokens (e.g. dialogue formatting) into video.usage_json.
+
+    Keeps the per-video summary shape that GET /videos/usage-summary
+    aggregates: tokens stack on top of the analysis call; llm_model keeps
+    whichever writer set it first.
+    """
+    try:
+        data = json.loads(video.usage_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    if not data.get("llm_model") and usage.get("llm_model"):
+        data["llm_model"] = usage["llm_model"]
+    for key in ("llm_prompt_tokens", "llm_completion_tokens", "llm_total_tokens"):
+        data[key] = int(data.get(key) or 0) + int(usage.get(key) or 0)
+    video.usage_json = json.dumps(data, ensure_ascii=False)
+
+
 def _reconcile_duration(
     meta: "VideoMeta", subtitles: list[SubtitleEntry], task_id: int | None = None
 ) -> int:
@@ -238,12 +256,15 @@ async def _generate_dialogue_for_video(
     already (this helper commits the dialogue update itself).
     """
     try:
-        dialogue = await format_dialogue(
+        dialogue, usage = await format_dialogue(
             subtitles,
             platform=meta.platform, uploader=meta.uploader,
             title=meta.title, duration_seconds=meta.duration_seconds,
         )
         video.dialogue_json = json.dumps(dialogue, ensure_ascii=False)
+        if int(usage.get("llm_total_tokens") or 0):
+            merge_llm_usage(video, usage)
+            await accumulate_usage(db, video.user_id, usage)
         await db.commit()
         logger.info(
             "[dialogue] Task saved video_id=%d (%s layout, %d blocks)",

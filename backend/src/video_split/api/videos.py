@@ -24,6 +24,7 @@ from video_split.schemas import (
 from video_split.service.data_sync import EXPORTS_DIR, _export_filename
 from video_split.service.dialogue import derive_dialogue_view, format_dialogue
 from video_split.service.downloader import SubtitleEntry
+from video_split.service.video_service import accumulate_usage, merge_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ def _video_to_out(v: Video) -> VideoOut:
     return VideoOut(
         id=v.id, url=v.url, platform=v.platform, video_id=v.video_id,
         title=v.title, thumbnail_url=v.thumbnail_url, upload_date=v.upload_date,
+        uploader=v.uploader,
         duration_seconds=v.duration_seconds, summary=v.summary, summary_en=v.summary_en,
         essence=v.essence,
         usage_json=v.usage_json,
@@ -398,12 +400,15 @@ async def generate_dialogue(
 
     logger.info("[dialogue] generating for video_id=%d (force=%s, %d subtitles)",
                 video.id, force, len(subtitles))
-    stored = await format_dialogue(
+    stored, usage = await format_dialogue(
         subtitles,
         platform=video.platform, uploader=video.uploader,
         title=video.title, duration_seconds=video.duration_seconds,
     )
     video.dialogue_json = json.dumps(stored, ensure_ascii=False)
+    if int(usage.get("llm_total_tokens") or 0):
+        merge_llm_usage(video, usage)
+        await accumulate_usage(db, video.user_id, usage)
     await db.commit()
     view = derive_dialogue_view(stored, subtitles)
     return DialogueOut(video_id=video.id, **view)
