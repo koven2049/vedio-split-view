@@ -13,9 +13,11 @@ import {
   ChevronUp,
   Loader2,
   Download,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
-import { useState } from 'react';
-import { api } from '../lib/api';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { api, ApiError } from '../lib/api';
 import {
   formatDuration,
   formatTimeRange,
@@ -24,10 +26,14 @@ import {
   cn,
 } from '../lib/utils';
 import {
-  buildMarkdown,
   buildEssenceMarkdown,
   downloadMarkdown,
   safeFilename,
+  pickExportMarkdown,
+  formatDialogueTimestamp,
+  parseBoldSegments,
+  parseTakeaways,
+  type DialogueOut,
 } from '../lib/exportMarkdown';
 import LangToggle from '../components/LangToggle';
 import MindmapView from '../components/MindmapView';
@@ -66,11 +72,15 @@ interface VideoDetail {
   title: string;
   thumbnail_url: string;
   upload_date: string;
+  uploader: string;
   duration_seconds: number;
   summary: string;
   summary_en: string;
   essence: string;
   usage_json: string;
+  takeaways_json: string;
+  show_intro: string;
+  has_dialogue: boolean;
   is_public: boolean;
   segments: SegmentInfo[];
   tags: TagInfo[];
@@ -205,6 +215,154 @@ function SegmentCard({
   );
 }
 
+/** Render `plain **bold** plain` as rich text (no dangerouslySetInnerHTML). */
+function BoldText({ text }: { text: string }) {
+  return (
+    <>
+      {parseBoldSegments(text).map((seg, i) =>
+        seg.bold ? <strong key={i}>{seg.text}</strong> : <span key={i}>{seg.text}</span>,
+      )}
+    </>
+  );
+}
+
+function DialogueView({ video, isViewer }: { video: VideoDetail; isViewer: boolean }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const generateRequestedRef = useRef(false);
+
+  const dialogueQuery = useQuery({
+    queryKey: ['dialogue', video.id],
+    queryFn: () => api.get<DialogueOut>(`/videos/${video.id}/dialogue`),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: () => api.post<DialogueOut>(`/videos/${video.id}/dialogue?force=false`),
+    onSuccess: (data) => queryClient.setQueryData(['dialogue', video.id], data),
+  });
+
+  const notGenerated =
+    dialogueQuery.isError &&
+    dialogueQuery.error instanceof ApiError &&
+    dialogueQuery.error.status === 404;
+
+  // First visit + server has nothing yet + allowed to → kick off generation once.
+  useEffect(() => {
+    if (notGenerated && !isViewer && !generateRequestedRef.current) {
+      generateRequestedRef.current = true;
+      generateMutation.mutate();
+    }
+  }, [notGenerated, isViewer, generateMutation]);
+
+  if (dialogueQuery.isLoading) {
+    return <div className="flex justify-center py-20 opacity-50">{t('common.loading')}</div>;
+  }
+
+  if (generateMutation.isPending) {
+    return (
+      <div
+        className="flex items-center justify-center gap-2 py-16 text-sm"
+        style={{ color: 'var(--color-text-secondary)' }}
+      >
+        <Loader2 size={16} className="animate-spin" /> {t('detail.dialogueGenerating')}
+      </div>
+    );
+  }
+
+  if (notGenerated && isViewer) {
+    return (
+      <div
+        className="flex items-center justify-center gap-2 py-16 text-sm"
+        style={{ color: 'var(--color-text-secondary)' }}
+      >
+        <Lock size={16} /> {t('detail.dialogueNoPermission')}
+      </div>
+    );
+  }
+
+  if (generateMutation.isError || dialogueQuery.isError) {
+    const err = generateMutation.isError ? generateMutation.error : dialogueQuery.error;
+    return (
+      <div className="flex flex-col items-center gap-3 py-16">
+        <p className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-danger)' }}>
+          <AlertCircle size={16} /> {t('detail.dialogueGenerateFailed')}
+        </p>
+        {err instanceof Error && err.message && <p className="text-xs opacity-60">{err.message}</p>}
+        <button
+          type="button"
+          onClick={() =>
+            generateMutation.isError ? generateMutation.mutate() : dialogueQuery.refetch()
+          }
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+          style={{ border: '1px solid var(--color-border)' }}
+        >
+          <RefreshCw size={13} /> {t('analyze.retry')}
+        </button>
+      </div>
+    );
+  }
+
+  const dialogue = dialogueQuery.data;
+  if (!dialogue) return null;
+
+  const sectionByIndex = new Map<number, string>();
+  for (const sec of dialogue.sections) sectionByIndex.set(sec.index, sec.title);
+
+  return (
+    <div className="max-w-3xl">
+      {dialogue.blocks.map((block) => {
+        const sectionTitle = sectionByIndex.get(block.index);
+        // single-speaker content timestamps every block instead of names
+        const showTurn = block.new_turn || dialogue.single_speaker;
+        const playbackUrl = generatePlaybackUrl(video.platform, video.video_id, block.start);
+        return (
+          <Fragment key={block.index}>
+            {sectionTitle !== undefined && (
+              <h3 className="pt-6 pb-1 text-base font-semibold">{sectionTitle}</h3>
+            )}
+            {showTurn ? (
+              <p className="py-1.5 text-sm leading-relaxed">
+                {playbackUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => window.open(playbackUrl, '_blank', 'noopener noreferrer')}
+                    className="font-mono tabular-nums mr-2 rounded px-1.5 py-0.5 text-xs hover:opacity-80"
+                    style={{
+                      background: 'var(--color-bg-tertiary)',
+                      color: 'var(--color-primary)',
+                    }}
+                    title={t('detail.playFromHere')}
+                  >
+                    {formatDialogueTimestamp(block.start)}
+                  </button>
+                ) : (
+                  <span
+                    className="inline-block font-mono tabular-nums mr-2 text-xs align-middle"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    {formatDialogueTimestamp(block.start)}
+                  </span>
+                )}
+                {!dialogue.single_speaker && <strong className="mr-1.5">{block.speaker}：</strong>}
+                {block.text}
+              </p>
+            ) : (
+              <p
+                className="py-1.5 text-sm leading-relaxed"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                {block.text}
+              </p>
+            )}
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function VideoDetailPage() {
   const t = useT();
   const { id } = useParams();
@@ -212,7 +370,7 @@ export default function VideoDetailPage() {
   const queryClient = useQueryClient();
   const [newTag, setNewTag] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
-  const [activeView, setActiveView] = useState<'segments' | 'mindmap'>('segments');
+  const [activeView, setActiveView] = useState<'segments' | 'dialogue' | 'mindmap'>('segments');
   const isViewer = useAuthStore((s) => s.isViewer)();
   const { lang, setLang } = useLangPreference();
   const [exporting, setExporting] = useState(false);
@@ -256,15 +414,29 @@ export default function VideoDetailPage() {
     if (!video || exporting) return;
     setExporting(true);
     try {
-      let subs: SubtitleEntry[] = [];
+      // Prefer the dialogue format; never POST-generate during export (costly).
+      let dialogue: DialogueOut | undefined;
       try {
-        subs = await api.get<SubtitleEntry[]>(
-          `/videos/${video.id}/subtitles?start=0&end=${video.duration_seconds + 1}`,
-        );
+        dialogue = await queryClient.fetchQuery({
+          queryKey: ['dialogue', video.id],
+          queryFn: () => api.get<DialogueOut>(`/videos/${video.id}/dialogue`),
+          staleTime: 5 * 60 * 1000,
+        });
       } catch {
-        /* transcript optional — export summary + segments anyway */
+        /* not generated (404) or unavailable — fall back to the per-line export */
       }
-      downloadMarkdown(safeFilename(video.title), buildMarkdown(video, subs, lang));
+
+      let subs: SubtitleEntry[] = [];
+      if (!dialogue?.blocks?.length) {
+        try {
+          subs = await api.get<SubtitleEntry[]>(
+            `/videos/${video.id}/subtitles?start=0&end=${video.duration_seconds + 1}`,
+          );
+        } catch {
+          /* transcript optional — export summary + segments anyway */
+        }
+      }
+      downloadMarkdown(safeFilename(video.title), pickExportMarkdown(video, dialogue, subs, lang));
     } finally {
       setExporting(false);
     }
@@ -459,6 +631,40 @@ export default function VideoDetailPage() {
           {lang === 'en' && video.summary_en ? video.summary_en : video.summary}
         </p>
         {(() => {
+          const takeaways = parseTakeaways(video.takeaways_json);
+          if (!takeaways.length) return null;
+          return (
+            <div
+              className="mt-3 pt-3 space-y-2"
+              style={{ borderTop: '1px solid var(--color-border)' }}
+            >
+              <h3 className="text-sm font-semibold">{t('detail.takeaways')}</h3>
+              <ul className="space-y-2">
+                {takeaways.map((tk, i) => (
+                  <li
+                    key={i}
+                    className="flex gap-2 text-sm leading-relaxed"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    <span style={{ color: 'var(--color-primary)' }}>•</span>
+                    <span>
+                      <BoldText
+                        text={[
+                          tk.title ? `**${tk.title}：**` : '',
+                          tk.body,
+                          tk.highlight ? `**${tk.highlight}**` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
+        {(() => {
           let usage: UsageInfo | undefined;
           if (video.usage_json) {
             try {
@@ -509,42 +715,39 @@ export default function VideoDetailPage() {
         </div>
       )}
 
-      {/* Segments / Mind map */}
+      {/* Segments / Dialogue / Mind map */}
       <div>
         <div
           className="flex gap-1 p-1 rounded-lg w-fit mb-4"
           style={{ background: 'var(--color-bg-tertiary)' }}
         >
-          <button
-            type="button"
-            onClick={() => setActiveView('segments')}
-            className={cn(
-              'px-4 py-2 rounded-md text-sm font-medium transition-colors',
-              activeView === 'segments' ? 'shadow-sm' : 'opacity-60 hover:opacity-100',
-            )}
-            style={
-              activeView === 'segments'
-                ? { background: 'var(--color-bg)', color: 'var(--color-primary)' }
-                : {}
-            }
-          >
-            {t('detail.segmentsCount', { count: video.segments.length })}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveView('mindmap')}
-            className={cn(
-              'px-4 py-2 rounded-md text-sm font-medium transition-colors',
-              activeView === 'mindmap' ? 'shadow-sm' : 'opacity-60 hover:opacity-100',
-            )}
-            style={
-              activeView === 'mindmap'
-                ? { background: 'var(--color-bg)', color: 'var(--color-primary)' }
-                : {}
-            }
-          >
-            {t('detail.mindMap')}
-          </button>
+          {(
+            [
+              {
+                key: 'segments',
+                label: t('detail.segmentsCount', { count: video.segments.length }),
+              },
+              { key: 'dialogue', label: t('detail.dialogue') },
+              { key: 'mindmap', label: t('detail.mindMap') },
+            ] as const
+          ).map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setActiveView(key)}
+              className={cn(
+                'px-4 py-2 rounded-md text-sm font-medium transition-colors',
+                activeView === key ? 'shadow-sm' : 'opacity-60 hover:opacity-100',
+              )}
+              style={
+                activeView === key
+                  ? { background: 'var(--color-bg)', color: 'var(--color-primary)' }
+                  : {}
+              }
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {activeView === 'segments' ? (
@@ -560,6 +763,8 @@ export default function VideoDetailPage() {
               />
             ))}
           </div>
+        ) : activeView === 'dialogue' ? (
+          <DialogueView video={video} isViewer={isViewer} />
         ) : (
           <MindmapView videoId={video.id} platform={video.platform} videoVideoId={video.video_id} />
         )}

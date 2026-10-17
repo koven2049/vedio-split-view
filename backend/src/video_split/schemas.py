@@ -162,12 +162,16 @@ class VideoOut(BaseModel):
     title: str
     thumbnail_url: str
     upload_date: str = ""
+    uploader: str = ""
     duration_seconds: int
     summary: str
     summary_en: str = ""
     essence: str = ""
     usage_json: str = ""
     mindmap_json: str = ""
+    takeaways_json: str = ""
+    show_intro: str = ""
+    has_dialogue: bool = False
     is_public: bool
     created_at: datetime
     updated_at: datetime
@@ -176,6 +180,35 @@ class VideoOut(BaseModel):
     owner_name: str = ""
 
     model_config = {"from_attributes": True}
+
+
+class DialogueSpeakerOut(BaseModel):
+    id: str
+    name: str = ""
+    role: str = ""
+
+
+class DialogueBlockOut(BaseModel):
+    index: int = Field(description="Position in the blocks array (sections reference this).")
+    speaker_id: str
+    speaker: str
+    start: float = Field(description="Start seconds of the turn's first subtitle line.")
+    text: str = Field(description="Paragraph text, joined deterministically from subtitles f..t.")
+    new_turn: bool = Field(description="True when this block starts a new speaking turn.")
+
+
+class DialogueSectionOut(BaseModel):
+    index: int = Field(description="Block index the section title attaches to.")
+    title: str
+
+
+class DialogueOut(BaseModel):
+    video_id: int
+    single_speaker: bool
+    fallback: bool
+    speakers: list[DialogueSpeakerOut] = []
+    blocks: list[DialogueBlockOut] = []
+    sections: list[DialogueSectionOut] = []
 
 
 class TranscriptOut(BaseModel):

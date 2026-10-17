@@ -4,15 +4,26 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from video_split.database import get_db
 from video_split.dependencies import get_current_user, require_admin, require_authenticated
 from video_split.models import Tag, User, Video, video_tags
-from video_split.schemas import VideoListOut, VideoOut, VideoUpdate, TagOut, TranscriptOut, TranscriptSegment, LLMLogOut
+from video_split.schemas import (
+    DialogueOut,
+    LLMLogOut,
+    TagOut,
+    TranscriptOut,
+    TranscriptSegment,
+    VideoListOut,
+    VideoOut,
+    VideoUpdate,
+)
 from video_split.service.data_sync import EXPORTS_DIR, _export_filename
+from video_split.service.dialogue import derive_dialogue_view, format_dialogue
+from video_split.service.downloader import SubtitleEntry
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +49,9 @@ def _video_to_out(v: Video) -> VideoOut:
         essence=v.essence,
         usage_json=v.usage_json,
         mindmap_json=v.mindmap_json,
+        takeaways_json=v.takeaways_json,
+        show_intro=v.show_intro,
+        has_dialogue=bool(v.dialogue_json),
         is_public=v.is_public, created_at=v.created_at, updated_at=v.updated_at,
         segments=[SegmentOut.model_validate(s) for s in v.segments],
         tags=[TagOut.model_validate(t) for t in v.tags],
@@ -313,3 +327,83 @@ async def get_transcript(
         video_id=video.id, title=video.title,
         transcript=transcript, char_count=len(transcript),
     )
+
+
+def _parse_stored_subtitles(video: Video) -> list[SubtitleEntry] | None:
+    """Parse subtitle_json into SubtitleEntry list; None when absent/unreadable."""
+    if not video.subtitle_json:
+        return None
+    try:
+        entries = json.loads(video.subtitle_json)
+        if not isinstance(entries, list) or not entries:
+            return None
+        return [
+            SubtitleEntry(start=e["start"], duration=e["duration"], text=e["text"])
+            for e in entries
+        ]
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return None
+
+
+@router.get("/{video_id}/dialogue", response_model=DialogueOut)
+async def get_dialogue(
+    video_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the dialogue-formatted transcript (speaker-labeled paragraphs).
+
+    Paragraph text and turn start times are re-derived from the stored
+    subtitle entries, so timestamps appear only at the start of each speaking
+    turn. Returns 404 when dialogue has not been generated yet.
+    """
+    video = await _get_accessible_video(db, video_id, user)
+    subtitles = _parse_stored_subtitles(video)
+    if not video.dialogue_json or subtitles is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "dialogue not generated; POST to generate"
+        )
+    view = derive_dialogue_view(json.loads(video.dialogue_json), subtitles)
+    return DialogueOut(video_id=video.id, **view)
+
+
+@router.post("/{video_id}/dialogue", response_model=DialogueOut)
+async def generate_dialogue(
+    video_id: int,
+    force: bool = Query(False, description="Regenerate even if dialogue already exists"),
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate (or with force=true, regenerate) the dialogue-formatted transcript.
+
+    Runs LLM speaker/turn detection over the stored subtitles and saves the
+    index-only layout to the video; the response is the rendered view.
+    """
+    result = await db.execute(
+        select(Video).where(Video.id == video_id, Video.user_id == user.id)
+    )
+    video = result.scalar_one_or_none()
+    if video is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
+
+    subtitles = _parse_stored_subtitles(video)
+    if subtitles is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "No subtitles stored for this video"
+        )
+
+    if video.dialogue_json and not force:
+        view = derive_dialogue_view(json.loads(video.dialogue_json), subtitles)
+        return DialogueOut(video_id=video.id, **view)
+
+    logger.info("[dialogue] generating for video_id=%d (force=%s, %d subtitles)",
+                video.id, force, len(subtitles))
+    stored = await format_dialogue(
+        subtitles,
+        platform=video.platform, uploader=video.uploader,
+        title=video.title, duration_seconds=video.duration_seconds,
+    )
+    video.dialogue_json = json.dumps(stored, ensure_ascii=False)
+    await db.commit()
+    view = derive_dialogue_view(stored, subtitles)
+    return DialogueOut(video_id=video.id, **view)

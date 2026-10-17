@@ -59,6 +59,7 @@ class Video(Base):
     title: Mapped[str] = mapped_column(String(512), default="")
     thumbnail_url: Mapped[str] = mapped_column(String(1024), default="")
     upload_date: Mapped[str] = mapped_column(String(16), default="")
+    uploader: Mapped[str] = mapped_column(String(256), default="")
     duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str] = mapped_column(Text, default="")
     summary_en: Mapped[str] = mapped_column(Text, default="")
@@ -67,6 +68,12 @@ class Video(Base):
     subtitle_json: Mapped[str] = mapped_column(Text, default="")
     usage_json: Mapped[str] = mapped_column(Text, default="")
     mindmap_json: Mapped[str] = mapped_column(Text, default="")
+    # Raw dialogue-formatting result: {speakers, blocks, sections, fallback}
+    # (blocks carry subtitle index ranges, never rendered text — the API
+    # re-renders paragraphs from subtitle_json deterministically).
+    dialogue_json: Mapped[str] = mapped_column(Text, default="")
+    takeaways_json: Mapped[str] = mapped_column(Text, default="")
+    show_intro: Mapped[str] = mapped_column(Text, default="")
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

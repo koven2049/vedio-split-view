@@ -39,6 +39,7 @@ const en: Record<TranslationKey, string> = {
   'analyze.audioDownload': 'Audio Download',
   'analyze.transcription': 'Transcription',
   'analyze.aiAnalysis': 'AI Analysis',
+  'analyze.dialogueStage': 'Formatting dialogue',
   'analyze.done': 'Done',
   'analyze.usingSubtitles': '📝 Using subtitles (fast, free)',
   'analyze.usingWhisper': '🎤 Using Whisper transcription (slower, costs API credits)',
@@ -145,6 +146,24 @@ const en: Record<TranslationKey, string> = {
   'detail.generated': 'Generated',
   'detail.segmentsCount': 'Segments ({count})',
   'detail.confirmDeleteVideo': 'Delete this video?',
+  'detail.dialogue': 'Dialogue',
+  'detail.dialogueGenerating': 'Formatting dialogue (identifying speakers)…',
+  'detail.dialogueGenerateFailed': 'Failed to generate the dialogue',
+  'detail.dialogueNoPermission':
+    'The dialogue has not been generated and your account cannot generate it.',
+  'detail.takeaways': 'Key Takeaways',
+
+  // Markdown export sections (also reused by the dialogue tab)
+  'export.compiledFrom': 'Compiled from {source} ·',
+  'export.compiledWithName': '{name} ({platform})',
+  'export.publishedOn': 'published {date}',
+  'export.durationIs': '· duration {duration}',
+  'export.sourceLink': 'Source: {url}',
+  'export.showIntro': 'Show Intro',
+  'export.speakers': 'Speakers',
+  'export.toc': 'Contents',
+  'export.dialogue': 'Dialogue Transcript',
+  'export.footer': 'Auto-compiled by VideoSplit · generated on {date}',
 
   // Mind Map
   'mindmap.loading': 'Loading mind map…',

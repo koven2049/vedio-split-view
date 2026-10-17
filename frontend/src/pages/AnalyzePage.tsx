@@ -71,6 +71,7 @@ const STAGE_LABELS_KEYS: Record<string, TranslationKey> = {
   audio_download: 'analyze.audioDownload',
   transcription: 'analyze.transcription',
   analysis: 'analyze.aiAnalysis',
+  dialogue: 'analyze.dialogueStage',
   complete: 'analyze.done',
 };
 

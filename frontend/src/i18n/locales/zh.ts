@@ -37,6 +37,7 @@ const zh = {
   'analyze.audioDownload': '音频下载',
   'analyze.transcription': '转录',
   'analyze.aiAnalysis': 'AI 分析',
+  'analyze.dialogueStage': '整理对话稿',
   'analyze.done': '完成',
   'analyze.usingSubtitles': '📝 使用字幕（快速、免费）',
   'analyze.usingWhisper': '🎤 使用 Whisper 转录（较慢，消耗 API 额度）',
@@ -139,6 +140,23 @@ const zh = {
   'detail.generated': '生成于',
   'detail.segmentsCount': '片段（{count}）',
   'detail.confirmDeleteVideo': '确定删除该视频？',
+  'detail.dialogue': '对话稿',
+  'detail.dialogueGenerating': '正在整理对话稿（识别说话人）…',
+  'detail.dialogueGenerateFailed': '对话稿生成失败',
+  'detail.dialogueNoPermission': '对话稿尚未生成，当前账号无权限生成。',
+  'detail.takeaways': '内容提要',
+
+  // Markdown export sections (also reused by the dialogue tab)
+  'export.compiledFrom': '整理自 {source}·',
+  'export.compiledWithName': '{name}（{platform}）',
+  'export.publishedOn': '发布于 {date}',
+  'export.durationIs': '· 时长 {duration}',
+  'export.sourceLink': '原始链接：{url}',
+  'export.showIntro': '节目简介',
+  'export.speakers': '出场人物',
+  'export.toc': '目录',
+  'export.dialogue': '对话实录',
+  'export.footer': '由 VideoSplit 自动整理 · 生成于 {date}',
 
   // Mind Map
   'mindmap.loading': '加载脑图中…',

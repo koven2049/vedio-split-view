@@ -1,4 +1,5 @@
 import { formatDuration, formatTimeRange, platformLabel } from './utils';
+import { createT } from '../i18n';
 
 export interface MdSubtitle {
   start: number;
@@ -25,6 +26,41 @@ export interface MdVideo {
   essence: string;
   segments: MdSegment[];
   tags: { name: string }[];
+  /** New dialogue-era VideoOut fields (empty string when absent). */
+  takeaways_json?: string;
+  show_intro?: string;
+  uploader?: string;
+}
+
+export interface DialogueSpeaker {
+  id: string;
+  name: string;
+  role: string;
+}
+export interface DialogueBlock {
+  index: number;
+  speaker_id: string;
+  speaker: string;
+  start: number;
+  text: string;
+  new_turn: boolean;
+}
+export interface DialogueSection {
+  index: number;
+  title: string;
+}
+export interface DialogueOut {
+  video_id: number;
+  single_speaker: boolean;
+  fallback: boolean;
+  speakers: DialogueSpeaker[];
+  blocks: DialogueBlock[];
+  sections: DialogueSection[];
+}
+export interface Takeaway {
+  title: string;
+  body: string;
+  highlight: string;
 }
 
 function pick(zh: string, en: string, lang: 'zh' | 'en') {
@@ -35,6 +71,48 @@ function ts(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** `mm:ss` timestamp used by the dialogue view/export (minutes zero-padded). */
+export function formatDialogueTimestamp(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Parse the `takeaways_json` VideoOut column; malformed/empty input → []. */
+export function parseTakeaways(json: string | undefined | null): Takeaway[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is Takeaway => !!item && typeof item === 'object')
+      .map((item) => ({
+        title: String(item.title ?? ''),
+        body: String(item.body ?? ''),
+        highlight: String(item.highlight ?? ''),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export interface BoldSegment {
+  text: string;
+  bold: boolean;
+}
+
+/** Split `plain **bold** plain` on paired `**` markers for <strong> rendering. */
+export function parseBoldSegments(text: string): BoldSegment[] {
+  const parts = text.split('**');
+  const segments: BoldSegment[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue;
+    // pairs (0,1), (2,3), … are bold; an unpaired trailing part is plain text
+    segments.push({ text: parts[i], bold: i % 2 === 1 });
+  }
+  return segments;
 }
 
 /** Build the full analysis document, one `##` section per part. */
@@ -102,6 +180,118 @@ export function buildMarkdown(video: MdVideo, subtitles: MdSubtitle[], lang: 'zh
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Build the WeChat-article style dialogue document:
+ * takeaways → show intro → speakers → TOC → dialogue transcript.
+ * Section headings reuse the i18n keys so UI and export stay in sync.
+ */
+export function buildDialogueMarkdown(
+  video: MdVideo,
+  dialogue: DialogueOut,
+  lang: 'zh' | 'en',
+): string {
+  const t = createT(lang);
+  const lines: string[] = [];
+
+  lines.push(`# ${video.title}`, '');
+
+  const platform = platformLabel(video.platform);
+  const duration = formatDuration(video.duration_seconds);
+  const source = video.uploader
+    ? t('export.compiledWithName', { name: video.uploader, platform })
+    : platform;
+  const metaParts = [t('export.compiledFrom', { source })];
+  if (video.upload_date) metaParts.push(t('export.publishedOn', { date: video.upload_date }));
+  metaParts.push(t('export.durationIs', { duration }));
+  lines.push(`> ${metaParts.join(' ')}`);
+  lines.push(`> ${t('export.sourceLink', { url: video.url })}`, '');
+
+  // 内容提要 — falls back to a single essence paragraph when takeaways are empty.
+  const takeaways = parseTakeaways(video.takeaways_json);
+  if (takeaways.length) {
+    lines.push(`## ${t('detail.takeaways')}`, '');
+    for (const tk of takeaways) {
+      const bullet = [tk.title ? `**${tk.title}：**` : '', tk.body];
+      if (tk.highlight) bullet.push(`**${tk.highlight}**`);
+      lines.push(`- ${bullet.filter(Boolean).join(' ')}`);
+    }
+    lines.push('');
+  } else if (video.essence) {
+    lines.push(`## ${t('detail.takeaways')}`, '', video.essence, '');
+  }
+
+  // 节目简介 — omitted entirely when empty.
+  if (video.show_intro) {
+    lines.push(`## ${t('export.showIntro')}`, '', video.show_intro, '');
+  }
+
+  // 出场人物 — omitted for single-speaker content or when no speaker carries a name.
+  const namedSpeakers = dialogue.single_speaker ? [] : dialogue.speakers.filter((s) => s.name);
+  if (namedSpeakers.length) {
+    lines.push(`## ${t('export.speakers')}`, '');
+    for (const sp of namedSpeakers) {
+      lines.push(sp.role ? `- **${sp.name}**：${sp.role}` : `- **${sp.name}**`);
+    }
+    lines.push('');
+  }
+
+  // 目录 — time-ranged segments from the analysis.
+  if (video.segments.length) {
+    lines.push(`## ${t('export.toc')}`, '');
+    for (const seg of video.segments) {
+      lines.push(
+        `- \`${formatTimeRange(seg.start_seconds, seg.end_seconds)}\` ${pick(seg.title, seg.title_en, lang)}`,
+      );
+    }
+    lines.push('');
+  }
+
+  // 对话实录 — section headings inserted before their anchor block.
+  lines.push(`## ${t('export.dialogue')}`, '');
+  const sectionByIndex = new Map<number, string>();
+  for (const sec of dialogue.sections) sectionByIndex.set(sec.index, sec.title);
+
+  for (const block of dialogue.blocks) {
+    const sectionTitle = sectionByIndex.get(block.index);
+    if (sectionTitle) {
+      if (lines.length && lines[lines.length - 1] !== '') lines.push('');
+      lines.push(`### ${sectionTitle}`, '');
+    }
+
+    const stamp = `\`[${formatDialogueTimestamp(block.start)}]\``;
+    if (block.new_turn && !dialogue.single_speaker) {
+      lines.push(`${stamp} **${block.speaker}：** ${block.text}`, '');
+    } else {
+      // new turns on single-speaker content keep the timestamp, drop the name;
+      // continuation blocks of the same turn are plain paragraphs.
+      lines.push(block.new_turn ? `${stamp} ${block.text}` : block.text, '');
+    }
+  }
+
+  lines.push('---', '', `_${t('export.footer', { date: todayISO() })}_`, '');
+
+  return lines.join('\n');
+}
+
+function todayISO(): string {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${mm}-${dd}`;
+}
+
+/** Dialogue format when a dialogue exists, else the legacy per-line export. */
+export function pickExportMarkdown(
+  video: MdVideo,
+  dialogue: DialogueOut | undefined | null,
+  subtitles: MdSubtitle[],
+  lang: 'zh' | 'en',
+): string {
+  return dialogue?.blocks?.length
+    ? buildDialogueMarkdown(video, dialogue, lang)
+    : buildMarkdown(video, subtitles, lang);
 }
 
 /** Strip characters that break filenames across OSes. */

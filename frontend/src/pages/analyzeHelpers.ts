@@ -19,6 +19,7 @@ export const STAGES = [
   'audio_download',
   'transcription',
   'analysis',
+  'dialogue',
   'complete',
 ];
 

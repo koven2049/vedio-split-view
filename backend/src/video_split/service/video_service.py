@@ -15,6 +15,7 @@ from video_split.models import BilibiliCredential, Segment, Tag, Task, User, Vid
 from video_split.schemas import ProgressEvent
 from video_split.service.error_text import describe_error
 from video_split.service.analyzer import analyze_transcript
+from video_split.service.dialogue import format_dialogue
 from video_split.service.downloader import (
     MIN_AUDIO_BYTES,
     SubtitleEntry,
@@ -197,10 +198,15 @@ async def _save_analysis_results(
     video = Video(
         user_id=task.user_id, url=meta.url, platform=meta.platform, video_id=meta.video_id,
         title=meta.title, thumbnail_url=meta.thumbnail_url, upload_date=meta.upload_date,
+        uploader=meta.uploader,
         duration_seconds=meta.duration_seconds, summary=analysis.summary, summary_en=analysis.summary_en,
         essence=analysis.essence,
         raw_transcript=transcript_text, subtitle_json=subtitle_data,
         usage_json=json.dumps(usage_data, ensure_ascii=False),
+        takeaways_json=(
+            json.dumps(analysis.takeaways, ensure_ascii=False) if analysis.takeaways else ""
+        ),
+        show_intro=analysis.show_intro,
     )
     db.add(video)
     await db.flush()
@@ -216,6 +222,37 @@ async def _save_analysis_results(
     await db.commit()
     await accumulate_usage(db, task.user_id, usage_data)
     return video, usage_data
+
+
+async def _generate_dialogue_for_video(
+    db: AsyncSession,
+    video: Video,
+    subtitles: list[SubtitleEntry],
+    meta: "VideoMeta",
+) -> None:
+    """Generate and persist the dialogue layout for a freshly saved video.
+
+    Non-fatal by design: any failure is logged and swallowed so the analysis
+    pipeline still completes — dialogue can be back-filled later via
+    POST /api/videos/{id}/dialogue. Callers must have committed the video
+    already (this helper commits the dialogue update itself).
+    """
+    try:
+        dialogue = await format_dialogue(
+            subtitles,
+            platform=meta.platform, uploader=meta.uploader,
+            title=meta.title, duration_seconds=meta.duration_seconds,
+        )
+        video.dialogue_json = json.dumps(dialogue, ensure_ascii=False)
+        await db.commit()
+        logger.info(
+            "[dialogue] Task saved video_id=%d (%s layout, %d blocks)",
+            video.id, "fallback" if dialogue.get("fallback") else "llm",
+            len(dialogue.get("blocks", [])),
+        )
+    except Exception as e:
+        logger.warning("[dialogue] video_id=%s — generation failed (non-fatal): %s",
+                       video.id, describe_error(e))
 
 
 async def run_analysis(
@@ -555,7 +592,9 @@ async def run_analysis(
         await update_task_status(db, task, "analyzing")
 
         try:
-            analysis = await analyze_transcript(subtitles, meta.duration_seconds)
+            analysis = await analyze_transcript(
+                subtitles, meta.duration_seconds, uploader=meta.uploader, title=meta.title
+            )
         except Exception as e:
             logger.error("[analysis] Task #%d — LLM analysis failed: %s", task.id, describe_error(e))
             transcript_text = json.dumps(
@@ -575,6 +614,14 @@ async def run_analysis(
 
         # Stage 6: Save results
         video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
+
+        # Stage 7: Dialogue formatting (non-fatal; own commit after the save)
+        yield ProgressEvent(stage="dialogue", progress=96,
+                            message="Formatting dialogue transcript...")
+        await _generate_dialogue_for_video(db, video, subtitles, meta)
+        yield ProgressEvent(stage="dialogue", progress=98, message="Saving dialogue...")
+        yield ProgressEvent(stage="dialogue", progress=99, message="Dialogue ready.")
+
         logger.info("[analysis] Task #%d — complete, video_id=%d", task.id, video.id)
         yield ProgressEvent(
             stage="complete", progress=100, message="Analysis complete!",
@@ -902,7 +949,9 @@ async def resume_analysis(
         meta.duration_seconds = _reconcile_duration(meta, subtitles_dl, task.id)
 
         try:
-            analysis_dl = await analyze_transcript(subtitles_dl, meta.duration_seconds)
+            analysis_dl = await analyze_transcript(
+                subtitles_dl, meta.duration_seconds, uploader=meta.uploader, title=meta.title
+            )
         except Exception as e:
             logger.error("[analysis] Task #%d — LLM failed on download-retry: %s", task.id, describe_error(e))
             task.progress_data = json.dumps(
@@ -915,6 +964,7 @@ async def resume_analysis(
         video_dl, usage_data_dl = await _save_analysis_results(
             db, task, meta, analysis_dl, subtitles_dl, asr_usage_dl,
         )
+        await _generate_dialogue_for_video(db, video_dl, subtitles_dl, meta)
         logger.info("[analysis] Task #%d — download-retry complete, video_id=%d", task.id, video_dl.id)
         yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!",
                             detail={"video_id": video_dl.id, "usage": usage_data_dl})
@@ -989,7 +1039,9 @@ async def resume_analysis(
         await update_task_status(db, task, "analyzing")
         meta.duration_seconds = _reconcile_duration(meta, subtitles, task.id)
         try:
-            analysis = await analyze_transcript(subtitles, meta.duration_seconds)
+            analysis = await analyze_transcript(
+                subtitles, meta.duration_seconds, uploader=meta.uploader, title=meta.title
+            )
         except Exception as e:
             logger.error("[analysis] Task #%d — LLM analysis failed on resume: %s", task.id, e)
             task.progress_data = json.dumps(
@@ -1000,6 +1052,7 @@ async def resume_analysis(
             return
 
         video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
+        await _generate_dialogue_for_video(db, video, subtitles, meta)
         logger.info("[analysis] Task #%d — resume complete, video_id=%d", task.id, video.id)
         yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!",
                             detail={"video_id": video.id, "usage": usage_data})
@@ -1063,7 +1116,9 @@ async def resume_analysis(
         meta.duration_seconds = _reconcile_duration(meta, subtitles, task.id)
 
         try:
-            analysis = await analyze_transcript(subtitles, meta.duration_seconds)
+            analysis = await analyze_transcript(
+                subtitles, meta.duration_seconds, uploader=meta.uploader, title=meta.title
+            )
         except Exception as e:
             logger.error("[analysis] Task #%d — LLM analysis failed on resume: %s", task.id, e)
             await update_task_status(db, task, "failed_analyze", describe_error(e))
@@ -1071,6 +1126,7 @@ async def resume_analysis(
             return
 
         video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
+        await _generate_dialogue_for_video(db, video, subtitles, meta)
         logger.info("[analysis] Task #%d — resume complete, video_id=%d", task.id, video.id)
         yield ProgressEvent(stage="complete", progress=100, message="Analysis complete!",
                             detail={"video_id": video.id, "usage": usage_data})

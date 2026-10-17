@@ -63,6 +63,10 @@ class AnalysisResult:
     segments: list[SegmentResult] = field(default_factory=list)
     summary_en: str = ""
     essence: str = ""
+    # Bullet-style takeaways (公众号「内容提要」体例): each item is
+    # {"title": str, "body": str, "highlight": str}.
+    takeaways: list[dict] = field(default_factory=list)
+    show_intro: str = ""
     llm_usage: LLMUsage = field(default_factory=LLMUsage)
 
 
@@ -75,23 +79,51 @@ def _build_transcript_text(subtitles: list[SubtitleEntry]) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(transcript: str, duration_seconds: int, subtitle_chars: int, *, skip_segmentation: bool = False) -> str:
+def _build_prompt(
+    transcript: str,
+    duration_seconds: int,
+    subtitle_chars: int,
+    *,
+    skip_segmentation: bool = False,
+    uploader: str = "",
+    title: str = "",
+) -> str:
     duration_minutes = duration_seconds / 60
     essence_min = int(subtitle_chars * 0.05)
     essence_max = int(subtitle_chars * 0.10)
+    background = (
+        f"背景信息：标题《{title}》，上传者/频道：{uploader}。"
+        if title or uploader
+        else ""
+    )
+    bg_line = f"\n{background}\n" if background else ""
 
     if skip_segmentation:
         return f"""你是一位视频内容分析师。请分析以下视频字幕（视频时长{duration_seconds}秒）。
+{bg_line}
 
 ## 任务：总结
 用中文写一段100-150字的视频总结，涵盖视频的核心主题、关键论点和主要结论。同时提供英文版本。
 
 由于视频较短，无需分段，segments 只需包含一个覆盖全程的段落。
 
+## 任务：内容提要
+提炼3~6条「内容提要」要点，体例如公众号文章开头的内容提要（**标题：** 说明 **加粗金句**）：
+- title：不超过14个字的名词短语
+- body：1~2句话展开说明
+- highlight：一句最有信息量的判断或金句
+
+## 任务：节目简介
+用1~2句话介绍这期节目/频道/UP主（基于标题、上传者与内容推断，不得虚构具体事实）。
+
 返回严格合法的 JSON，结构如下：
 {{
   "summary": "中文总结（100-150字）",
   "summary_en": "English summary",
+  "takeaways": [
+    {{"title": "要点标题", "body": "1~2句说明", "highlight": "核心判断或金句"}}
+  ],
+  "show_intro": "节目简介（1~2句）",
   "segments": [
     {{
       "index": 0,
@@ -108,7 +140,8 @@ def _build_prompt(transcript: str, duration_seconds: int, subtitle_chars: int, *
 字幕内容：
 {transcript}"""
 
-    return f"""你是一位视频内容分析师。请分析以下视频字幕，完成三项任务：
+    return f"""你是一位视频内容分析师。请分析以下视频字幕，完成五项任务：
+{bg_line}
 
 ## 任务一：总结
 用中文写一段100-150字的视频总结，涵盖视频的核心主题、关键论点和主要结论。
@@ -136,11 +169,24 @@ def _build_prompt(transcript: str, duration_seconds: int, subtitle_chars: int, *
 
 请仔细阅读字幕中话题切换的位置，精准标记 start_seconds / end_seconds。
 
+## 任务四：内容提要
+提炼3~6条「内容提要」要点，体例如公众号文章开头的内容提要（**标题：** 说明 **加粗金句**）：
+- title：不超过14个字的名词短语
+- body：1~2句话展开说明
+- highlight：一句最有信息量的判断或金句
+
+## 任务五：节目简介
+用1~2句话介绍这期节目/频道/UP主（基于标题、上传者与内容推断，不得虚构具体事实）。
+
 返回严格合法的 JSON，结构如下：
 {{
   "summary": "中文总结（100-150字）",
   "summary_en": "English summary",
   "essence": "精华总结（叙述体，字幕量5-10%）",
+  "takeaways": [
+    {{"title": "要点标题", "body": "1~2句说明", "highlight": "核心判断或金句"}}
+  ],
+  "show_intro": "节目简介（1~2句）",
   "segments": [
     {{
       "index": 0,
@@ -188,10 +234,24 @@ def _parse_llm_response(text: str) -> AnalysisResult:
                 summary_en=seg.get("summary_en", ""),
             )
         )
+    takeaways = []
+    for item in data.get("takeaways") or []:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        if not title:
+            continue
+        takeaways.append({
+            "title": title,
+            "body": str(item.get("body", "")).strip(),
+            "highlight": str(item.get("highlight", "")).strip(),
+        })
     return AnalysisResult(
         summary=data.get("summary", ""),
         summary_en=data.get("summary_en", ""),
         essence=data.get("essence", ""),
+        takeaways=takeaways,
+        show_intro=str(data.get("show_intro", "")),
         segments=segments,
     )
 
@@ -199,6 +259,9 @@ def _parse_llm_response(text: str) -> AnalysisResult:
 async def analyze_transcript(
     subtitles: list[SubtitleEntry],
     duration_seconds: int,
+    *,
+    uploader: str = "",
+    title: str = "",
 ) -> AnalysisResult:
     settings = get_settings()
     transcript_text = _build_transcript_text(subtitles)
@@ -210,6 +273,7 @@ async def analyze_transcript(
         transcript_text, duration_seconds,
         subtitle_chars=sum(len(s.text) for s in subtitles),
         skip_segmentation=skip_seg,
+        uploader=uploader, title=title,
     )
 
     import time as _time
