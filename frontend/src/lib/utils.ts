@@ -43,6 +43,15 @@ export function platformLabel(platform: string): string {
   return labels[platform] || platform;
 }
 
+/** Split prose on blank lines into paragraphs; falls back to one paragraph. */
+export function splitParagraphs(text: string): string[] {
+  const parts = text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [text.trim()].filter(Boolean);
+}
+
 export function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const minutes = Math.floor(diff / 60000);

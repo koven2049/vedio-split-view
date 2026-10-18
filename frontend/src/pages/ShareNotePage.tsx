@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { formatDuration, formatTimeRange, platformLabel } from '../lib/utils';
+import { formatDuration, formatTimeRange, platformLabel, splitParagraphs } from '../lib/utils';
 
 interface PublicSegment {
   segment_index: number;
@@ -99,7 +99,11 @@ export default function ShareNotePage() {
       {note.essence ? (
         <section className="mt-8">
           <h2 className="mb-2 text-lg font-medium">精华</h2>
-          <p className="whitespace-pre-wrap leading-7">{note.essence}</p>
+          {splitParagraphs(note.essence).map((para, i) => (
+            <p key={i} className="leading-7" style={i > 0 ? { marginTop: '1em' } : undefined}>
+              {para}
+            </p>
+          ))}
         </section>
       ) : null}
 

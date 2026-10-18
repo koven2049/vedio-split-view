@@ -23,6 +23,7 @@ import {
   formatTimeRange,
   generatePlaybackUrl,
   platformLabel,
+  splitParagraphs,
   cn,
 } from '../lib/utils';
 import {
@@ -708,11 +709,16 @@ export default function VideoDetailPage() {
               <Download size={13} /> {t('detail.downloadEssence')}
             </button>
           </div>
-          <div
-            className="text-sm leading-relaxed whitespace-pre-wrap"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            {video.essence}
+          <div style={{ color: 'var(--color-text-secondary)' }}>
+            {splitParagraphs(video.essence).map((para, i) => (
+              <p
+                key={i}
+                className="text-sm leading-relaxed"
+                style={i > 0 ? { marginTop: '0.9em' } : undefined}
+              >
+                {para}
+              </p>
+            ))}
           </div>
         </div>
       )}
