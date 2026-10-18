@@ -340,7 +340,17 @@ _ensure_images_exist() {
 _remove_container_if_exists() {
     local name="$1"
     if "$PODMAN_CMD" container exists "$name" 2>/dev/null; then
-        "$PODMAN_CMD" rm -f "$name" >/dev/null
+        "$PODMAN_CMD" rm -f "$name" >/dev/null 2>&1 || true
+        # podman releases container names asynchronously (macOS VM): a
+        # compose-up right after rm used to lose the race with
+        # "container name is already in use". Poll until it's really gone.
+        local i
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+            "$PODMAN_CMD" container exists "$name" 2>/dev/null || return 0
+            sleep 0.5
+        done
+        # Still held — retry loudly so the failure is visible, not silent.
+        "$PODMAN_CMD" rm -f "$name"
     fi
 }
 

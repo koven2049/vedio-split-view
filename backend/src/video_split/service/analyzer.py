@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import httpx
 
@@ -355,13 +357,32 @@ def _is_mostly_chinese(subtitles: list[SubtitleEntry]) -> bool:
     return zh / cjk > 0.6
 
 
+# Concurrent translation batches. post_chat already backs off on 429/5xx;
+# 3 keeps a 20-batch job ~3x faster without tripping rate limits.
+_TRANSLATE_CONCURRENCY = 3
+
+
+def _translate_cache_path(texts: list[str]) -> Path:
+    """Per-batch checkpoint keyed by the exact source lines (content-hash)."""
+    from video_split.config import get_settings
+
+    settings = get_settings()
+    digest = hashlib.md5(
+        "\n".join(texts).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
+    return Path(settings.storage.temp_dir).parent / "translate_cache" / f"{digest}.json"
+
+
 async def translate_subtitles_to_chinese(
     subtitles: list[SubtitleEntry],
+    progress_callback=None,
 ) -> list[SubtitleEntry]:
     """Translate non-Chinese subtitles to Chinese via the configured LLM.
 
     Returns originals unchanged if already Chinese or translation fails.
-    Preserves all timing (start/duration); only ``text`` is replaced.
+    Preserves all timing (start/duration) and speaker; only ``text`` is
+    replaced. ``progress_callback(done: int, total: int)`` fires per completed
+    batch.
     """
     if not subtitles or _is_mostly_chinese(subtitles):
         return subtitles
@@ -463,41 +484,81 @@ async def translate_subtitles_to_chinese(
         return out
 
     chunk_size = 50
-    translated: list[str] = []
+    total_chunks = (len(subtitles) + chunk_size - 1) // chunk_size
 
-    for i in range(0, len(subtitles), chunk_size):
-        if i > 0:
-            await asyncio.sleep(1)  # throttle to avoid 429
-        chunk_texts = [s.text for s in subtitles[i:i + chunk_size]]
-        chunk_num = i // chunk_size + 1
-        total_chunks = (len(subtitles) + chunk_size - 1) // chunk_size
-
+    async def _translate_chunk_with_split(chunk_texts: list[str]) -> list[str]:
+        """Translate one batch; on failure split in half and retry each half."""
         try:
             batch = await _translate_batch(chunk_texts)
-            # Fill gaps from missing keys with original text
-            for j, t in enumerate(batch):
-                translated.append(t if t is not None else chunk_texts[j])
             missing = sum(1 for t in batch if t is None)
             if missing:
-                logger.warning("[translate] chunk %d/%d: %d/%d keys missing",
-                               chunk_num, total_chunks, missing, len(chunk_texts))
-            else:
-                logger.info("[translate] chunk %d/%d done (%d entries)", chunk_num, total_chunks, len(chunk_texts))
+                logger.warning("[translate] batch: %d/%d keys missing", missing, len(chunk_texts))
+            return [t if t is not None else chunk_texts[j] for j, t in enumerate(batch)]
         except Exception as e:
-            # Split failed chunk in half and retry each half
-            logger.warning("[translate] chunk %d/%d failed (%s), splitting", chunk_num, total_chunks, e)
+            logger.warning("[translate] batch failed (%s), splitting", str(e)[:80])
+            out_texts: list[str] = []
             mid = len(chunk_texts) // 2
             for half_start in (0, mid):
-                half = chunk_texts[half_start:half_start + mid] if half_start + mid < len(chunk_texts) else chunk_texts[half_start:]
+                half = (
+                    chunk_texts[half_start:half_start + mid]
+                    if half_start + mid < len(chunk_texts)
+                    else chunk_texts[half_start:]
+                )
                 if not half:
                     continue
                 try:
                     batch = await _translate_batch(half)
-                    for j, t in enumerate(batch):
-                        translated.append(t if t is not None else half[j])
+                    out_texts.extend(t if t is not None else half[j] for j, t in enumerate(batch))
                 except Exception as e2:
-                    logger.warning("[translate] chunk %d half failed (%s), keeping original", chunk_num, e2)
-                    translated.extend(half)
+                    logger.warning("[translate] half failed (%s), keeping original", str(e2)[:80])
+                    out_texts.extend(half)
+            return out_texts
+
+    async def _translate_chunk_cached(chunk_texts: list[str], chunk_num: int) -> list[str]:
+        """Per-batch disk checkpoint: a retried task re-hashes the same lines
+        and skips batches that already succeeded (translation is the slowest
+        serial stage — losing 15/20 done batches on a late failure hurt)."""
+        cache = _translate_cache_path(chunk_texts)
+        if cache.exists():
+            try:
+                data = json.loads(cache.read_text(encoding="utf-8"))
+                if isinstance(data, list) and len(data) == len(chunk_texts):
+                    logger.info("[translate] chunk %d/%d cache hit", chunk_num, total_chunks)
+                    return [str(x) for x in data]
+            except (json.JSONDecodeError, OSError):
+                pass
+        result = await _translate_chunk_with_split(chunk_texts)
+        if len(result) == len(chunk_texts):
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                cache.write_text(
+                    json.dumps(result, ensure_ascii=False), encoding="utf-8"
+                )
+            except OSError:
+                logger.debug("[translate] cache write failed for %s", cache)
+        done_count[0] += 1
+        if progress_callback:
+            progress_callback(done_count[0], total_chunks)
+        return result
+
+    # Batches are independent — run a few concurrently instead of one-by-one
+    # with a fixed 1s gap. post_chat already backs off on 429/5xx, so the
+    # semaphore alone keeps us under the rate limit.
+    sem = asyncio.Semaphore(_TRANSLATE_CONCURRENCY)
+    done_count = [0]
+
+    async def _guarded(chunk_texts: list[str], chunk_num: int) -> list[str]:
+        async with sem:
+            return await _translate_chunk_cached(chunk_texts, chunk_num)
+
+    batches = [
+        [s.text for s in subtitles[i:i + chunk_size]]
+        for i in range(0, len(subtitles), chunk_size)
+    ]
+    results = await asyncio.gather(*(
+        _guarded(texts, num) for num, texts in enumerate(batches, 1)
+    ))
+    translated = [t for batch in results for t in batch]
 
     if len(translated) != len(subtitles):
         logger.warning("[translate] count mismatch (%d vs %d), returning originals", len(translated), len(subtitles))

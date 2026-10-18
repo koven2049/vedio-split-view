@@ -30,6 +30,19 @@ def _get_engine():
             f"sqlite+aiosqlite:///{db_path}",
             echo=False,
         )
+        # WAL lets reads proceed while a task commits (parallel analyses used
+        # to risk "database is locked"); busy_timeout waits out the few real
+        # write-write collisions instead of failing instantly.
+        from sqlalchemy import event
+
+        @event.listens_for(_engine.sync_engine, "connect")
+        def _sqlite_pragma(dbapi_conn, _record):  # type: ignore[no-untyped-def]
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+
     return _engine
 
 

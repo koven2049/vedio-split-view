@@ -18,6 +18,11 @@ from video_split.service.downloader import SubtitleEntry
 
 logger = logging.getLogger(__name__)
 
+# How many audio chunks upload/transcribe concurrently. Each chunk holds one
+# OSS object + one polling DashScope task; 3 keeps latency ~3x lower without
+# hammering the API (default quota is 20 QPS).
+_CHUNK_CONCURRENCY = 3
+
 
 @dataclass
 class TranscriptionProgress:
@@ -271,16 +276,39 @@ async def transcribe_audio(
     # completely on a chunk that yields no speech at all.
     chunk_dur_seconds = float(settings.transcription.chunk_duration_seconds)
 
-    for i, chunk_path in enumerate(chunks):
+    # Chunks are independent (each uploads itself, submits its own ASR task,
+    # and hits its own cache) — run a few at a time instead of one-by-one.
+    # Uploads go through a worker thread, so this overlaps network + polling.
+    concurrency = min(_CHUNK_CONCURRENCY, total)
+
+    async def _one(i: int, chunk_path: Path) -> tuple[int, list[SubtitleEntry], float]:
         _emit(TranscriptionProgress(
             step="chunk_start",
             message=f"Transcribing chunk {i + 1}/{total}...",
             chunk_index=i + 1, total_chunks=total,
         ))
+        entries, chunk_dur = await transcribe_single_chunk(
+            chunk_path, progress_callback=progress_callback,
+            chunk_index=i + 1, total_chunks=total,
+        )
+        _emit(TranscriptionProgress(
+            step="chunk_done",
+            message=f"Chunk {i + 1}/{total} done — {len(entries)} segments",
+            chunk_index=i + 1, total_chunks=total,
+            extra={"segments": len(entries)},
+        ))
+        return i, entries, chunk_dur
 
-        entries, chunk_dur = await transcribe_single_chunk(chunk_path, progress_callback=progress_callback, chunk_index=i + 1, total_chunks=total)
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _guarded(i: int, chunk_path: Path) -> tuple[int, list[SubtitleEntry], float]:
+        async with sem:
+            return await _one(i, chunk_path)
+
+    results = await asyncio.gather(*(_guarded(i, p) for i, p in enumerate(chunks)))
+
+    for i, entries, chunk_dur in sorted(results, key=lambda r: r[0]):
         total_asr_duration += chunk_dur
-
         time_offset = 0.0 if is_single else i * chunk_dur_seconds
         for entry in entries:
             all_entries.append(
@@ -288,18 +316,11 @@ async def transcribe_audio(
                     start=entry.start + time_offset,
                     duration=entry.duration,
                     text=entry.text,
+                    speaker=entry.speaker,
                 )
             )
-
-        _emit(TranscriptionProgress(
-            step="chunk_done",
-            message=f"Chunk {i + 1}/{total} done — {len(entries)} segments",
-            chunk_index=i + 1, total_chunks=total,
-            extra={"segments": len(entries)},
-        ))
-
         if not is_single:
-            chunk_path.unlink(missing_ok=True)
+            chunks[i].unlink(missing_ok=True)
 
     # Per-chunk silence is tolerated above, but a recording with no speech
     # anywhere means the audio is wrong (silent download, music-only track).

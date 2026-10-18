@@ -245,6 +245,36 @@ async def _save_analysis_results(
     return video, usage_data
 
 
+async def _persist_dialogue_for_video(
+    db: AsyncSession,
+    video: Video,
+    dialogue: dict,
+    usage: dict,
+) -> None:
+    """Store a generated dialogue layout + fold its usage into accounting.
+
+    Non-fatal: any failure is logged and swallowed — dialogue can be
+    back-filled later via POST /api/videos/{id}/dialogue. Callers must have
+    committed the video already (this helper commits itself).
+    """
+    try:
+        if not dialogue:
+            return
+        video.dialogue_json = json.dumps(dialogue, ensure_ascii=False)
+        if int(usage.get("llm_total_tokens") or 0):
+            merge_llm_usage(video, usage)
+            await accumulate_usage(db, video.user_id, usage)
+        await db.commit()
+        logger.info(
+            "[dialogue] Task saved video_id=%d (%s layout, %d blocks)",
+            video.id, "fallback" if dialogue.get("fallback") else "llm",
+            len(dialogue.get("blocks", [])),
+        )
+    except Exception as e:
+        logger.warning("[dialogue] video_id=%s — persist failed (non-fatal): %s",
+                       video.id, describe_error(e))
+
+
 async def _generate_dialogue_for_video(
     db: AsyncSession,
     video: Video,
@@ -264,16 +294,7 @@ async def _generate_dialogue_for_video(
             platform=meta.platform, uploader=meta.uploader,
             title=meta.title, duration_seconds=meta.duration_seconds,
         )
-        video.dialogue_json = json.dumps(dialogue, ensure_ascii=False)
-        if int(usage.get("llm_total_tokens") or 0):
-            merge_llm_usage(video, usage)
-            await accumulate_usage(db, video.user_id, usage)
-        await db.commit()
-        logger.info(
-            "[dialogue] Task saved video_id=%d (%s layout, %d blocks)",
-            video.id, "fallback" if dialogue.get("fallback") else "llm",
-            len(dialogue.get("blocks", [])),
-        )
+        await _persist_dialogue_for_video(db, video, dialogue, usage)
     except Exception as e:
         logger.warning("[dialogue] video_id=%s — generation failed (non-fatal): %s",
                        video.id, describe_error(e))
@@ -599,7 +620,40 @@ async def run_analysis(
                 message=f"Translating {len(subtitles)} subtitles to Chinese...",
             )
             logger.info("[analysis] Task #%d — translating %d subtitles to Chinese", task.id, len(subtitles))
-            subtitles = await translate_subtitles_to_chinese(subtitles)
+
+            # Batch-level progress relay: translation runs as a task so the
+            # generator can keep emitting (and stay cancellable) mid-stage.
+            translate_queue: asyncio.Queue[tuple[int, int]] = asyncio.Queue()
+
+            def _on_translate_progress(done: int, total: int) -> None:
+                translate_queue.put_nowait((done, total))
+
+            translate_task = asyncio.create_task(
+                translate_subtitles_to_chinese(subtitles, progress_callback=_on_translate_progress)
+            )
+            try:
+                while not translate_task.done():
+                    try:
+                        done, total = await asyncio.wait_for(translate_queue.get(), timeout=1.0)
+                        pct = min(87, 86 + int(done * 1.0 / max(total, 1)))
+                        yield ProgressEvent(
+                            stage="translation", progress=pct,
+                            message=f"Translating subtitles to Chinese… {done}/{total} batches",
+                        )
+                    except asyncio.TimeoutError:
+                        _check_cancelled()
+                        continue
+                subtitles = translate_task.result()
+            except Exception as e:
+                if not translate_task.done():
+                    translate_task.cancel()
+                logger.error("[analysis] Task #%d — translation failed: %s", task.id, describe_error(e))
+                task.progress_data = json.dumps(
+                    [{"start": s.start, "duration": s.duration, "text": s.text, "speaker": s.speaker}
+                     for s in subtitles]
+                )
+                await update_task_status(db, task, "failed_analyze", describe_error(e))
+                raise
 
         # Stage 5: LLM analysis
         settings = get_settings()
@@ -615,36 +669,63 @@ async def run_analysis(
         )
         await update_task_status(db, task, "analyzing")
 
-        try:
-            analysis = await analyze_transcript(
-                subtitles, meta.duration_seconds, uploader=meta.uploader, title=meta.title
+        # Stage 5+7 kickoff: analysis and dialogue both consume only the final
+        # subtitles — run the dialogue LLM call alongside analysis instead of
+        # after the save, saving one full LLM round-trip per video.
+        dialogue_gen = asyncio.create_task(
+            format_dialogue(
+                subtitles,
+                platform=meta.platform, uploader=meta.uploader,
+                title=meta.title, duration_seconds=meta.duration_seconds,
             )
-        except Exception as e:
-            logger.error("[analysis] Task #%d — LLM analysis failed: %s", task.id, describe_error(e))
-            transcript_text = json.dumps(
-                [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles]
-            )
-            task.progress_data = transcript_text
-            await update_task_status(db, task, "failed_analyze", describe_error(e))
-            raise
-
-        _check_cancelled()
-        logger.info("[analysis] Task #%d — LLM analysis done: %d segments", task.id, len(analysis.segments))
-        yield ProgressEvent(
-            stage="analysis", progress=95,
-            message=f"Analysis complete — {len(analysis.segments)} segments identified.",
-            detail={"segment_count": len(analysis.segments)},
         )
 
-        # Stage 6: Save results
-        video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
+        try:
+            try:
+                analysis = await analyze_transcript(
+                    subtitles, meta.duration_seconds, uploader=meta.uploader, title=meta.title
+                )
+            except Exception as e:
+                logger.error("[analysis] Task #%d — LLM analysis failed: %s", task.id, describe_error(e))
+                transcript_text = json.dumps(
+                    [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles]
+                )
+                task.progress_data = transcript_text
+                await update_task_status(db, task, "failed_analyze", describe_error(e))
+                raise
 
-        # Stage 7: Dialogue formatting (non-fatal; own commit after the save)
-        yield ProgressEvent(stage="dialogue", progress=96,
-                            message="Formatting dialogue transcript...")
-        await _generate_dialogue_for_video(db, video, subtitles, meta)
-        yield ProgressEvent(stage="dialogue", progress=98, message="Saving dialogue...")
-        yield ProgressEvent(stage="dialogue", progress=99, message="Dialogue ready.")
+            _check_cancelled()
+            logger.info("[analysis] Task #%d — LLM analysis done: %d segments", task.id, len(analysis.segments))
+            yield ProgressEvent(
+                stage="analysis", progress=95,
+                message=f"Analysis complete — {len(analysis.segments)} segments identified.",
+                detail={"segment_count": len(analysis.segments)},
+            )
+
+            # Stage 6: Save results
+            video, usage_data = await _save_analysis_results(db, task, meta, analysis, subtitles, asr_usage)
+
+            # Stage 7: persist the (already-running) dialogue layout
+            yield ProgressEvent(stage="dialogue", progress=96,
+                                message="Formatting dialogue transcript...")
+            try:
+                stored_dialogue, stored_usage = await dialogue_gen
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                # format_dialogue is designed never to raise; if it somehow
+                # does, keep the completed analysis and skip the dialogue.
+                logger.warning("[dialogue] Task #%d — parallel generation failed (non-fatal): %s",
+                               task.id, describe_error(e))
+                stored_dialogue, stored_usage = {}, {}
+            await _persist_dialogue_for_video(db, video, stored_dialogue, stored_usage)
+            yield ProgressEvent(stage="dialogue", progress=98, message="Saving dialogue...")
+            yield ProgressEvent(stage="dialogue", progress=99, message="Dialogue ready.")
+        finally:
+            # Analysis failed or user cancelled mid-flight — don't leak the
+            # parallel LLM call.
+            if not dialogue_gen.done():
+                dialogue_gen.cancel()
 
         logger.info("[analysis] Task #%d — complete, video_id=%d", task.id, video.id)
         yield ProgressEvent(
