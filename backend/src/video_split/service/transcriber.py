@@ -7,9 +7,9 @@ import logging
 import math
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 import httpx
 
@@ -163,8 +163,16 @@ def split_audio(audio_path: Path, *, chunk_seconds: int | None = None) -> list[P
     # ones (never split) and yt-dlp downloads (transcoded to real MP3) sailed
     # through. MP3-family input → .mp3 copy; AAC → .m4a copy; anything else →
     # re-encode to MP3 as a safe universal fallback.
+    #
+    # Diarization exception: DashScope returns no speaker_id for stream-copied
+    # segments (observed on `-c copy` AAC chunks) — so diarization-capable
+    # models always re-encode chunks to mono MP3, which also matches the
+    # documented single-channel preference.
     codec = probe_audio_codec(audio_path)
-    if codec in ("mp1", "mp2", "mp3"):
+    if _model_supports_diarization(settings.transcription.model):
+        codec_args, chunk_ext = ["-codec:a", "libmp3lame", "-b:a", "128k", "-ac", "1"], "mp3"
+        logger.info("[split] diarization model → re-encoding chunks to mono mp3")
+    elif codec in ("mp1", "mp2", "mp3"):
         codec_args, chunk_ext = ["-c", "copy"], "mp3"
     elif codec == "aac":
         codec_args, chunk_ext = ["-c", "copy"], "m4a"
@@ -431,7 +439,7 @@ async def _funasr_transcribe_single(
     chunk_index: int = 1,
     total_chunks: int = 1,
 ) -> tuple[list[SubtitleEntry], float]:
-    from video_split.service.oss_helper import upload_and_sign, delete_object
+    from video_split.service.oss_helper import delete_object, upload_and_sign
 
     def _emit(p: TranscriptionProgress) -> None:
         if progress_callback:

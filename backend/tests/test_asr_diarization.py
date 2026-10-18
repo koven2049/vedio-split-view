@@ -144,3 +144,30 @@ async def test_asr_sparse_labels_fall_through_to_llm(monkeypatch, _config):
     assert len(calls) == 1
     assert result["fallback"] is False
     assert "source" not in result
+
+
+# ─── split_audio: diarization models get mono mp3 chunks ───
+
+
+def test_split_reencodes_mono_mp3_for_diarization(monkeypatch, tmp_path):
+    audio = tmp_path / "audio.m4a"
+    audio.write_bytes(b"x" * 2048)
+    monkeypatch.setattr(transcriber, "get_audio_duration", lambda p: 700.0)
+    monkeypatch.setattr(transcriber, "probe_audio_codec", lambda p: "aac")
+    monkeypatch.setattr(transcriber, "_model_supports_diarization", lambda m: True)
+    captured: dict = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        chunk_dir = audio.parent / "chunks"
+        for i in range(3):
+            (chunk_dir / f"chunk_{i:03d}.mp3").write_bytes(b"y" * 2048)
+        return transcriber.subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(transcriber.subprocess, "run", _fake_run)
+    chunks = transcriber.split_audio(audio, chunk_seconds=300)
+
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-ac") + 1] == "1", "diarization chunks must be mono"
+    assert "libmp3lame" in cmd, "stream copy yields no speaker_id — must re-encode"
+    assert all(c.suffix == ".mp3" for c in chunks)
