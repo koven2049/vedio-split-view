@@ -39,7 +39,7 @@
 
 ## 自部署
 
-依赖：**Podman**（不依赖 Docker）。先装好并启动 Podman，确认 `podman info` 能跑通。
+依赖：**Python 3.11+、Node（构建前端）、ffmpeg、Deno ≥2.6.6（YouTube 字幕挑战）**。宿主进程直接运行（launchd 守护），不再使用容器。
 
 ```bash
 # 1. 初始化（生成配置模板 + 目录结构，含 config/build.cfg）
@@ -57,9 +57,9 @@ bash manage.sh rebuild
 ### 常用命令
 
 ```bash
-bash manage.sh status     # 查看容器状态 + 健康检查 + 数据库行数
-bash manage.sh rebuild     # 改完代码后增量构建并重启（最常用）
-bash manage.sh restart     # 只重启，不重建镜像
+bash manage.sh status     # 进程状态 + 健康检查 + 数据库行数
+bash manage.sh rebuild     # 改完代码后重装依赖并重建前端（最常用）
+bash manage.sh restart     # 停止 + 启动（launchctl bootout/bootstrap）
 bash manage.sh stop        # 停止
 bash manage.sh start       # 启动
 ```
@@ -101,4 +101,4 @@ bash manage.sh deploy       # 同步代码（不含 data/、配置、密钥）
 
 ## 技术栈
 
-后端 Python + FastAPI + SQLite，前端 React + Vite + Tailwind，容器化用 Podman。
+后端 Python + FastAPI + SQLite，前端 React + Vite + Tailwind；单进程双监听（:5180 SPA+API / :8080 API 兼容），launchd 守护，详见 docs/process-deploy-plan.md。

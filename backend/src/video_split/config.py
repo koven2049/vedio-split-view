@@ -14,6 +14,10 @@ class AppConfig(BaseModel):
     port: int = 8080
     frontend_port: int = 5180
     secret_key: str = "change-me"
+    # Process-mode deployment: the API process also serves the built SPA
+    # from frontend/dist (replaces the nginx frontend container). No-op
+    # when dist/ is absent, so dev checkouts are unaffected.
+    serve_frontend: bool = True
 
     @property
     def cors_origins(self) -> list[str]:

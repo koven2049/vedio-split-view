@@ -44,6 +44,14 @@ FRONTEND_CONTAINER="vsplit-frontend"
 BACKEND_IMAGE="vedio-split-view_backend"
 FRONTEND_IMAGE="vedio-split-view_frontend"
 
+# ── process-mode constants ────────────────────────────────────────────────────
+VENV_PY="$SCRIPT_DIR/backend/.venv/bin/python"
+DIST_DIR="$SCRIPT_DIR/frontend/dist"
+AGENT_LABEL="com.koven.vsplit.web"
+AGENT_DOMAIN="gui/$(id -u)/${AGENT_LABEL}"
+AGENT_PLIST_INSTALL="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
+AGENT_PLIST_SRC="$SCRIPT_DIR/scripts/com.koven.vsplit.web.plist"
+
 # ── config helpers ────────────────────────────────────────────────────────────
 read_yaml_value() {
     local key="$1" default="$2"
@@ -373,150 +381,129 @@ run_init() {
     log_ok "Init complete."
 }
 
+_ensure_venv() {
+    if [[ ! -x "$VENV_PY" ]]; then
+        log_step "Creating backend venv (first run) …"
+        python3 -m venv "$SCRIPT_DIR/backend/.venv" || { log_error "venv create failed"; exit 1; }
+        "$VENV_PY" -m pip install --quiet --upgrade pip
+        "$VENV_PY" -m pip install --quiet -e "$SCRIPT_DIR/backend" || { log_error "pip install failed"; exit 1; }
+    fi
+}
+
+_ensure_dist() {
+    [[ -f "$DIST_DIR/index.html" ]] || {
+        log_error "frontend/dist missing — run: $0 rebuild"
+        exit 1
+    }
+}
+
 run_start() {
     ensure_config
-    export_compose_env
-    _ensure_images_exist
-    _ensure_podman_network
-    mkdir -p logs/nginx
-    log_step "Starting services …"
+    _ensure_venv
+    _ensure_dist
+    mkdir -p "$SCRIPT_DIR/logs"
+    log_step "Starting service (launchd) …"
 
-    _remove_container_if_exists "$FRONTEND_CONTAINER"
-    _remove_container_if_exists "$BACKEND_CONTAINER"
+    if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
+        launchctl kickstart -k "$AGENT_DOMAIN"
+        log_info "Agent already loaded — restarted."
+    else
+        [[ -f "$AGENT_PLIST_INSTALL" ]] || {
+            log_error "Agent plist not installed — run: $0 install-launchd"
+            exit 1
+        }
+        launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST_INSTALL" || { log_error "bootstrap failed"; exit 1; }
+    fi
 
-    # Do not pass --dns here. On a dns-enabled network it never reaches
-    # resolv.conf; aardvark swallows it as the *only* upstream, so one UDP/53
-    # blip becomes EAI_AGAIN for every outbound host. Unset --dns lets
-    # aardvark forward via pasta (169.254.1.1) then the VM resolver.
-    "$PODMAN_CMD" run -d \
-        --name "$BACKEND_CONTAINER" \
-        --network "$NETWORK_NAME" \
-        --network-alias backend \
-        $(ip_opt) \
-        -p "$APP_PORT:8080" \
-        -v "$SCRIPT_DIR/config:/app/config:ro" \
-        -v "$SCRIPT_DIR/data:/app/data" \
-        -v "$SCRIPT_DIR/logs:/app/logs" \
-        -e PORT=8080 \
-        -e http_proxy= \
-        -e https_proxy= \
-        -e HTTP_PROXY= \
-        -e HTTPS_PROXY= \
-        --restart unless-stopped \
-        "$BACKEND_IMAGE" >/dev/null
-
-    "$PODMAN_CMD" run -d \
-        --name "$FRONTEND_CONTAINER" \
-        --network "$NETWORK_NAME" \
-        --network-alias frontend \
-        -p "$FRONTEND_PORT:80" \
-        -v "$SCRIPT_DIR/logs/nginx:/var/log/nginx" \
-        --restart unless-stopped \
-        "$FRONTEND_IMAGE" >/dev/null
-
-    log_ok "Backend: http://localhost:$APP_PORT  Frontend: http://localhost:$FRONTEND_PORT"
+    local port i
+    port="$(get_frontend_port)"
+    for i in $(seq 1 30); do
+        curl -sf --noproxy '*' "http://localhost:${port}/api/health" >/dev/null 2>&1 && break
+        sleep 1
+    done
+    if curl -sf --noproxy '*' "http://localhost:${port}/api/health" >/dev/null 2>&1; then
+        log_ok "Web: http://localhost:${port}  (API compat: http://localhost:$(get_app_port))"
+    else
+        log_error "Service did not come up within 30s — check logs/process.log"
+        exit 1
+    fi
 }
 
 run_stop() {
-    ensure_podman
-    log_step "Stopping services …"
-    _remove_container_if_exists "$FRONTEND_CONTAINER"
-    _remove_container_if_exists "$BACKEND_CONTAINER"
-    log_ok "Stopped."
+    log_step "Stopping service …"
+    if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
+        launchctl bootout "$AGENT_DOMAIN" && log_ok "Stopped." || log_error "bootout failed"
+    else
+        log_ok "Not running."
+    fi
 }
 
 run_restart() { run_stop; run_start; }
 
 run_rebuild() {
-    local no_cache="" pull=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -n|--no-cache) no_cache="--no-cache" ;;
-            -p|--pull)     pull="--pull-always" ;;
+            # kept for muscle-memory compat; process mode has no image cache
+            -n|--no-cache|-p|--pull) log_info "$1 accepted (no-op in process mode)" ;;
             *) log_error "Unknown option: $1"; exit 1 ;;
         esac
         shift
     done
 
     ensure_config
-    export_compose_env
-    ensure_podman
 
-    log_step "Building images (registry: $REGISTRY) …"
-    [[ -n "$PODMAN_DNS" ]] && log_info "podman DNS: $PODMAN_DNS"
-    [[ -n "$no_cache" ]] && log_info "--no-cache"
-    [[ -n "$pull" ]]     && log_info "--pull"
+    log_step "Installing backend deps (venv) …"
+    _ensure_venv
+    "$VENV_PY" -m pip install --quiet -e "$SCRIPT_DIR/backend" \
+        || { log_error "backend pip install failed"; exit 1; }
+    log_ok "backend"
 
-    local use_proxy=0
-    if [[ -n "${http_proxy:-}" ]] || [[ -n "${https_proxy:-}" ]]; then
-        use_proxy=1
-        log_info "proxy detected → podman build --network=host"
+    log_step "Building frontend …"
+    # nvm node lives outside launchd's PATH — source it explicitly.
+    if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+        # shellcheck disable=SC1091
+        . "$HOME/.nvm/nvm.sh"
+    fi
+    command -v npm >/dev/null 2>&1 || { log_error "npm not found (install node via nvm)"; exit 1; }
+    (cd "$SCRIPT_DIR/frontend" && npm ci --no-audit --no-fund && npm run build) \
+        || { log_error "frontend build failed"; exit 1; }
+    log_ok "frontend ($(du -sh "$DIST_DIR" 2>/dev/null | cut -f1))"
+
+    log_step "Restarting service …"
+    if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
+        run_restart
+    else
+        run_start
     fi
 
-    local apt_mirror pypi_index pypi_trusted_host
-    apt_mirror="$(read_build_value apt_mirror "deb.debian.org")"
-    pypi_index="$(read_build_value pypi_index "https://pypi.org/simple/")"
-    pypi_trusted_host="$(read_build_value pypi_trusted_host "")"
-    log_info "build sources: apt=$apt_mirror pypi=$pypi_index"
-
-    for svc in backend frontend; do
-        log_step "Building $svc …"
-        local image_tag="vedio-split-view_${svc}"
-
-        local build_args=(--build-arg "REGISTRY=$REGISTRY")
-        if [[ "$svc" == "backend" ]]; then
-            build_args+=(
-                --build-arg "APT_MIRROR=$apt_mirror"
-                --build-arg "PYPI_INDEX=$pypi_index"
-                --build-arg "PYPI_TRUSTED_HOST=$pypi_trusted_host"
-            )
-        fi
-        [[ -n "$PODMAN_DNS" ]] && build_args+=(--dns "$PODMAN_DNS")
-        [[ -n "$no_cache" ]] && build_args+=(--no-cache)
-        [[ -n "$pull" ]]     && build_args+=(--pull=always)
-
-        if [[ "$use_proxy" -eq 1 ]]; then
-            build_args+=(--network=host)
-            [[ -n "${http_proxy:-}" ]]  && build_args+=(--build-arg "http_proxy=$http_proxy")
-            [[ -n "${https_proxy:-}" ]] && build_args+=(--build-arg "https_proxy=$https_proxy")
-        fi
-
-        "$PODMAN_CMD" build "${build_args[@]}" -t "$image_tag" "./${svc}"
-
-        if ! "$PODMAN_CMD" image exists "$image_tag" 2>/dev/null; then
-            log_error "$svc image not found after build."
-            exit 1
-        fi
-        log_ok "$svc"
-    done
-
-    log_step "Restarting services …"
-    _remove_container_if_exists "$FRONTEND_CONTAINER"
-    _remove_container_if_exists "$BACKEND_CONTAINER"
-    run_start
-
     echo
-    _smoke_check "$APP_PORT" "$(get_admin_password)"
+    _smoke_check "$(get_frontend_port)" "$(get_admin_password)"
 
-    log_ok "Done. Backend: http://localhost:$APP_PORT  Frontend: http://localhost:$FRONTEND_PORT"
+    log_ok "Done. Web: http://localhost:$(get_frontend_port)"
 }
 
 run_status() {
-    ensure_podman
-    export_compose_env
-    local fail=0
-    log_step "Container status:"
-    "$PODMAN_CMD" ps -a --filter "name=vsplit-"
-    echo
+    local fail=0 web_port api_port
+    web_port="$(get_frontend_port)"
+    api_port="$(get_app_port)"
 
-    if curl -sf --noproxy '*' "http://localhost:$APP_PORT/health" >/dev/null 2>&1; then
-        log_ok "URL: http://localhost:$APP_PORT"
-        log_ok "Health: OK"
+    log_step "Process status:"
+    if pgrep -fl "multi_listen.py" 2>/dev/null; then
+        log_ok "Process: running"
     else
-        log_ok "URL: http://localhost:$APP_PORT"
-        log_error "Health: FAILED"
+        log_error "Process: NOT running"
         fail=1
     fi
+    echo
+
+    for port in "$web_port" "$api_port"; do
+        if curl -sf --noproxy '*' "http://localhost:${port}/api/health" >/dev/null 2>&1; then
+            log_ok "http://localhost:${port} — health OK"
+        else
+            log_error "http://localhost:${port} — health FAILED"
+            fail=1
+        fi
+    done
     if curl -sf --noproxy '*' "http://localhost:$FRONTEND_PORT/" >/dev/null 2>&1; then
         log_ok "URL: http://localhost:$FRONTEND_PORT"
         log_ok "Health: OK"
@@ -812,69 +799,60 @@ run_clean_exports() {
 }
 
 run_clean() {
-    ensure_podman
-    log_warn "This will remove dangling images and build cache."
-    log_warn "PRUNE SAFETY: 'podman system prune' releases file descriptors held"
-    log_warn "  by stopped containers. If a container was writing to a bind-mount"
-    log_warn "  whose host directory was deleted, its data lives only in that fd —"
-    log_warn "  pruning makes it disappear permanently. This is exactly how the"
-    log_warn "  production SQLite DB was lost. NEVER prune while data-bearing"
-    log_warn "  containers are stopped; verify the list below first."
-    echo
-    log_step "Stopped containers (must be safe to discard before pruning):"
-    # Never abort status listing under set -e.
-    "$PODMAN_CMD" ps -a --filter "status=exited" \
-        --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null || true
-    echo
-    log_warn "Confirm none of the above still hold unflushed data (e.g. vsplit-backend"
-    log_warn "  writing to data/video_split.db). If unsure, 'start' them first, then quit."
-    read -r -p "Continue with prune? [y/N] " confirm
+    log_warn "This removes build artefacts: pip cache, __pycache__, frontend"
+    log_warn "node_modules and dist. data/ logs/ config/ are NEVER touched."
+    if pgrep -f "multi_listen.py" >/dev/null 2>&1; then
+        log_error "Service is running — 'stop' it first (dist removal would 404 the SPA)."
+        exit 1
+    fi
+    read -r -p "Continue? [y/N] " confirm
     [[ "${confirm,,}" == "y" ]] || { log_info "Aborted."; exit 0; }
 
-    log_step "Pruning images …"
-    "$PODMAN_CMD" image prune -f
-    log_step "Pruning system (containers/networks/build cache; volumes NOT touched) …"
-    "$PODMAN_CMD" system prune -f
+    log_step "Cleaning …"
+    [[ -x "$VENV_PY" ]] && "$VENV_PY" -m pip cache purge >/dev/null 2>&1 || true
+    find "$SCRIPT_DIR/backend" -type d \( -name __pycache__ -o -name .pytest_cache -o -name "*.egg-info" \) \
+        -prune -exec rm -rf {} + 2>/dev/null || true
+    rm -rf "$SCRIPT_DIR/frontend/node_modules" "$DIST_DIR"
     log_ok "Clean complete."
 }
 
-# Bake SCRIPT_DIR / current user into the LaunchDaemon plist and install it
-# under /Library/LaunchDaemons (needs sudo). Without passwordless sudo, print
-# the commands — same one-shot pattern as com.koven.multica.
+# Generate the user LaunchAgent plist from the template (ROOT baked in),
+# install it under ~/Library/LaunchAgents, and neutralize the legacy
+# container-era watchdogs so they cannot fight the process stack.
 run_install_launchd() {
-    local label="com.koven.vedio-split-view"
-    local src="$SCRIPT_DIR/scripts/${label}.plist"
-    local dest="/Library/LaunchDaemons/${label}.plist"
-    local generated="$SCRIPT_DIR/logs/${label}.plist"
-    local user
-    user="$(whoami)"
+    local legacy_label="com.koven.vedio-split-view"
 
-    [[ -f "$src" ]] || { log_error "missing $src"; exit 1; }
-    mkdir -p "$SCRIPT_DIR/logs"
-    sed \
-        -e "s|/Users/admin/Services/vedio-split-view|${SCRIPT_DIR}|g" \
-        -e "s|<string>admin</string>|<string>${user}</string>|" \
-        "$src" > "$generated"
-    chmod +x "$SCRIPT_DIR/scripts/launchd-start.sh"
-    log_info "Plist: $generated"
+    [[ -f "$AGENT_PLIST_SRC" ]] || { log_error "missing $AGENT_PLIST_SRC"; exit 1; }
+    mkdir -p "$SCRIPT_DIR/logs" "$HOME/Library/LaunchAgents"
+    sed -e "s|__ROOT__|${SCRIPT_DIR}|g" "$AGENT_PLIST_SRC" > "$AGENT_PLIST_INSTALL"
+    log_info "Plist: $AGENT_PLIST_INSTALL"
 
-    if sudo -n true 2>/dev/null; then
-        sudo cp "$generated" "$dest"
-        sudo chown root:wheel "$dest"
-        sudo chmod 644 "$dest"
-        sudo launchctl bootout "system/${label}" 2>/dev/null || true
-        sudo launchctl bootstrap system "$dest"
-        log_ok "LaunchDaemon ${label} installed"
-        return 0
+    # Legacy 1/2: user boot agent (podman machine starter) — remove outright.
+    if [[ -f "$HOME/Library/LaunchAgents/${legacy_label}.plist" ]]; then
+        launchctl bootout "gui/$(id -u)/${legacy_label}" 2>/dev/null || true
+        rm -f "$HOME/Library/LaunchAgents/${legacy_label}.plist"
+        log_ok "Removed legacy boot agent ${legacy_label}"
     fi
 
-    log_warn "需要 sudo 才能写入 /Library/LaunchDaemons/。在本机执行："
-    echo "  sudo cp $generated $dest"
-    echo "  sudo chown root:wheel $dest"
-    echo "  sudo chmod 644 $dest"
-    echo "  sudo launchctl bootout system/${label} 2>/dev/null || true"
-    echo "  sudo launchctl bootstrap system $dest"
-    return 1
+    # Legacy 2/2: system watchdog Daemon runs scripts/launchd-start.sh under
+    # root. Neutralize the script itself (user-writable) so the next cycle is
+    # a no-op; full sudo removal stays a manual follow-up.
+    if [[ -f "$SCRIPT_DIR/scripts/launchd-start.sh" ]] \
+        && ! grep -q "VSLP-NEUTRALIZED" "$SCRIPT_DIR/scripts/launchd-start.sh"; then
+        printf '#!/bin/bash\n# VSLP-NEUTRALIZED: process-mode deployment replaced this watchdog.\nexit 0\n' \
+            > "$SCRIPT_DIR/scripts/launchd-start.sh"
+        chmod +x "$SCRIPT_DIR/scripts/launchd-start.sh"
+        pkill -f "launchd-start.sh" 2>/dev/null || true
+        log_ok "Neutralized legacy system watchdog script + killed running instance"
+        log_warn "完整卸载旧系统 Daemon（可选，需 sudo）："
+        echo "  sudo launchctl bootout system/${legacy_label} 2>/dev/null || true"
+        echo "  sudo rm -f /Library/LaunchDaemons/${legacy_label}.plist"
+    fi
+
+    if ! launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
+        launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST_INSTALL"
+    fi
+    log_ok "LaunchAgent ${AGENT_LABEL} installed (RunAtLoad + KeepAlive)"
 }
 
 # ── usage ─────────────────────────────────────────────────────────────────────
@@ -882,17 +860,15 @@ usage() {
     cat <<EOF
 Usage: $0 <command> [options]
 
-Lifecycle:
+Lifecycle (native processes via launchd; no containers):
   init                       Create config, directories
-  start                      Start all services
-  stop                       Stop all services
+  start                      Start the service (bootstrap/kickstart LaunchAgent)
+  stop                       Stop the service (launchctl bootout)
   restart                    Stop + start
-  rebuild [-n] [-p]          Build images and restart
-    -n, --no-cache             Ignore layer cache
-    -p, --pull                 Re-pull base images
-  status                     Show container status + health check
-  install-launchd            Install macOS LaunchDaemon (needs sudo once)
-  clean                      Remove dangling images / build cache
+  rebuild                    Reinstall backend deps (venv) + rebuild frontend, restart
+  status                     Process status + health checks + data health
+  install-launchd            Install LaunchAgent (no sudo) + neutralize legacy watchdogs
+  clean                      Remove pip cache / __pycache__ / node_modules / dist
 
 Data:
   export [youtube|bilibili]        Export video data to data/exports/
@@ -906,9 +882,7 @@ Deploy (between machines):
                                          Exclusion rules:    $DEPLOY_EXCLUDE_FILE
 
 Examples:
-  $0 rebuild                              # build and restart
-  $0 rebuild -n                           # no cache
-  REGISTRY=docker.io $0 rebuild           # Docker Hub instead of CN mirror
+  $0 rebuild                              # reinstall deps + rebuild frontend + restart
 
   $0 deploy -d                            # dry run — preview code sync
   $0 deploy                               # push code, then rebuild on remote

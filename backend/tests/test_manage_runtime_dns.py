@@ -1,8 +1,9 @@
-"""Runtime containers must not pin aardvark to a single public DNS.
+"""manage.sh invariants across the container→process migration.
 
-On a dns-enabled Podman network, ``--dns`` is not written to resolv.conf;
-aardvark takes it as the only upstream. One UDP/53 timeout then becomes
-``EAI_AGAIN`` for every outbound host. ``podman_dns`` stays for image builds.
+Historical note: the aardvark single-DNS trap (``--dns`` on a podman network
+becomes the ONLY upstream; one UDP/53 blip = EAI_AGAIN everywhere) is why
+runtime containers never pinned DNS. Process mode retires containers; the
+guards below pin the new invariants instead.
 """
 
 from __future__ import annotations
@@ -26,19 +27,21 @@ def test_run_start_does_not_pass_dns_to_containers() -> None:
     assert "--dns" not in code
 
 
-def test_rebuild_still_passes_dns_to_build() -> None:
+def test_rebuild_is_process_mode_no_podman_build() -> None:
+    """Container era is over: rebuild installs venv deps + builds the SPA,
+    and must never shell out to podman build again."""
     body = _func_body("run_rebuild")
-    assert "--dns" in body
-    assert "PODMAN_DNS" in body
+    assert "pip install" in body
+    assert "npm run build" in body
+    assert "podman" not in body
 
 
-def test_launchd_start_is_health_watchdog() -> None:
+def test_legacy_watchdog_script_is_neutralized_template() -> None:
+    """The shipped watchdog script doubles as a neutralization stub in process
+    mode (install-launchd overwrites any live copy with exit 0)."""
     text = (Path(__file__).resolve().parents[2] / "scripts" / "launchd-start.sh").read_text(
         encoding="utf-8"
     )
-    assert "while true" in text
-    assert "/health" in text
+    assert "VSLP-NEUTRALIZED" in text
     assert "exec ./manage.sh start" not in text
-    assert "containers_up" in text
-    assert "容器仍在跑, 不重建" in text
-    assert "NEED=" not in text
+    assert "containers_up" not in text

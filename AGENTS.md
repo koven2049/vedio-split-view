@@ -63,6 +63,6 @@
 ## 本工程专属
 
 - **API 文档自动派生**，不要手写端点清单。真相源 = 路由（path + `response_model` + docstring）；`GET /api/docs-data` 与 `/docs` 都来自 `app.openapi()`。对外可见性由 `apidocs.py:_VISIBLE_GROUPS`（tag → 组名）白名单控制。改 API 后跑 `cd backend && .venv/bin/python -m pytest tests/test_apidocs.py -q`。
-- 后端容器**不挂载 src**：改代码必须 `./manage.sh rebuild`（`restart` 看不到新代码）。
-- 运行时不要给容器 `--dns`：自定义网络上它只会被 aardvark 收成唯一上游，公网解析单点失败即 `EAI_AGAIN`。`podman_dns` 只用于 `rebuild`。开机用 `./manage.sh install-launchd`；`scripts/launchd-start.sh` 只在容器没在跑时 `manage.sh start`，禁止用 `/health` 超时当死亡信号去删容器。
+- **进程部署（2026-10 从容器迁移）**：单进程双监听 `scripts/multi_listen.py`（:5180 SPA+API / :8080 API 兼容，共享 TaskRunner 状态——不要拆成两个进程，SSE/确认/orphan-recovery 会 split-brain）。改代码后 `./manage.sh rebuild`（重装 venv 依赖 + 重建前端 + 重启）；`restart` 看不到新代码。launchd 守护 `com.koven.vsplit.web`（KeepAlive），`stop` 必须 `launchctl bootout`（kill 会被 KeepAlive 重拉）。方案与验收清单见 `docs/process-deploy-plan.md`。
+- SQLite 保持默认 DELETE 日志模式：**不要开 WAL**——数据目录经 podman virtiofs 挂载时代曾因 WAL 共享内存跨不过 VM 边界而全库 `disk I/O error`（教训已固化在 database.py 注释与回归测试）。宿主本地盘下 WAL 理论可用但无实测必要。
 - 抓取路径不要回退：YouTube 用 Deno + `web_embedded`/`android`（不要锁 `js_runtimes=node`）；B 站音频走 playurl，扫码/指纹禁止出海代理；AAC 切片输出 `.m4a`，禁止 `-c copy` 进 `.mp3`。

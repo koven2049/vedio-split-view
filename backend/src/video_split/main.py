@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
-
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -54,13 +54,13 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     from video_split.api.auth import router as auth_router
     from video_split.api.bilibili import router as bilibili_router
     from video_split.api.debug import router as debug_router
+    from video_split.api.feishu_hook import router as feishu_hook_router
+    from video_split.api.mindmap import router as mindmap_router
+    from video_split.api.public_notes import router as public_notes_router
     from video_split.api.tags import router as tags_router
     from video_split.api.tasks import router as tasks_router
     from video_split.api.videos import router as videos_router
     from video_split.api.youtube import router as youtube_router
-    from video_split.api.mindmap import router as mindmap_router
-    from video_split.api.feishu_hook import router as feishu_hook_router
-    from video_split.api.public_notes import router as public_notes_router
 
     app.include_router(auth_router)
     app.include_router(tasks_router)
@@ -111,7 +111,52 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     thumb_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/api/thumbnails", StaticFiles(directory=str(thumb_dir)), name="thumbnails")
 
+    _mount_frontend(app)
+
     return app
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """Serve the built SPA from the API process (process-mode deployment).
+
+    Replaces the nginx frontend container: hashed /assets get immutable
+    caching, everything else falls back to index.html with no-cache (SPA
+    routing). Mounted AFTER all API routes; the fallback explicitly skips
+    /api and the OpenAPI docs prefixes so unknown API paths keep their
+    404 JSON instead of being swallowed by HTML.
+    """
+    if not get_settings().app.serve_frontend:
+        return
+    dist = Path(os.environ.get("VSLP_FRONTEND_DIST", "")) if os.environ.get("VSLP_FRONTEND_DIST") \
+        else Path(__file__).resolve().parents[3] / "frontend" / "dist"
+    if not (dist / "index.html").is_file():
+        return
+
+    class _ImmutableStatic(StaticFiles):
+        def file_response(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            response = super().file_response(*args, **kwargs)
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return response
+
+    app.mount("/assets", _ImmutableStatic(directory=str(dist / "assets")), name="assets")
+
+    # Path params arrive WITHOUT the leading slash.
+    _skip_prefixes = ("api/", "docs", "redoc", "openapi.json")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        from fastapi import HTTPException
+        from fastapi.responses import FileResponse
+
+        if full_path == "api" or full_path.startswith(_skip_prefixes):
+            raise HTTPException(status_code=404, detail="Not Found")
+        target = dist / full_path
+        if full_path and target.is_file():
+            return FileResponse(target, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+        return FileResponse(
+            dist / "index.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
+        )
 
 
 app = create_app()
