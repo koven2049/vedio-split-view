@@ -504,17 +504,12 @@ run_status() {
             fail=1
         fi
     done
-    if curl -sf --noproxy '*' "http://localhost:$FRONTEND_PORT/" >/dev/null 2>&1; then
-        log_ok "URL: http://localhost:$FRONTEND_PORT"
-        log_ok "Health: OK"
-    else
-        log_ok "URL: http://localhost:$FRONTEND_PORT"
-        log_error "Health: FAILED"
-        fail=1
-    fi
 
     echo
     _report_data_health || fail=1
+    return "$fail"
+
+    echo
     return "$fail"
 }
 
