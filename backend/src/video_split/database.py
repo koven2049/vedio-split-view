@@ -30,17 +30,18 @@ def _get_engine():
             f"sqlite+aiosqlite:///{db_path}",
             echo=False,
         )
-        # WAL lets reads proceed while a task commits (parallel analyses used
-        # to risk "database is locked"); busy_timeout waits out the few real
-        # write-write collisions instead of failing instantly.
+        # busy_timeout rides out short write-write collisions between parallel
+        # tasks instead of failing instantly with "database is locked".
+        # NOTE: journal_mode=WAL was tried here and must NOT come back while
+        # the DB sits on a macOS bind mount — WAL's shared-memory (-shm) file
+        # does not work across podman's virtiofs boundary and every container
+        # query dies with "disk I/O error" (verified in production 2026-10-18).
         from sqlalchemy import event
 
         @event.listens_for(_engine.sync_engine, "connect")
         def _sqlite_pragma(dbapi_conn, _record):  # type: ignore[no-untyped-def]
             cursor = dbapi_conn.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
 
     return _engine

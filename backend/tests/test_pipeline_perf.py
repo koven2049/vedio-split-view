@@ -153,11 +153,13 @@ async def test_translate_batch_cache_skips_done_work(monkeypatch, test_config_pa
     assert calls == [], "cached batch must not hit the LLM"
 
 
-# ─── SQLite WAL ───
+# ─── SQLite pragmas ───
 
 
 @pytest.mark.asyncio
-async def test_sqlite_wal_enabled(test_config_path):
+async def test_sqlite_busy_timeout_set(test_config_path):
+    """busy_timeout yes; journal_mode must stay default — WAL breaks on
+    podman virtiofs bind mounts (disk I/O error, see database.py note)."""
     from sqlalchemy import text
 
     from video_split.config import set_config_path
@@ -168,5 +170,5 @@ async def test_sqlite_wal_enabled(test_config_path):
     async with factory() as session:
         mode = (await session.execute(text("PRAGMA journal_mode"))).scalar()
         timeout = (await session.execute(text("PRAGMA busy_timeout"))).scalar()
-    assert str(mode).lower() == "wal"
+    assert str(mode).lower() == "delete"
     assert int(timeout) >= 5000
