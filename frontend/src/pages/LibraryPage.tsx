@@ -641,7 +641,13 @@ function VideoCard({
       <div className="relative">
         <Link to={`/video/${video.id}`} className="block">
           {video.thumbnail_url ? (
-            <img src={video.thumbnail_url} alt="" className="w-full h-36 object-cover" />
+            <img
+              src={video.thumbnail_url}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="w-full h-36 object-cover"
+            />
           ) : (
             <div
               className="w-full h-36 flex items-center justify-center"

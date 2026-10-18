@@ -476,6 +476,8 @@ export default function VideoDetailPage() {
           <img
             src={video.thumbnail_url}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="w-64 h-40 object-cover rounded-xl shrink-0"
           />
         )}

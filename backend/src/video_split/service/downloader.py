@@ -438,6 +438,36 @@ async def extract_metadata(
     return meta
 
 
+_THUMBNAIL_MAX_WIDTH = 640
+_THUMBNAIL_JPEG_QUALITY = 80
+
+
+def _resize_thumbnail(path: Path) -> None:
+    """Shrink an oversized thumbnail in place so library grids stay fast.
+
+    The UI never renders thumbnails wider than ~640 CSS px, yet sources ship
+    1280px+ JPEGs (worst observed: 4 MB). Resize keeps the original format
+    (same filename/extension, DB paths stay valid); on any failure the
+    original bytes stay untouched — thumbnails are cosmetic, never fatal.
+    """
+    try:
+        from PIL import Image
+
+        with Image.open(path) as img:
+            if img.width <= _THUMBNAIL_MAX_WIDTH:
+                return
+            height = round(img.height * _THUMBNAIL_MAX_WIDTH / img.width)
+            resized = img.resize((_THUMBNAIL_MAX_WIDTH, height))
+            fmt = (img.format or "JPEG").upper()
+            if fmt == "JPEG":
+                resized = resized.convert("RGB")
+            save_kwargs = {"quality": _THUMBNAIL_JPEG_QUALITY} if fmt in ("JPEG", "WEBP") else {}
+            resized.save(path, format=fmt, **save_kwargs)
+        logger.info("[thumbnail] resized %s to %dw (%.1f KB)", path.name, _THUMBNAIL_MAX_WIDTH, path.stat().st_size / 1024)
+    except Exception:
+        logger.warning("[thumbnail] resize failed for %s (keeping original)", path.name, exc_info=True)
+
+
 async def download_thumbnail(meta: VideoMeta) -> str:
     """Download remote thumbnail to local storage. Returns the API-relative path.
 
@@ -476,7 +506,8 @@ async def download_thumbnail(meta: VideoMeta) -> str:
             resp = await client.get(meta.thumbnail_url, headers=headers)
             resp.raise_for_status()
             local_path.write_bytes(resp.content)
-            logger.info("[thumbnail] Downloaded: %s (%.1f KB)", filename, len(resp.content) / 1024)
+            _resize_thumbnail(local_path)
+            logger.info("[thumbnail] Downloaded: %s (%.1f KB)", filename, local_path.stat().st_size / 1024)
             return f"/api/thumbnails/{filename}"
     except Exception:
         logger.warning("[thumbnail] Failed to download %s", meta.thumbnail_url, exc_info=True)

@@ -95,11 +95,16 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         return {"status": "ok"}
 
     @app.middleware("http")
-    async def no_cache_thumbnails(request, call_next):  # type: ignore[no-untyped-def]
-        """Prevent Cloudflare from caching stale thumbnail responses."""
+    async def cache_thumbnails(request, call_next):  # type: ignore[no-untyped-def]
+        """Browser-cacheable, CDN-uncacheable thumbnails.
+
+        Thumbnail files are content-stable (re-analysis reuses the cached
+        file), so browsers may keep them for a day; ``private`` keeps shared
+        CDNs like Cloudflare out, preserving the original intent.
+        """
         response = await call_next(request)
         if request.url.path.startswith("/api/thumbnails/"):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Cache-Control"] = "private, max-age=86400"
         return response
 
     thumb_dir = Path(settings.storage.temp_dir).parent / "thumbnails"
