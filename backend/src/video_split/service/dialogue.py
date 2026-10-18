@@ -28,10 +28,6 @@ logger = logging.getLogger(__name__)
 
 _ASCII_ALNUM = re.compile(r"[A-Za-z0-9]")
 _SENTENCE_END = tuple("。？！?!…")
-# Safety valve for fallback paragraphs: subtitle runs without any sentence
-# punctuation (e.g. auto-generated CJK captions) would otherwise fuse into
-# one giant block.
-_FALLBACK_MAX_LINES = 40
 
 
 def _join_texts(texts: list[str]) -> str:
@@ -85,13 +81,17 @@ def _build_prompt(
 ## 任务：说话人识别与分段
 1. 为每行字幕判断说话人，并把全部字幕切分成连续的 blocks（自然段）：
    - blocks 必须按顺序**无缝覆盖全部下标 0..{total_lines - 1}**：不重叠、不跳过、首尾相接
-   - 每个 block 是一个自然段：同一说话人按话题/停顿切段，典型包含 2~10 行字幕
+   - 每个 block 是一个**完整的意群**（一个观点/一层意思讲完才换段）：
+     - 多人对话：每个说话轮一个 block，典型 4~12 行字幕（约 100~300 字）
+     - 单人独白/教程/播报：按话题弧切段，典型 8~20 行字幕（约 200~500 字）
+     - **宁长而完整，不要短而碎**；一个意思没讲完绝不要断段
+     - 禁止按固定行数或固定时间间隔机械切段
    - 说话人变化必须开新 block
 2. 说话人识别规则：
    - 从称呼、自我介绍、问答模式等线索推断；能确定真名时用真名（知名人物用通行中文译名）
    - 不能确定时用 主持人 / 嘉宾1 / 嘉宾2 这类角色称呼
    - 单人内容（独白、教程、单人播报）统一只给一个说话人
-3. sections：只在内容出现重大话题切换处给 3~8 个小节标题（可选，无明显切换时给空数组）
+3. sections：内容超过10分钟时给 4~8 个小节标题（单人独白的导航主要靠小节）；不足10分钟或无明显切换时给空数组
 
 ## 防幻觉约束（最重要）
 - 你只输出说话人和字幕下标区间，绝对不要改写、翻译或复述字幕文本
@@ -189,27 +189,41 @@ def _validate_blocks(data: dict, total_lines: int) -> tuple[list[dict], list[dic
     return speakers, blocks, sections
 
 
+_FALLBACK_MIN_CHARS = 200
+# Safety valve for fallback paragraphs: subtitle runs without any sentence
+# punctuation (e.g. auto-generated CJK captions) would otherwise fuse into
+# one giant block.
+_FALLBACK_MAX_LINES = 40
+
+
 def _fallback_dialogue(subtitles: list[SubtitleEntry]) -> dict:
     """Deterministic single-speaker layout used when the LLM path fails.
 
-    One speaker ("讲述者"); paragraphs accumulate subtitle lines until two
-    sentence-final punctuation marks (。？！?!…) have been seen, then cut.
-    Never raises.
+    One speaker ("讲述者"); lines accumulate into a paragraph and cut only
+    at a sentence-final line (。？！?!…) once the paragraph has reached
+    ``_FALLBACK_MIN_CHARS`` characters — cutting every couple of sentences
+    shatters spoken monologues into unreadable fragments, and ASR periods
+    routinely land mid-sentence, so an arbitrary early cut also severs
+    sentences. Never raises.
     """
     blocks: list[dict] = []
     start = 0
+    chars = 0
     sentences = 0
     for i, entry in enumerate(subtitles):
-        text = (entry.text or "").rstrip()
+        text = (entry.text or "").strip()
+        chars += len(text)
         if text.endswith(_SENTENCE_END):
             sentences += 1
-            if sentences >= 2:
+            if chars >= _FALLBACK_MIN_CHARS and sentences >= 2:
                 blocks.append({"s": "A", "f": start, "t": i})
                 start = i + 1
+                chars = 0
                 sentences = 0
         if i - start + 1 >= _FALLBACK_MAX_LINES:
             blocks.append({"s": "A", "f": start, "t": i})
             start = i + 1
+            chars = 0
             sentences = 0
     if start < len(subtitles):
         blocks.append({"s": "A", "f": start, "t": len(subtitles) - 1})

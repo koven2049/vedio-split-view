@@ -206,19 +206,38 @@ async def test_fallback_on_llm_error(monkeypatch, _config):
 
 
 @pytest.mark.asyncio
-async def test_fallback_cuts_paragraphs_by_punctuation(monkeypatch, _config):
+async def test_fallback_paragraphs_reach_min_chars(monkeypatch, _config):
     _mock_llm(monkeypatch, RuntimeError("boom"))
-    # Two sentence-final marks per paragraph → block per 2 subtitle lines.
-    subs = _subs(["第一句。", "第二句！", "第三句？", "第四句。", "第五句？", "没有标点"])
+    # Paragraphs fuse until ~200 chars AND ≥2 sentence-final lines: short
+    # punctuated lines must NOT each become their own fragment.
+    lines = [f"这是第{i}句话，内容比较短。" for i in range(12)]  # ~13 chars each
+    subs = _subs(lines)
     result, _usage = await format_dialogue(
         subs,
         platform="youtube",
         uploader="u",
         title="t",
-        duration_seconds=36,
+        duration_seconds=72,
     )
     blocks = result["blocks"]
-    assert [(b["f"], b["t"]) for b in blocks] == [(0, 1), (2, 3), (4, 5)]
+    # 12 lines × ~13 chars ≈ 156 chars total → too small to cut anywhere:
+    # exactly one paragraph covering everything.
+    assert [(b["f"], b["t"]) for b in blocks] == [(0, 11)]
+
+    # A longer stream cuts only at sentence-final lines past the threshold,
+    # never mid-run: every block ends on a punctuated line and spans ≥2 lines.
+    long_lines = [f"第{i}句话，凑够一些字数好越过两百字的段落阈值。" for i in range(30)]
+    subs2 = _subs(long_lines)
+    result2, _usage = await format_dialogue(
+        subs2, platform="youtube", uploader="u", title="t", duration_seconds=180
+    )
+    blocks2 = result2["blocks"]
+    assert len(blocks2) >= 2
+    covered = [i for b in blocks2 for i in range(b["f"], b["t"] + 1)]
+    assert covered == list(range(30))
+    for b in blocks2[:-1]:  # trailing block may end without punctuation
+        assert long_lines[b["t"]].endswith(("。", "！", "？"))
+        assert b["t"] - b["f"] + 1 >= 2
 
 
 # ─── text joining ───
