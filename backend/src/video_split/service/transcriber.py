@@ -40,7 +40,15 @@ class ASRUsage:
 
 
 DASHSCOPE_HOSTS = ("dashscope.aliyuncs.com",)
-FUNASR_MODELS = ("fun-asr", "fun-asr-mtl")
+# Models served by the DashScope async file-transcription API
+# (POST /services/audio/asr/transcription + task polling).
+FUNASR_MODELS = (
+    "fun-asr",
+    "fun-asr-mtl",
+    "qwen-audio-3.0-asr-flash-filetrans",
+    "qwen-audio-3.1-asr-flash-filetrans",
+    "qwen3-asr-flash-filetrans",
+)
 
 
 def _is_dashscope_funasr() -> bool:
@@ -50,6 +58,18 @@ def _is_dashscope_funasr() -> bool:
     return any(h in base for h in DASHSCOPE_HOSTS) and any(
         model.startswith(m) for m in FUNASR_MODELS
     )
+
+
+# Models whose async file-transcription API accepts diarization_enabled
+# (per DashScope docs: Fun-ASR / Paraformer / Qwen-Audio-3.x-ASR-Flash-Filetrans).
+# Matched by prefix; note qwen-audio-3.1 renamed the param to
+# speaker_diarization_enabled — add a branch here before switching to it.
+_DIARIZATION_MODELS = ("fun-asr", "paraformer", "qwen-audio-3.0-asr-flash-filetrans")
+
+
+def _model_supports_diarization(model: str) -> bool:
+    model = model.lower()
+    return any(model.startswith(m) for m in _DIARIZATION_MODELS)
 
 
 def _stderr_tail(stderr: str, *, max_lines: int = 6) -> str:
@@ -475,6 +495,12 @@ async def _funasr_call(
     params: dict = {}
     if lang:
         params["language_hints"] = [lang]
+    if _model_supports_diarization(model):
+        # Native speaker labels land in each sentence's speaker_id — the
+        # dialogue formatter uses them instead of guessing speakers via LLM.
+        # Recommended audio length ≤2h when enabled; longer tasks may still
+        # succeed but with lower label quality.
+        params["diarization_enabled"] = True
 
     body: dict = {
         "model": model,
@@ -566,5 +592,6 @@ async def _parse_funasr_results(
                         start=begin_s,
                         duration=end_s - begin_s,
                         text=text,
+                        speaker=str(sent.get("speaker_id", "") or ""),
                     ))
     return entries

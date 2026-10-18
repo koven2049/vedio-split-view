@@ -340,7 +340,10 @@ def _parse_stored_subtitles(video: Video) -> list[SubtitleEntry] | None:
         if not isinstance(entries, list) or not entries:
             return None
         return [
-            SubtitleEntry(start=e["start"], duration=e["duration"], text=e["text"])
+            SubtitleEntry(
+                start=e["start"], duration=e["duration"], text=e["text"],
+                speaker=str(e.get("speaker", "") or ""),
+            )
             for e in entries
         ]
     except (json.JSONDecodeError, TypeError, KeyError):

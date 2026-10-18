@@ -506,6 +506,6 @@ async def translate_subtitles_to_chinese(
     translated_count = sum(1 for t in translated if t not in [s.text for s in subtitles])
     logger.info("[translate] translated %d/%d entries to Chinese", translated_count, len(translated))
     return [
-        SubtitleEntry(start=s.start, duration=s.duration, text=translated[i])
+        SubtitleEntry(start=s.start, duration=s.duration, text=translated[i], speaker=s.speaker)
         for i, s in enumerate(subtitles)
     ]

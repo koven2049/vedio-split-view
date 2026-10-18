@@ -210,7 +210,10 @@ async def _save_analysis_results(
         f"[{int(s.start) // 60:02d}:{int(s.start) % 60:02d}] {s.text}" for s in subtitles
     )
     subtitle_data = json.dumps(
-        [{"start": s.start, "duration": s.duration, "text": s.text} for s in subtitles],
+        [
+            {"start": s.start, "duration": s.duration, "text": s.text, "speaker": s.speaker}
+            for s in subtitles
+        ],
         ensure_ascii=False,
     )
     video = Video(

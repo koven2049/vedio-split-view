@@ -36,6 +36,10 @@ class SubtitleEntry:
     start: float
     duration: float
     text: str
+    # ASR diarization label (raw speaker_id from DashScope); empty when the
+    # transcription model has no diarization (Whisper) or the entry predates
+    # the field.
+    speaker: str = ""
 
 
 @dataclass

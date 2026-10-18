@@ -235,6 +235,69 @@ def _fallback_dialogue(subtitles: list[SubtitleEntry]) -> dict:
     }
 
 
+def _split_run(subtitles: list[SubtitleEntry], f: int, t: int, sid: str) -> list[dict]:
+    """Chunk one speaker run [f..t] into paragraphs (min chars, sentence-final cut)."""
+    blocks: list[dict] = []
+    start = f
+    chars = 0
+    sentences = 0
+    for i in range(f, t + 1):
+        chars += len(subtitles[i].text or "")
+        if (subtitles[i].text or "").rstrip().endswith(_SENTENCE_END):
+            sentences += 1
+            if chars >= _FALLBACK_MIN_CHARS and sentences >= 2:
+                blocks.append({"s": sid, "f": start, "t": i})
+                start = i + 1
+                chars = 0
+                sentences = 0
+        if i - start + 1 >= _FALLBACK_MAX_LINES:
+            blocks.append({"s": sid, "f": start, "t": i})
+            start = i + 1
+            chars = 0
+            sentences = 0
+    if start <= t:
+        blocks.append({"s": sid, "f": start, "t": t})
+    return blocks
+
+
+def _asr_speaker_layout(subtitles: list[SubtitleEntry]) -> dict | None:
+    """Build the dialogue layout from native ASR diarization labels, or None.
+
+    Requires labels on ~all entries (Whisper output and pre-diarization rows
+    have none). Speakers are numbered by first appearance — raw ids carry no
+    name information; a later pass can attach real names. Long same-speaker
+    runs are chunked with the same coarse rule as the fallback path.
+    """
+    labeled = sum(1 for s in subtitles if s.speaker)
+    if labeled < len(subtitles) * 0.8:
+        return None
+
+    order: list[str] = []
+    seen: set[str] = set()
+    for s in subtitles:
+        if s.speaker and s.speaker not in seen:
+            seen.add(s.speaker)
+            order.append(s.speaker)
+    speakers = [
+        {"id": f"S{i + 1}", "name": f"说话人{i + 1}", "role": ""} for i in range(len(order))
+    ]
+    sid_of = {raw: f"S{i + 1}" for i, raw in enumerate(order)}
+
+    blocks: list[dict] = []
+    run_start = 0
+    for i in range(1, len(subtitles) + 1):
+        if i == len(subtitles) or subtitles[i].speaker != subtitles[run_start].speaker:
+            blocks.extend(_split_run(subtitles, run_start, i - 1, sid_of[subtitles[run_start].speaker]))
+            run_start = i
+    return {
+        "speakers": speakers,
+        "blocks": blocks,
+        "sections": [],
+        "fallback": False,
+        "source": "asr",
+    }
+
+
 async def _call_llm_dialogue(
     prompt: str,
     model: str,
@@ -278,10 +341,18 @@ async def format_dialogue(
     accounting (all zeros on the fallback path). Any LLM/validation failure
     degrades to the deterministic single-speaker fallback; this function
     never raises.
+
+    When most entries carry native ASR diarization labels, the layout is
+    built from those labels directly — no LLM attribution call, no fallback
+    risk (sections stay empty; a future pass can add them).
     """
     n = len(subtitles)
     if n == 0:
         return {"speakers": [], "blocks": [], "sections": [], "fallback": True}, {}
+
+    asr_layout = _asr_speaker_layout(subtitles)
+    if asr_layout is not None:
+        return asr_layout, {}
 
     settings = get_settings()
     prompt = _build_prompt(
