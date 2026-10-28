@@ -41,3 +41,4 @@ logs/
 
 # code-review-graph 本地图谱索引（每工程独立，不入 git）
 .code-review-graph/
+.worktree/
