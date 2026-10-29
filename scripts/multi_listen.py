@@ -38,6 +38,9 @@ PORTS = tuple(
 def _preflight_ports() -> None:
     for port in PORTS:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Match uvicorn's bind: without SO_REUSEADDR, TIME_WAIT sockets left
+        # by the previous process fail a restart; a live listener still fails.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("0.0.0.0", port))
         except OSError as e:
