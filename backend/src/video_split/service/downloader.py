@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -412,9 +413,13 @@ async def extract_metadata(
         _apply_youtube_opts(ydl_opts)
 
     logger.info("[metadata] Extracting metadata: platform=%s vid=%s url=%s", platform, vid, url)
-    try:
+    def _extract() -> dict | None:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            return ydl.extract_info(url, download=False)
+
+    try:
+        # yt-dlp is blocking; keep the event loop free (Feishu callbacks, SSE).
+        info = await asyncio.to_thread(_extract)
     except Exception:
         logger.exception("[metadata] yt-dlp extract_info failed for %s", url)
         raise
@@ -551,8 +556,12 @@ async def _fetch_youtube_subtitles_via_ytdlp(video_id: str) -> list[SubtitleEntr
         _apply_youtube_opts(ydl_opts)
 
         logger.info("[subtitle] YouTube via yt-dlp: %s", video_id)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        def _download() -> None:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+        # yt-dlp is blocking; keep the event loop free (Feishu callbacks, SSE).
+        await asyncio.to_thread(_download)
 
         chosen = _pick_youtube_subtitle_file(
             sorted(Path(tmp).glob(f"{video_id}*.json3")), video_id

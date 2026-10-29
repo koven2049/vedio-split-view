@@ -59,7 +59,11 @@ async def _attach_platform_tag(db: AsyncSession, video: Video) -> None:
 
 
 class AnalysisCancelled(Exception):
-    pass
+    """Raised to stop analysis; the message (if any) explains why."""
+
+
+CONFIRM_TIMEOUT_SECONDS = 300
+CONFIRM_TIMEOUT_MESSAGE = "确认超时（5 分钟未确认），已自动取消。请重新发送链接。"
 
 
 class DurationLimitExceeded(ValueError):
@@ -373,9 +377,9 @@ async def run_analysis(
             logger.info("[analysis] Task #%d — awaiting user confirmation (duration=%ds, threshold=%ds)",
                         task.id, duration, threshold)
             try:
-                await asyncio.wait_for(confirm_event.wait(), timeout=300)
+                await asyncio.wait_for(confirm_event.wait(), timeout=CONFIRM_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
-                raise AnalysisCancelled()
+                raise AnalysisCancelled(CONFIRM_TIMEOUT_MESSAGE)
             _check_cancelled()
             logger.info("[analysis] Task #%d — user confirmed, proceeding", task.id)
 
@@ -733,11 +737,15 @@ async def run_analysis(
             detail={"video_id": video.id, "usage": usage_data},
         )
 
-    except AnalysisCancelled:
-        logger.info("[analysis] Task #%d — cancelled by user", task.id)
+    except AnalysisCancelled as e:
+        reason = str(e)
+        if reason:
+            logger.info("[analysis] Task #%d — cancelled: %s", task.id, reason)
+        else:
+            logger.info("[analysis] Task #%d — cancelled by user", task.id)
         await update_task_status(db, task, "cancelled")
         await cleanup_task_files(task)
-        yield ProgressEvent(stage="cancelled", progress=0, message="Analysis cancelled.")
+        yield ProgressEvent(stage="cancelled", progress=0, message=reason or "Analysis cancelled.")
 
     except Exception as e:
         logger.error("[analysis] Task #%d — unhandled error: %s", task.id, e)

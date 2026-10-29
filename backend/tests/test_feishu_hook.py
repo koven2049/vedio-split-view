@@ -434,6 +434,26 @@ async def test_confirm_card_action(enable_feishu, monkeypatch):
     }
     result = await handle_card_action(payload)
     assert result["toast"]["type"] == "success"
+    # The clicked card is replaced so the button is gone.
+    card = result["card"]["data"]
+    assert result["card"]["type"] == "raw"
+    assert card["header"]["title"]["content"] == "已确认"
+    assert not any(el["tag"] == "action" for el in card["elements"])
+
+
+async def test_confirm_card_action_expired_replaces_card(enable_feishu, monkeypatch):
+    monkeypatch.setattr(runner, "confirm", lambda _id: False)
+    payload = {
+        "header": {"event_type": "card.action.trigger", "token": VERIFICATION},
+        "event": {
+            "operator": {"open_id": ALLOWED_OPEN_ID},
+            "action": {"value": {"action": "confirm", "task_id": "9"}, "tag": "button"},
+        },
+    }
+    result = await handle_card_action(payload)
+    card = result["card"]["data"]
+    assert card["header"]["title"]["content"] == "确认已失效"
+    assert not any(el["tag"] == "action" for el in card["elements"])
 
 
 async def test_confirm_card_action_forbidden(enable_feishu, monkeypatch):

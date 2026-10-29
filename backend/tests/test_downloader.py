@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -15,6 +16,7 @@ from video_split.service.downloader import (
     _pick_youtube_subtitle_url,
     _proxy_for_platform,
     detect_platform,
+    extract_metadata,
     fetch_youtube_subtitles,
     generate_playback_url,
 )
@@ -180,6 +182,8 @@ class TestYoutubeSubtitleParse:
         assert _pick_youtube_subtitle_file([en, zh], "vid") == zh
 
     async def test_fetch_uses_ytdlp_json3(self):
+        threads: list[threading.Thread] = []
+
         class FakeYDL:
             def __init__(self, opts):
                 self.opts = opts
@@ -191,6 +195,7 @@ class TestYoutubeSubtitleParse:
                 return False
 
             def download(self, _urls):
+                threads.append(threading.current_thread())
                 dest = Path(self.opts["outtmpl"]).parent / "rAk1wGn0hXs.en.json3"
                 dest.write_text(
                     '{"events":[{"tStartMs":0,"dDurationMs":1000,"segs":[{"utf8":"字幕"}]}]}',
@@ -208,6 +213,31 @@ class TestYoutubeSubtitleParse:
 
         legacy.assert_not_called()
         assert entries == [SubtitleEntry(start=0.0, duration=1.0, text="字幕")]
+        # Blocking yt-dlp must not run on the event loop thread: it stalled
+        # Feishu card callbacks past their 3s deadline.
+        assert threads and threads[0] is not threading.main_thread()
+
+    async def test_extract_metadata_runs_ytdlp_off_loop(self):
+        threads: list[threading.Thread] = []
+
+        class FakeYDL:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, _url, download=False):
+                threads.append(threading.current_thread())
+                raise RuntimeError("stop after recording thread")
+
+        with patch("yt_dlp.YoutubeDL", FakeYDL), pytest.raises(RuntimeError):
+            await extract_metadata("https://www.youtube.com/watch?v=rAk1wGn0hXs")
+
+        assert threads and threads[0] is not threading.main_thread()
 
 
 class TestPickBilibiliAudioUrl:

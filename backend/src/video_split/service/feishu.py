@@ -444,6 +444,10 @@ def card_confirmed() -> dict:
     return _md_card("已确认", "继续分析中。", color="green")
 
 
+def card_confirm_expired() -> dict:
+    return _md_card("确认已失效", "任务已结束或已取消。如需分析，请重新发送链接。", color="grey")
+
+
 _CONFIRM_PHRASES = frozenset({"确认", "继续", "确认继续", "confirm", "yes", "y"})
 
 
@@ -644,19 +648,32 @@ def _card_action_value(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def handle_card_action(payload: dict[str, Any]) -> dict[str, Any]:
+    # Feishu drops responses slower than 3s; the returned card replaces the
+    # clicked one so the button disappears and repeat clicks are harmless.
     open_id = _card_open_id(payload)
     if not is_open_id_allowed(open_id):
+        logger.info("[feishu] card action rejected: open_id not allowed")
         return {"toast": {"type": "error", "content": "未授权"}}
     value = _card_action_value(payload)
     if value.get("action") != "confirm":
+        logger.info("[feishu] card action ignored: action=%s", value.get("action"))
         return {}
     try:
         task_id = int(value.get("task_id"))
     except (TypeError, ValueError):
+        logger.info("[feishu] card action rejected: bad task_id=%r", value.get("task_id"))
         return {"toast": {"type": "error", "content": "无效的任务"}}
     if runner.confirm(task_id):
-        return {"toast": {"type": "success", "content": "已确认，继续分析"}}
-    return {"toast": {"type": "error", "content": "没有待确认的任务"}}
+        logger.info("[feishu] card confirm accepted: task #%d", task_id)
+        return {
+            "toast": {"type": "success", "content": "已确认，继续分析"},
+            "card": {"type": "raw", "data": card_confirmed()},
+        }
+    logger.info("[feishu] card confirm expired: task #%d not pending", task_id)
+    return {
+        "toast": {"type": "warning", "content": "任务已结束或已取消"},
+        "card": {"type": "raw", "data": card_confirm_expired()},
+    }
 
 
 async def _reply(creds: FeishuCredentials, message_id: str, chat_id: str, card: dict) -> None:
