@@ -46,5 +46,8 @@ config/*.key
 data/
 logs/
 
+# ── remote-only rollback backups (docs/process-deploy-plan.md) ──────────────
+*.container.bak
+
 # ── this file itself (remote may have its own) ──────────────────────────────
 .rsync-exclude
