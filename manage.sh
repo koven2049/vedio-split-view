@@ -405,7 +405,8 @@ run_start() {
     log_step "Starting service (launchd) …"
 
     if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
-        launchctl kickstart -k "$AGENT_DOMAIN"
+        launchctl kickstart -k "$AGENT_DOMAIN" \
+            || { log_error "kickstart failed (agent still unloading? retry: $0 start)"; exit 1; }
         log_info "Agent already loaded — restarted."
     else
         [[ -f "$AGENT_PLIST_INSTALL" ]] || {
@@ -432,7 +433,17 @@ run_start() {
 run_stop() {
     log_step "Stopping service …"
     if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
-        launchctl bootout "$AGENT_DOMAIN" && log_ok "Stopped." || log_error "bootout failed"
+        launchctl bootout "$AGENT_DOMAIN" || { log_error "bootout failed"; return 1; }
+        # bootout returns before the agent is fully unloaded; until then
+        # `launchctl print` still finds it and a following start would
+        # kickstart a dying agent (exit 37) instead of bootstrapping.
+        local i
+        for i in $(seq 1 20); do
+            launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1 || { log_ok "Stopped."; return 0; }
+            sleep 0.5
+        done
+        log_error "Agent still loaded 10s after bootout"
+        return 1
     else
         log_ok "Not running."
     fi

@@ -8,6 +8,7 @@ guards below pin the new invariants instead.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 MANAGE = Path(__file__).resolve().parents[2] / "manage.sh"
@@ -45,3 +46,50 @@ def test_legacy_watchdog_script_is_neutralized_template() -> None:
     assert "VSLP-NEUTRALIZED" in text
     assert "exec ./manage.sh start" not in text
     assert "containers_up" not in text
+
+
+def _run_stop_with_fake_launchctl(lingering_prints: int) -> subprocess.CompletedProcess[str]:
+    """Execute the real run_stop against a launchctl stub whose `print`
+    keeps finding the agent for N calls after bootout (launchd unloads
+    asynchronously)."""
+    script = f"""
+set -euo pipefail
+AGENT_DOMAIN=gui/501/test
+booted_out=0; lingering={lingering_prints}
+log_step() {{ :; }}; log_ok() {{ echo "OK $*"; }}; log_error() {{ echo "ERR $*"; }}
+sleep() {{ :; }}
+launchctl() {{
+    case "$1" in
+        bootout) booted_out=1 ;;
+        print)
+            [[ $booted_out == 0 ]] && return 0
+            (( lingering > 0 )) && {{ lingering=$((lingering - 1)); return 0; }}
+            return 113 ;;
+    esac
+}}
+{_func_body("run_stop")}
+run_stop
+echo "left=$lingering"
+"""
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
+
+
+def test_run_stop_waits_until_agent_unloaded() -> None:
+    """Regression: restart = stop + start. If stop returns while launchctl
+    still lists the agent, start kickstarts a dying agent (exit 37) and
+    set -e aborts silently, leaving production down after rebuild."""
+    result = _run_stop_with_fake_launchctl(lingering_prints=3)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OK Stopped." in result.stdout
+    assert "left=0" in result.stdout
+
+
+def test_run_stop_fails_loudly_if_agent_never_unloads() -> None:
+    result = _run_stop_with_fake_launchctl(lingering_prints=999)
+    assert result.returncode != 0
+    assert "ERR" in result.stdout
+
+
+def test_run_start_kickstart_failure_is_reported() -> None:
+    body = _func_body("run_start")
+    assert 'kickstart -k "$AGENT_DOMAIN" \\\n            || { log_error' in body
