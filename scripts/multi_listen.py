@@ -78,7 +78,17 @@ async def main() -> None:
     # gives both listeners one shared, orderly startup/shutdown.
     servers = [
         uvicorn.Server(
-            uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info", lifespan="off")
+            uvicorn.Config(
+                app,
+                host="0.0.0.0",
+                port=port,
+                log_level="info",
+                lifespan="off",
+                # Default 5s closes idle keep-alive sockets; the public entry
+                # rides a cloudflared tunnel whose origin pool wants a longer
+                # reuse window — fewer reconnects on a lossy cross-border link.
+                timeout_keep_alive=75,
+            )
         )
         for port in PORTS
     ]
