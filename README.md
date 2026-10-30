@@ -66,6 +66,8 @@ bash manage.sh start       # 启动
 
 转录说明：长音频尾部短静音块会并入上一块；Fun-ASR 对单块无语音返回空结果，不再让整条任务失败。失败任务重试会复用已完成 chunk 缓存。YouTube 字幕支持代理失败后直连兜底；Bilibili 多 P 链接按 `p` 参数读取对应字幕。
 
+公网访问走 Cloudflare Tunnel（跨境链路延迟远高于本机 1–2ms 的处理耗时）：响应已开启 gzip 压缩（SSE 进度流与图片等不可压类型自动排除），uvicorn keep-alive 提到 75s 减少隧道连接重建——压缩与连接复用都在服务端完成，无需配置。
+
 部署到远端服务器：
 
 ```bash

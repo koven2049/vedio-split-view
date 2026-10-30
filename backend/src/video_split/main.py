@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from video_split.config import get_settings
@@ -46,6 +47,10 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # The public entry rides a cross-border cloudflared tunnel (T28: tunnel
+    # latency dominates, app serves in 1-2ms) — compress JSON/HTML so fewer
+    # bytes cross the slow leg. Browsers/CF send Accept-Encoding anyway.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
     from video_split.api.admin import router as admin_router
     from video_split.api.analysis import router as analysis_router
