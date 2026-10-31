@@ -51,6 +51,15 @@ AGENT_LABEL="com.koven.vsplit.web"
 AGENT_DOMAIN="gui/$(id -u)/${AGENT_LABEL}"
 AGENT_PLIST_INSTALL="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
 AGENT_PLIST_SRC="$SCRIPT_DIR/scripts/com.koven.vsplit.web.plist"
+# Watchdog guards the guard: KeepAlive only revives a *loaded* agent; if the
+# agent is booted out (restart race, manual bootout), the watchdog agent
+# re-bootstraps it every 30s unless a deliberate stop marker exists.
+# 2026-10-31 S1: booted-out agent served 502 for hours with KeepAlive idle.
+WATCHDOG_LABEL="com.koven.vsplit.watchdog"
+WATCHDOG_DOMAIN="gui/$(id -u)/${WATCHDOG_LABEL}"
+WATCHDOG_PLIST_INSTALL="$HOME/Library/LaunchAgents/${WATCHDOG_LABEL}.plist"
+WATCHDOG_PLIST_SRC="$SCRIPT_DIR/scripts/com.koven.vsplit.watchdog.plist"
+STOP_MARKER="$SCRIPT_DIR/logs/.service-stopped"
 
 # ── config helpers ────────────────────────────────────────────────────────────
 read_yaml_value() {
@@ -404,6 +413,9 @@ run_start() {
     mkdir -p "$SCRIPT_DIR/logs"
     log_step "Starting service (launchd) …"
 
+    # Clear the deliberate-stop flag so the watchdog guards this agent again.
+    rm -f "$STOP_MARKER"
+
     if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
         launchctl kickstart -k "$AGENT_DOMAIN" \
             || { log_error "kickstart failed (agent still unloading? retry: $0 start)"; exit 1; }
@@ -439,13 +451,22 @@ run_stop() {
         # kickstart a dying agent (exit 37) instead of bootstrapping.
         local i
         for i in $(seq 1 20); do
-            launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1 || { log_ok "Stopped."; return 0; }
+            launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1 || {
+                # Deliberate stop: flag it so the watchdog doesn't undo this
+                # within 30s (`start` clears the marker again).
+                mkdir -p "$(dirname "$STOP_MARKER")"
+                : > "$STOP_MARKER"
+                log_ok "Stopped. (watchdog stands down until next start)"
+                return 0
+            }
             sleep 0.5
         done
         log_error "Agent still loaded 10s after bootout"
         return 1
     else
-        log_ok "Not running."
+        mkdir -p "$(dirname "$STOP_MARKER")"
+        : > "$STOP_MARKER"
+        log_ok "Not running. (watchdog stands down until next start)"
     fi
 }
 
@@ -505,6 +526,21 @@ run_status() {
         log_error "Process: NOT running"
         fail=1
     fi
+
+    if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
+        log_ok "LaunchAgent ${AGENT_LABEL}: loaded"
+    else
+        log_error "LaunchAgent ${AGENT_LABEL}: NOT loaded"
+        fail=1
+    fi
+    if launchctl print "$WATCHDOG_DOMAIN" >/dev/null 2>&1; then
+        log_ok "Watchdog ${WATCHDOG_LABEL}: loaded"
+    else
+        log_warn "Watchdog ${WATCHDOG_LABEL}: NOT loaded — run: $0 install-launchd"
+    fi
+    if [[ -f "$STOP_MARKER" ]]; then
+        log_warn "Deliberate stop marker present (logs/.service-stopped) — watchdog stands down"
+    fi
     echo
 
     for port in "$web_port" "$api_port"; do
@@ -518,9 +554,6 @@ run_status() {
 
     echo
     _report_data_health || fail=1
-    return "$fail"
-
-    echo
     return "$fail"
 }
 
@@ -859,6 +892,19 @@ run_install_launchd() {
         launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST_INSTALL"
     fi
     log_ok "LaunchAgent ${AGENT_LABEL} installed (RunAtLoad + KeepAlive)"
+
+    # Watchdog agent (30s re-bootstrap guard; no KeepAlive — script exits fast).
+    [[ -f "$WATCHDOG_PLIST_SRC" ]] || { log_error "missing $WATCHDOG_PLIST_SRC"; exit 1; }
+    sed -e "s|__ROOT__|${SCRIPT_DIR}|g" "$WATCHDOG_PLIST_SRC" > "$WATCHDOG_PLIST_INSTALL"
+    log_info "Watchdog plist: $WATCHDOG_PLIST_INSTALL"
+    rm -f "$STOP_MARKER"
+    if launchctl print "$WATCHDOG_DOMAIN" >/dev/null 2>&1; then
+        # Reload so plist/script changes take effect (bootstrap alone won't).
+        launchctl bootout "$WATCHDOG_DOMAIN" 2>/dev/null || true
+    fi
+    launchctl bootstrap "gui/$(id -u)" "$WATCHDOG_PLIST_INSTALL" \
+        || { log_error "watchdog bootstrap failed"; exit 1; }
+    log_ok "LaunchAgent ${WATCHDOG_LABEL} installed (30s re-bootstrap guard)"
 }
 
 # ── usage ─────────────────────────────────────────────────────────────────────
@@ -869,11 +915,13 @@ Usage: $0 <command> [options]
 Lifecycle (native processes via launchd; no containers):
   init                       Create config, directories
   start                      Start the service (bootstrap/kickstart LaunchAgent)
-  stop                       Stop the service (launchctl bootout)
+  stop                       Stop the service (launchctl bootout; watchdog stands
+                             down until the next start)
   restart                    Stop + start
   rebuild                    Reinstall backend deps (venv) + rebuild frontend, restart
-  status                     Process status + health checks + data health
-  install-launchd            Install LaunchAgent (no sudo) + neutralize legacy watchdogs
+  status                     Process/launchd status + health checks + data health
+  install-launchd            Install LaunchAgents (web + 30s watchdog) + neutralize
+                             legacy container watchdogs
   clean                      Remove pip cache / __pycache__ / node_modules / dist
 
 Data:

@@ -39,7 +39,7 @@
 
 ## 自部署
 
-依赖：**Python 3.11+、Node（构建前端）、ffmpeg、Deno ≥2.6.6（YouTube 字幕挑战）**。宿主进程直接运行（launchd 守护），不再使用容器。
+依赖：**Python 3.11+、Node（构建前端）、ffmpeg、Deno ≥2.6.6（YouTube 字幕挑战）**。宿主进程直接运行（launchd 守护 + 30s watchdog 兜底），不再使用容器。
 
 ```bash
 # 1. 初始化（生成配置模板 + 目录结构，含 config/build.cfg）
@@ -60,7 +60,7 @@ bash manage.sh rebuild
 bash manage.sh status     # 进程状态 + 健康检查 + 数据库行数
 bash manage.sh rebuild     # 改完代码后重装依赖并重建前端（最常用）
 bash manage.sh restart     # 停止 + 启动（launchctl bootout/bootstrap）
-bash manage.sh stop        # 停止
+bash manage.sh stop        # 停止（watchdog 仃手，直到下次 start）
 bash manage.sh start       # 启动
 ```
 

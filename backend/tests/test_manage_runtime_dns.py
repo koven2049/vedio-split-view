@@ -55,6 +55,8 @@ def _run_stop_with_fake_launchctl(lingering_prints: int) -> subprocess.Completed
     script = f"""
 set -euo pipefail
 AGENT_DOMAIN=gui/501/test
+STOP_MARKER="${{TMPDIR:-/tmp}}/vsplit-stop-marker-test"
+rm -f "$STOP_MARKER"
 booted_out=0; lingering={lingering_prints}
 log_step() {{ :; }}; log_ok() {{ echo "OK $*"; }}; log_error() {{ echo "ERR $*"; }}
 sleep() {{ :; }}
