@@ -95,3 +95,17 @@ LaunchAgent com.koven.vsplit.web   → .venv python scripts/multi_listen.py
 ## 3. 明确不做
 
 不改业务逻辑；不迁数据；不停 podman machine；不引入 systemd/supervisor/nginx 等新依赖；本轮不测 YouTube（代理问题，观察项）。
+
+## 4. 修订（2026-10-31，T40/T41）：守护缺一层——watchdog agent 补位
+
+**事故**：11:10 前后 web agent 被整体 bootout（应用日志 11:09:53 后戛然而止、无崩溃栈，KeepAlive 全程未动作），公网 502 持续 3h+ 无自动拉起。触发者未查明；结构性原因是 §2.1 的守护决策只覆盖「进程崩、agent 仍在」——launchd KeepAlive 对「agent 已 bootout」无能为力，而旧的 30s watchdog 又在迁移第 0 步被摘除，两层守护换成了半层。
+
+**修订**（不引入新依赖，仍只用 launchd）：新增用户级 watchdog agent `com.koven.vsplit.watchdog` 跑 `scripts/watchdog.sh`（StartInterval 30s；**不设 KeepAlive**——脚本秒退，KeepAlive 会 respawn 洪水）：
+
+- web agent 未加载且无 marker → `launchctl bootstrap` 拉回，动作记 `logs/watchdog.log`；已加载/无 plist/有 marker → 静默退出。
+- `manage.sh stop` 的两条停机路径（bootout 成功 / 本就未运行）都写 `logs/.service-stopped` marker；`start` 在触碰 launchd 前清除、`install-launchd` 亦清除——防止 watchdog 在 30s 内把 deliberate stop 拉回。
+- `install-launchd` 同装两个 agent（watchdog 已加载则 bootout+bootstrap 重载配置）；`status` 增报 web agent / watchdog 加载态与 marker 在场提示。
+- `logs/` 已在 `.rsync-exclude`（marker 与日志不随部署迁移）；`scripts/` 随部署同步。
+- 回归测试 `backend/tests/test_watchdog.py`：真实脚本 + stub launchctl 跑行为分支，manage.sh 函数体断言不变量。
+
+**验收**（上线后实测，不信任文字）：`launchctl bootout gui/$UID/com.koven.vsplit.web` → ≤30s 内自动回载、`/api/health` 恢复；`manage.sh stop` 后静置 5min 无复活且 marker 存在；`start` 后 marker 消失。
