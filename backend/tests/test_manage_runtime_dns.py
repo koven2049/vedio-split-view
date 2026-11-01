@@ -122,6 +122,51 @@ def test_run_start_bootstraps_into_background_domain() -> None:
     assert 'bootstrap "gui/' not in body
 
 
+def test_run_start_gates_start_on_both_listeners() -> None:
+    """T54 acceptance: restart must prove BOTH listeners (:5180 SPA+API and
+    :8080 API compat) answer /api/health. The old gate probed only the web
+    port, so a start with a dead compat listener still reported OK."""
+    body = _func_body("run_start")
+    assert "_ports_healthy && break" in body
+    assert "if _ports_healthy; then" in body
+    helper = _helper_body("_ports_healthy")
+    assert '"$(get_frontend_port)" "$(get_app_port)"' in helper
+    assert "/api/health" in helper
+
+
+def _ports_healthy_with_fake_curl(fail_url: str) -> subprocess.CompletedProcess[str]:
+    """Run the real _ports_healthy against a curl stub that fails for one URL."""
+    script = f"""
+set -euo pipefail
+get_frontend_port() {{ echo 5180; }}
+get_app_port() {{ echo 8080; }}
+probed=""
+curl() {{
+    probed="$probed ${{@: -1}}"
+    [[ "${{@: -1}}" == "{fail_url}" ]] && return 7
+    return 0
+}}
+{_helper_body("_ports_healthy")}
+_ports_healthy && echo healthy=yes || echo healthy=no
+echo "probed:$probed"
+"""
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
+
+
+def test_ports_healthy_passes_when_both_listeners_answer() -> None:
+    result = _ports_healthy_with_fake_curl(fail_url="")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "healthy=yes" in result.stdout
+    assert "http://localhost:5180/api/health" in result.stdout
+    assert "http://localhost:8080/api/health" in result.stdout
+
+
+def test_ports_healthy_fails_when_compat_listener_is_dead() -> None:
+    result = _ports_healthy_with_fake_curl(fail_url="http://localhost:8080/api/health")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "healthy=no" in result.stdout
+
+
 def test_agent_target_looks_in_background_domain_first() -> None:
     """Lookups prefer user/<uid> and only fall back to gui/<uid> for a
     leftover instance from an older install, so stop/restart never misses
