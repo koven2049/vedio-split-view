@@ -68,6 +68,17 @@ _agent_target() {
     return 1
 }
 
+# True only when EVERY listener answers /api/health. multi_listen.py binds
+# :5180 (SPA+API) and :8080 (API compat) in one process; one port up without
+# the other is a broken start, not a healthy one (2026-11-01 T54 acceptance).
+_ports_healthy() {
+    local port
+    for port in "$(get_frontend_port)" "$(get_app_port)"; do
+        curl -sf --noproxy '*' "http://localhost:${port}/api/health" >/dev/null 2>&1 || return 1
+    done
+    return 0
+}
+
 # ── config helpers ────────────────────────────────────────────────────────────
 read_yaml_value() {
     local key="$1" default="$2"
@@ -434,14 +445,16 @@ run_start() {
             || { log_error "bootstrap into $AGENT_BOOT_DOMAIN failed (plist outdated? run: $0 install-launchd)"; exit 1; }
     fi
 
-    local port i
-    port="$(get_frontend_port)"
+    # Both listeners (:5180 SPA+API and :8080 API compat) must answer within
+    # 30s; probing only the web port would report a healthy start while the
+    # compat listener is dead.
+    local i
     for i in $(seq 1 30); do
-        curl -sf --noproxy '*' "http://localhost:${port}/api/health" >/dev/null 2>&1 && break
+        _ports_healthy && break
         sleep 1
     done
-    if curl -sf --noproxy '*' "http://localhost:${port}/api/health" >/dev/null 2>&1; then
-        log_ok "Web: http://localhost:${port}  (API compat: http://localhost:$(get_app_port))"
+    if _ports_healthy; then
+        log_ok "Web: http://localhost:$(get_frontend_port)  (API compat: http://localhost:$(get_app_port))"
     else
         log_error "Service did not come up within 30s — check logs/process.log"
         exit 1
