@@ -21,6 +21,13 @@ def _func_body(name: str) -> str:
     return text[start : nxt if nxt != -1 else None]
 
 
+def _helper_body(name: str) -> str:
+    """Extract a top-level helper (ends at the first column-0 closing brace)."""
+    text = MANAGE.read_text(encoding="utf-8")
+    start = text.index(f"{name}()")
+    return text[start : text.index("\n}\n", start) + 2]
+
+
 def test_run_start_does_not_pass_dns_to_containers() -> None:
     body = _func_body("run_start")
     assert "_podman_dns_args" not in body
@@ -49,27 +56,30 @@ def test_legacy_watchdog_script_is_neutralized_template() -> None:
 
 
 def _run_stop_with_fake_launchctl(lingering_prints: int) -> subprocess.CompletedProcess[str]:
-    """Execute the real run_stop against a launchctl stub whose `print`
-    keeps finding the agent for N calls after bootout (launchd unloads
-    asynchronously)."""
+    """Execute the real _agent_target + run_stop against a launchctl stub
+    whose `print` keeps finding the agent for N calls after bootout (launchd
+    unloads asynchronously)."""
     script = f"""
 set -euo pipefail
-AGENT_DOMAIN=gui/501/test
-booted_out=0; lingering={lingering_prints}
+AGENT_LABEL=com.koven.vsplit.web.test
+AGENT_BOOT_DOMAIN=user/501
+booted_out=0; lingering={lingering_prints}; booted_target=""
 log_step() {{ :; }}; log_ok() {{ echo "OK $*"; }}; log_error() {{ echo "ERR $*"; }}
 sleep() {{ :; }}
 launchctl() {{
     case "$1" in
-        bootout) booted_out=1 ;;
+        bootout) booted_out=1; booted_target="$2" ;;
         print)
             [[ $booted_out == 0 ]] && return 0
             (( lingering > 0 )) && {{ lingering=$((lingering - 1)); return 0; }}
             return 113 ;;
     esac
 }}
+{_helper_body("_agent_target")}
 {_func_body("run_stop")}
 run_stop
 echo "left=$lingering"
+echo "booted=$booted_target"
 """
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
 
@@ -84,6 +94,14 @@ def test_run_stop_waits_until_agent_unloaded() -> None:
     assert "left=0" in result.stdout
 
 
+def test_run_stop_boots_out_background_domain_instance() -> None:
+    """The loaded agent lives in user/<uid> (background domain) since the
+    2026-10-31 outage fix; stop must boot out exactly that instance."""
+    result = _run_stop_with_fake_launchctl(lingering_prints=0)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "booted=user/501/com.koven.vsplit.web.test" in result.stdout
+
+
 def test_run_stop_fails_loudly_if_agent_never_unloads() -> None:
     result = _run_stop_with_fake_launchctl(lingering_prints=999)
     assert result.returncode != 0
@@ -92,4 +110,31 @@ def test_run_stop_fails_loudly_if_agent_never_unloads() -> None:
 
 def test_run_start_kickstart_failure_is_reported() -> None:
     body = _func_body("run_start")
-    assert 'kickstart -k "$AGENT_DOMAIN" \\\n            || { log_error' in body
+    assert 'launchctl kickstart -k "$target" \\\n            || { log_error "kickstart failed' in body
+
+
+def test_run_start_bootstraps_into_background_domain() -> None:
+    """2026-10-31 outage: with another user holding the console there is no
+    gui/<uid> session, and `bootstrap gui/<uid>` from SSH/LaunchDaemon fails
+    with error 125 — start must target the user background domain."""
+    body = _func_body("run_start")
+    assert 'launchctl bootstrap "$AGENT_BOOT_DOMAIN"' in body
+    assert 'bootstrap "gui/' not in body
+
+
+def test_agent_target_looks_in_background_domain_first() -> None:
+    """Lookups prefer user/<uid> and only fall back to gui/<uid> for a
+    leftover instance from an older install, so stop/restart never misses
+    an already-loaded agent."""
+    body = _helper_body("_agent_target")
+    assert 'for d in "$AGENT_BOOT_DOMAIN" "gui/$(id -u)"' in body
+
+
+def test_agent_plist_loads_into_background_session() -> None:
+    """LimitLoadToSessionType=Background is what makes the plist loadable
+    into user/<uid>; a plain Aqua agent is rejected there (error 125)."""
+    plist = (
+        Path(__file__).resolve().parents[2] / "scripts" / "com.koven.vsplit.web.plist"
+    ).read_text(encoding="utf-8")
+    assert "<key>LimitLoadToSessionType</key>" in plist
+    assert "<string>Background</string>" in plist
