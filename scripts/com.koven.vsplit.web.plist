@@ -26,6 +26,9 @@
         <key>HTTPS_PROXY</key>
         <string></string>
     </dict>
+    <!-- Background: loadable into user/<uid>, independent of who holds the console. -->
+    <key>LimitLoadToSessionType</key>
+    <string>Background</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

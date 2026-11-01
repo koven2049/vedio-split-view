@@ -48,9 +48,25 @@ FRONTEND_IMAGE="vedio-split-view_frontend"
 VENV_PY="$SCRIPT_DIR/backend/.venv/bin/python"
 DIST_DIR="$SCRIPT_DIR/frontend/dist"
 AGENT_LABEL="com.koven.vsplit.web"
-AGENT_DOMAIN="gui/$(id -u)/${AGENT_LABEL}"
+# The agent runs in the user's *background* domain (user/<uid>), not the GUI one:
+# a gui/<uid> agent is torn down when another user takes the console (fast user
+# switching, 2026-10-31 outage) and gui/<uid> cannot be bootstrapped over SSH or
+# from a LaunchDaemon (error 125). Lookups check both, for an older GUI instance.
+AGENT_BOOT_DOMAIN="user/$(id -u)"
 AGENT_PLIST_INSTALL="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
 AGENT_PLIST_SRC="$SCRIPT_DIR/scripts/com.koven.vsplit.web.plist"
+
+# Loaded launchd target (domain/label) or empty.
+_agent_target() {
+    local d
+    for d in "$AGENT_BOOT_DOMAIN" "gui/$(id -u)"; do
+        if launchctl print "$d/$AGENT_LABEL" >/dev/null 2>&1; then
+            echo "$d/$AGENT_LABEL"
+            return 0
+        fi
+    done
+    return 1
+}
 
 # ── config helpers ────────────────────────────────────────────────────────────
 read_yaml_value() {
@@ -404,16 +420,18 @@ run_start() {
     mkdir -p "$SCRIPT_DIR/logs"
     log_step "Starting service (launchd) …"
 
-    if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
-        launchctl kickstart -k "$AGENT_DOMAIN" \
+    local target
+    if target="$(_agent_target)"; then
+        launchctl kickstart -k "$target" \
             || { log_error "kickstart failed (agent still unloading? retry: $0 start)"; exit 1; }
-        log_info "Agent already loaded — restarted."
+        log_info "Agent already loaded ($target) — restarted."
     else
         [[ -f "$AGENT_PLIST_INSTALL" ]] || {
             log_error "Agent plist not installed — run: $0 install-launchd"
             exit 1
         }
-        launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST_INSTALL" || { log_error "bootstrap failed"; exit 1; }
+        launchctl bootstrap "$AGENT_BOOT_DOMAIN" "$AGENT_PLIST_INSTALL" \
+            || { log_error "bootstrap into $AGENT_BOOT_DOMAIN failed (plist outdated? run: $0 install-launchd)"; exit 1; }
     fi
 
     local port i
@@ -432,14 +450,15 @@ run_start() {
 
 run_stop() {
     log_step "Stopping service …"
-    if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
-        launchctl bootout "$AGENT_DOMAIN" || { log_error "bootout failed"; return 1; }
+    local target
+    if target="$(_agent_target)"; then
+        launchctl bootout "$target" || { log_error "bootout failed"; return 1; }
         # bootout returns before the agent is fully unloaded; until then
         # `launchctl print` still finds it and a following start would
         # kickstart a dying agent (exit 37) instead of bootstrapping.
         local i
         for i in $(seq 1 20); do
-            launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1 || { log_ok "Stopped."; return 0; }
+            launchctl print "$target" >/dev/null 2>&1 || { log_ok "Stopped."; return 0; }
             sleep 0.5
         done
         log_error "Agent still loaded 10s after bootout"
@@ -481,7 +500,7 @@ run_rebuild() {
     log_ok "frontend ($(du -sh "$DIST_DIR" 2>/dev/null | cut -f1))"
 
     log_step "Restarting service …"
-    if launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
+    if _agent_target >/dev/null; then
         run_restart
     else
         run_start
@@ -855,8 +874,14 @@ run_install_launchd() {
         echo "  sudo rm -f /Library/LaunchDaemons/${legacy_label}.plist"
     fi
 
-    if ! launchctl print "$AGENT_DOMAIN" >/dev/null 2>&1; then
-        launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST_INSTALL"
+    # An instance still in the GUI domain is moved to the background domain.
+    local target
+    if target="$(_agent_target)" && [[ "$target" == gui/* ]]; then
+        launchctl bootout "$target" 2>/dev/null || true
+        sleep 2
+    fi
+    if ! _agent_target >/dev/null; then
+        launchctl bootstrap "$AGENT_BOOT_DOMAIN" "$AGENT_PLIST_INSTALL"
     fi
     log_ok "LaunchAgent ${AGENT_LABEL} installed (RunAtLoad + KeepAlive)"
 }

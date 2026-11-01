@@ -58,6 +58,8 @@ LaunchAgent com.koven.vsplit.web   → .venv python scripts/multi_listen.py
 | `scripts/multi_listen.py`（新） | chdir 锚定 + db 路径自检（**db 文件缺失一律拒启**；首次安装显式 `FIRST_RUN=1` 放行）+ 端口占用预检 + 双 `uvicorn.Server`（5180/8080，0.0.0.0）共享 app + 实例级 `handle_exit` 双退 |
 | `manage.sh` | 命令面不变；**start=`launchctl bootstrap`（已 loaded 则 kickstart，幂等）；stop=`launchctl bootout`（KeepAlive 下 kill 只会被立刻重拉，stop 必须是 bootout）**；rebuild=venv `pip install -e .` + `source nvm` 后 `npm ci && npm run build`；status=pgrep+curl+数据体检（保留 `_report_data_health`）；clean 重写为进程版（**先确认服务已停**，清 venv 缓存/node_modules/dist，不碰 data/logs/config）；install-launchd=装新 Agent（免 sudo）；deploy/export/import/backup 原样，文尾提示语同步 |
 | `scripts/com.koven.vsplit.web.plist`（新） | LaunchAgent：venv python multi_listen.py；WorkingDirectory+PATH+清空代理 env；RunAtLoad+KeepAlive；日志 `logs/process.log` |
+
+> 2026-11-01 修订：Agent 改装进 `user/<uid>` 后台域（plist 加 `LimitLoadToSessionType=Background`），不再用 `gui/<uid>`。原因：10-31 另一用户登录屏幕后 admin 的 GUI 会话结束，GUI 域的 Agent 被一并停掉，且从 SSH / LaunchDaemon（agent-tag）里 `bootstrap gui/<uid>` 必报 125，自动重启全部失败。`manage.sh` 查找已加载实例时两个域都看；`install-launchd` 会把残留的 GUI 域实例迁到后台域。
 | `backend/tests/test_static_frontend.py`（新） | SPA 回退、/assets 缓存头、未知 /api/* 404 JSON、dist 缺失 no-op |
 | `README.md`、`AGENTS.md` | 部署描述进程化；`rebuild` 语义更新（不再有容器重建） |
 
