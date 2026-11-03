@@ -1,0 +1,815 @@
+{
+ "started": "2026-11-03 13:13:09",
+ "finished": "2026-11-03 13:13:33",
+ "config": {
+  "runs": 10,
+  "profile": "fast4g",
+  "cpu": 1,
+  "width": 1440,
+  "height": 900,
+  "ready": "document.body.innerText.includes('/api/videos/analyze')",
+  "type_check": null
+ },
+ "paired": true,
+ "results": {
+  "A": {
+   "url": "http://127.0.0.1:8302/api-docs",
+   "summary": {
+    "n": 10,
+    "n_ok": 10,
+    "ready": {
+     "p50": 423.3,
+     "p75": 424.4,
+     "p95": 450.1
+    },
+    "lcp": {
+     "p50": 430.0,
+     "p75": 432.0,
+     "p95": 456.8
+    },
+    "fcp": {
+     "p50": 378.0,
+     "p75": 390.0,
+     "p95": 404.4
+    },
+    "dcl": {
+     "p50": 350.1,
+     "p75": 355.4,
+     "p95": 366.9
+    },
+    "load": {
+     "p50": 350.1,
+     "p75": 355.4,
+     "p95": 366.9
+    },
+    "longtask": {
+     "p50": 0.0,
+     "p75": 0.0,
+     "p95": 0.0
+    },
+    "requests": {
+     "p50": 4.0,
+     "p75": 4.0,
+     "p95": 4.0
+    },
+    "bytes_total": {
+     "p50": 147154.0,
+     "p75": 147154.0,
+     "p95": 147154.0
+    }
+   },
+   "runs": [
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 424.60000002384186,
+     "lcp": 432,
+     "longtask": 0,
+     "fcp": 376,
+     "dcl": 346.5,
+     "load": 346.60000002384186,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 401
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 336
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 78
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 407.2000000476837,
+     "lcp": 416,
+     "longtask": 0,
+     "fcp": 376,
+     "dcl": 349.2000000476837,
+     "load": 349.2000000476837,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 400
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 337
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 80
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 423.2999999523163,
+     "lcp": 428,
+     "longtask": 0,
+     "fcp": 376,
+     "dcl": 348,
+     "load": 348.0999999642372,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 406
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 337
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 80
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 419.69999998807907,
+     "lcp": 428,
+     "longtask": 0,
+     "fcp": 372,
+     "dcl": 346.0999999642372,
+     "load": 346.0999999642372,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 403
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 335
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 76
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 403.9000000357628,
+     "lcp": 412,
+     "longtask": 0,
+     "fcp": 384,
+     "dcl": 351,
+     "load": 351,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 393
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 339
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 78
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 423.9000000357628,
+     "lcp": 432,
+     "longtask": 0,
+     "fcp": 380,
+     "dcl": 351.30000001192093,
+     "load": 351.30000001192093,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 406
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 338
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 81
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 404.69999998807907,
+     "lcp": 412,
+     "longtask": 0,
+     "fcp": 372,
+     "dcl": 345.39999997615814,
+     "load": 345.5,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 397
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 335
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 76
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 423.4000000357628,
+     "lcp": 432,
+     "longtask": 0,
+     "fcp": 392,
+     "dcl": 356.80000001192093,
+     "load": 356.80000001192093,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 406
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 341
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 83
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 440.7999999523163,
+     "lcp": 448,
+     "longtask": 0,
+     "fcp": 400,
+     "dcl": 362.19999998807907,
+     "load": 362.19999998807907,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 423
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 340
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 82
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/api-docs",
+     "ok": true,
+     "ready": 457.7000000476837,
+     "lcp": 464,
+     "longtask": 0,
+     "fcp": 408,
+     "dcl": 370.7000000476837,
+     "load": 370.7000000476837,
+     "requests": 4,
+     "bytes_total": 147154,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/docs-data",
+       "responseEnd": 435
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 343
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 80
+      }
+     ]
+    }
+   ]
+  },
+  "B": {
+   "url": "http://127.0.0.1:8303/api-docs",
+   "summary": {
+    "n": 10,
+    "n_ok": 10,
+    "ready": {
+     "p50": 655.0,
+     "p75": 657.5,
+     "p95": 675.5
+    },
+    "lcp": {
+     "p50": 664.0,
+     "p75": 667.0,
+     "p95": 683.4
+    },
+    "fcp": {
+     "p50": 624.0,
+     "p75": 646.0,
+     "p95": 650.2
+    },
+    "dcl": {
+     "p50": 286.9,
+     "p75": 291.8,
+     "p95": 296.4
+    },
+    "load": {
+     "p50": 287.0,
+     "p75": 291.8,
+     "p95": 296.4
+    },
+    "longtask": {
+     "p50": 0.0,
+     "p75": 0.0,
+     "p95": 0.0
+    },
+    "requests": {
+     "p50": 8.0,
+     "p75": 8.0,
+     "p95": 8.0
+    },
+    "bytes_total": {
+     "p50": 121976.0,
+     "p75": 121976.0,
+     "p95": 121976.0
+    }
+   },
+   "runs": [
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 688.5,
+     "lcp": 696,
+     "longtask": 0,
+     "fcp": 624,
+     "dcl": 281.39999997615814,
+     "load": 281.39999997615814,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "script": 113329,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 669
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 335
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 332
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 326
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 323
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 655.6000000238419,
+     "lcp": 664,
+     "longtask": 0,
+     "fcp": 616,
+     "dcl": 286.9000000357628,
+     "load": 287,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "script": 113329,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 634
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 343
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 340
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 334
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 332
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 640,
+     "lcp": 648,
+     "longtask": 0,
+     "fcp": 624,
+     "dcl": 290.19999998807907,
+     "load": 290.19999998807907,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "script": 113329,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 632
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 343
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 337
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 332
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 329
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 635.9000000357628,
+     "lcp": 644,
+     "longtask": 0,
+     "fcp": 616,
+     "dcl": 279.10000002384186,
+     "load": 279.10000002384186,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 113329,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 627
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 335
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 331
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 326
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 320
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 653.8000000119209,
+     "lcp": 660,
+     "longtask": 0,
+     "fcp": 616,
+     "dcl": 286.5,
+     "load": 286.5,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "script": 113329,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 632
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 340
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 338
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 332
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 326
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 655,
+     "lcp": 664,
+     "longtask": 0,
+     "fcp": 640,
+     "dcl": 286.80000001192093,
+     "load": 286.9000000357628,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 113329,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 635
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 342
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 337
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 332
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 326
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 640.3000000119209,
+     "lcp": 648,
+     "longtask": 0,
+     "fcp": 620,
+     "dcl": 286.89999997615814,
+     "load": 286.89999997615814,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 113329,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 629
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 343
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 340
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 332
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 329
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 655,
+     "lcp": 664,
+     "longtask": 0,
+     "fcp": 648,
+     "dcl": 294.60000002384186,
+     "load": 294.60000002384186,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 113329,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 641
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 354
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 348
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 340
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 337
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 658.1999999880791,
+     "lcp": 668,
+     "longtask": 0,
+     "fcp": 648,
+     "dcl": 292.2999999523163,
+     "load": 292.2999999523163,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "script": 113329,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 641
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 351
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 346
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 343
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 340
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/api-docs",
+     "ok": true,
+     "ready": 659.5,
+     "lcp": 668,
+     "longtask": 0,
+     "fcp": 652,
+     "dcl": 297.80000001192093,
+     "load": 297.80000001192093,
+     "requests": 8,
+     "bytes_total": 121976,
+     "bytes_by_type": {
+      "script": 113329,
+      "link": 5851,
+      "fetch": 2201
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/docs-data",
+       "responseEnd": 649
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/useQuery-mzDmHlyW.js",
+       "responseEnd": 354
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/ApiDocsPage-BW8QDsK7.js",
+       "responseEnd": 349
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 342
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/copy-Dao32LHW.js",
+       "responseEnd": 337
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "ready_p75_reduction": -0.5492
+}

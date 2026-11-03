@@ -1,0 +1,425 @@
+{
+ "started": "2026-11-03 12:50:47",
+ "finished": "2026-11-03 12:51:05",
+ "config": {
+  "runs": 10,
+  "profile": "fast4g",
+  "cpu": 1,
+  "width": 1440,
+  "height": 900,
+  "ready": "document.body.innerText.includes('片段 19')",
+  "type_check": null
+ },
+ "paired": false,
+ "results": {
+  "A": {
+   "url": "http://127.0.0.1:8301/video/1",
+   "summary": {
+    "n": 10,
+    "n_ok": 10,
+    "ready": {
+     "p50": 1143.6,
+     "p75": 1149.9,
+     "p95": 1167.2
+    },
+    "lcp": {
+     "p50": 1154.0,
+     "p75": 1159.0,
+     "p95": 1176.8
+    },
+    "fcp": {
+     "p50": 1060.0,
+     "p75": 1070.0,
+     "p95": 1076.4
+    },
+    "dcl": {
+     "p50": 1029.4,
+     "p75": 1031.5,
+     "p95": 1033.6
+    },
+    "load": {
+     "p50": 1029.4,
+     "p75": 1031.6,
+     "p95": 1033.7
+    },
+    "longtask": {
+     "p50": 0.0,
+     "p75": 0.0,
+     "p95": 0.0
+    },
+    "requests": {
+     "p50": 5.0,
+     "p75": 5.0,
+     "p95": 5.0
+    },
+    "bytes_total": {
+     "p50": 664418.0,
+     "p75": 664418.0,
+     "p95": 664418.0
+    }
+   },
+   "runs": [
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1173.199999988079,
+     "lcp": 1184,
+     "longtask": 0,
+     "fcp": 1080,
+     "dcl": 1031.800000011921,
+     "load": 1031.800000011921,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "link": 26042,
+      "script": 474153,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1465
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1142
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1013
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 155
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1150.800000011921,
+     "lcp": 1160,
+     "longtask": 0,
+     "fcp": 1060,
+     "dcl": 1030.7000000476837,
+     "load": 1030.800000011921,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1441
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1129
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1012
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 153
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1140.4000000357628,
+     "lcp": 1148,
+     "longtask": 0,
+     "fcp": 1052,
+     "dcl": 1020.2000000476837,
+     "load": 1020.3000000119209,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1433
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1118
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1006
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 148
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1143.5999999642372,
+     "lcp": 1156,
+     "longtask": 0,
+     "fcp": 1072,
+     "dcl": 1034.8999999761581,
+     "load": 1035,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1436
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1122
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1019
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 157
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1143.6000000238419,
+     "lcp": 1152,
+     "longtask": 0,
+     "fcp": 1056,
+     "dcl": 1024,
+     "load": 1024,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1435
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1123
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1009
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 154
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1159.8999999761581,
+     "lcp": 1168,
+     "longtask": 0,
+     "fcp": 1064,
+     "dcl": 1030.5999999642372,
+     "load": 1030.5999999642372,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1450
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1133
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1010
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 155
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1147.1000000238419,
+     "lcp": 1156,
+     "longtask": 0,
+     "fcp": 1060,
+     "dcl": 1026.1000000238419,
+     "load": 1026.1000000238419,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1438
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1126
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1009
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 150
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1138.4000000357628,
+     "lcp": 1148,
+     "longtask": 0,
+     "fcp": 1048,
+     "dcl": 1020.3000000119209,
+     "load": 1020.3000000119209,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1429
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1115
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1006
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 148
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1142.300000011921,
+     "lcp": 1152,
+     "longtask": 0,
+     "fcp": 1060,
+     "dcl": 1028.300000011921,
+     "load": 1028.300000011921,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1433
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1124
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1014
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 154
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/video/1",
+     "ok": true,
+     "ready": 1143.5999999642372,
+     "lcp": 1152,
+     "longtask": 0,
+     "fcp": 1072,
+     "dcl": 1032,
+     "load": 1032.0999999642372,
+     "requests": 5,
+     "bytes_total": 664418,
+     "bytes_by_type": {
+      "link": 26042,
+      "script": 474153,
+      "fetch": 25001,
+      "img": 138462
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/thumbnails/bench_1.jpg",
+       "responseEnd": 1436
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/1",
+       "responseEnd": 1115
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1012
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-CfYdhWX6.css",
+       "responseEnd": 157
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

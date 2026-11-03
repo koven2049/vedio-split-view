@@ -1,0 +1,895 @@
+{
+ "started": "2026-11-03 13:10:49",
+ "finished": "2026-11-03 13:11:18",
+ "config": {
+  "runs": 10,
+  "profile": "fast4g",
+  "cpu": 1,
+  "width": 1440,
+  "height": 900,
+  "ready": "(document.body.innerText.match(/测速视频 \\d+：/g)||[]).length >= 20",
+  "type_check": null
+ },
+ "paired": true,
+ "results": {
+  "A": {
+   "url": "http://127.0.0.1:8301/library",
+   "summary": {
+    "n": 10,
+    "n_ok": 10,
+    "ready": {
+     "p50": 1186.1,
+     "p75": 1204.8,
+     "p95": 1300.2
+    },
+    "lcp": {
+     "p50": 1198.0,
+     "p75": 1218.0,
+     "p95": 1313.8
+    },
+    "fcp": {
+     "p50": 1076.0,
+     "p75": 1079.0,
+     "p95": 1086.2
+    },
+    "dcl": {
+     "p50": 1037.3,
+     "p75": 1038.8,
+     "p95": 1040.1
+    },
+    "load": {
+     "p50": 1037.3,
+     "p75": 1038.8,
+     "p95": 1040.2
+    },
+    "longtask": {
+     "p50": 0.0,
+     "p75": 0.0,
+     "p95": 0.0
+    },
+    "requests": {
+     "p50": 7.0,
+     "p75": 7.0,
+     "p95": 7.0
+    },
+    "bytes_total": {
+     "p50": 510187.0,
+     "p75": 510187.0,
+     "p95": 510187.0
+    }
+   },
+   "runs": [
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1205.800000011921,
+     "lcp": 1220,
+     "longtask": 0,
+     "fcp": 1076,
+     "dcl": 1035.699999988079,
+     "load": 1035.699999988079,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "link": 26042,
+      "script": 474153,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1185
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1151
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1099
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1097
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1014
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1201.800000011921,
+     "lcp": 1212,
+     "longtask": 0,
+     "fcp": 1072,
+     "dcl": 1033.199999988079,
+     "load": 1033.300000011921,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1178
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1101
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1096
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1093
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1010
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1187.800000011921,
+     "lcp": 1200,
+     "longtask": 0,
+     "fcp": 1076,
+     "dcl": 1036.7000000476837,
+     "load": 1036.7000000476837,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "link": 26042,
+      "script": 474153,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1178
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1100
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1098
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1095
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1015
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1168.0999999642372,
+     "lcp": 1180,
+     "longtask": 0,
+     "fcp": 1072,
+     "dcl": 1034.0999999642372,
+     "load": 1034.199999988079,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1156
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1098
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1095
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1092
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1009
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1255.7000000476837,
+     "lcp": 1272,
+     "longtask": 0,
+     "fcp": 1076,
+     "dcl": 1038.9000000357628,
+     "load": 1038.9000000357628,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1238
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1101
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1098
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1095
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1015
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1153.9000000357628,
+     "lcp": 1168,
+     "longtask": 0,
+     "fcp": 1076,
+     "dcl": 1038.6000000238419,
+     "load": 1038.6000000238419,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1144
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1101
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1098
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1095
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1009
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1139,
+     "lcp": 1152,
+     "longtask": 0,
+     "fcp": 1052,
+     "dcl": 1022.5,
+     "load": 1022.5,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "link": 26042,
+      "script": 474153,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1129
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1080
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1077
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1075
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1009
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1184.4000000357628,
+     "lcp": 1196,
+     "longtask": 0,
+     "fcp": 1080,
+     "dcl": 1039.7000000476837,
+     "load": 1039.800000011921,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1167
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1104
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1101
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1098
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1015
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1184,
+     "lcp": 1196,
+     "longtask": 0,
+     "fcp": 1084,
+     "dcl": 1037.9000000357628,
+     "load": 1037.9000000357628,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1167
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1107
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1101
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1098
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1012
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8301/library",
+     "ok": true,
+     "ready": 1336.5999999642372,
+     "lcp": 1348,
+     "longtask": 0,
+     "fcp": 1088,
+     "dcl": 1040.5,
+     "load": 1040.5999999642372,
+     "requests": 7,
+     "bytes_total": 510187,
+     "bytes_by_type": {
+      "script": 474153,
+      "link": 26042,
+      "fetch": 9232
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8301/api/videos",
+       "responseEnd": 1312
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/usage-summary",
+       "responseEnd": 1141
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/videos/tasks",
+       "responseEnd": 1110
+      },
+      {
+       "name": "http://127.0.0.1:8301/api/tags",
+       "responseEnd": 1107
+      },
+      {
+       "name": "http://127.0.0.1:8301/assets/index-BhvWNfmB.js",
+       "responseEnd": 1024
+      }
+     ]
+    }
+   ]
+  },
+  "B": {
+   "url": "http://127.0.0.1:8302/library",
+   "summary": {
+    "n": 10,
+    "n_ok": 10,
+    "ready": {
+     "p50": 436.1,
+     "p75": 447.4,
+     "p95": 498.5
+    },
+    "lcp": {
+     "p50": 448.0,
+     "p75": 457.0,
+     "p95": 510.2
+    },
+    "fcp": {
+     "p50": 392.0,
+     "p75": 396.0,
+     "p95": 396.0
+    },
+    "dcl": {
+     "p50": 353.2,
+     "p75": 354.4,
+     "p95": 355.6
+    },
+    "load": {
+     "p50": 353.2,
+     "p75": 354.4,
+     "p95": 355.6
+    },
+    "longtask": {
+     "p50": 0.0,
+     "p75": 0.0,
+     "p95": 0.0
+    },
+    "requests": {
+     "p50": 7.0,
+     "p75": 7.0,
+     "p95": 7.0
+    },
+    "bytes_total": {
+     "p50": 147149.0,
+     "p75": 147149.0,
+     "p95": 147149.0
+    }
+   },
+   "runs": [
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 537.1999999880791,
+     "lcp": 548,
+     "longtask": 0,
+     "fcp": 384,
+     "dcl": 346.89999997615814,
+     "load": 347,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 517
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 514
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 429
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 425
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 331
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 435,
+     "lcp": 444,
+     "longtask": 0,
+     "fcp": 396,
+     "dcl": 355.5,
+     "load": 355.5,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 420
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 417
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 414
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 411
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 329
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 437.69999998807907,
+     "lcp": 448,
+     "longtask": 0,
+     "fcp": 392,
+     "dcl": 353.60000002384186,
+     "load": 353.60000002384186,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 420
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 417
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 415
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 411
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 333
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 437.2000000476837,
+     "lcp": 448,
+     "longtask": 0,
+     "fcp": 392,
+     "dcl": 353,
+     "load": 353,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 420
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 417
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 415
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 412
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 329
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 450.69999998807907,
+     "lcp": 464,
+     "longtask": 0,
+     "fcp": 396,
+     "dcl": 354.69999998807907,
+     "load": 354.69999998807907,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 426
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 423
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 415
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 411
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 329
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 451.10000002384186,
+     "lcp": 460,
+     "longtask": 0,
+     "fcp": 396,
+     "dcl": 353.4000000357628,
+     "load": 353.4000000357628,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 426
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 423
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 420
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 417
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 326
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 421.30000001192093,
+     "lcp": 432,
+     "longtask": 0,
+     "fcp": 392,
+     "dcl": 351.5,
+     "load": 351.5,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 397
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 394
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 391
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 388
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 332
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 424.80000001192093,
+     "lcp": 436,
+     "longtask": 0,
+     "fcp": 396,
+     "dcl": 355.60000002384186,
+     "load": 355.60000002384186,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 420
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 417
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 414
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 411
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 332
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 435,
+     "lcp": 448,
+     "longtask": 0,
+     "fcp": 388,
+     "dcl": 350.2999999523163,
+     "load": 350.2999999523163,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 417
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 414
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 412
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 409
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 328
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/library",
+     "ok": true,
+     "ready": 419.89999997615814,
+     "lcp": 440,
+     "longtask": 0,
+     "fcp": 372,
+     "dcl": 341.10000002384186,
+     "load": 341.10000002384186,
+     "requests": 7,
+     "bytes_total": 147149,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 2196
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/videos",
+       "responseEnd": 400
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/usage-summary",
+       "responseEnd": 398
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/tags",
+       "responseEnd": 395
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/tasks",
+       "responseEnd": 391
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 329
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "ready_p75_reduction": 0.6287
+}

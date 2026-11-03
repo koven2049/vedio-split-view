@@ -1,0 +1,875 @@
+{
+ "started": "2026-11-03 13:12:19",
+ "finished": "2026-11-03 13:12:44",
+ "config": {
+  "runs": 10,
+  "profile": "fast4g",
+  "cpu": 1,
+  "width": 1440,
+  "height": 900,
+  "ready": "document.body.innerText.includes('片段 19')",
+  "type_check": null
+ },
+ "paired": true,
+ "results": {
+  "A": {
+   "url": "http://127.0.0.1:8302/video/1",
+   "summary": {
+    "n": 10,
+    "n_ok": 10,
+    "ready": {
+     "p50": 444.8,
+     "p75": 449.1,
+     "p95": 470.2
+    },
+    "lcp": {
+     "p50": 456.0,
+     "p75": 459.0,
+     "p95": 479.8
+    },
+    "fcp": {
+     "p50": 394.0,
+     "p75": 402.0,
+     "p95": 425.6
+    },
+    "dcl": {
+     "p50": 358.0,
+     "p75": 364.6,
+     "p95": 377.9
+    },
+    "load": {
+     "p50": 358.0,
+     "p75": 364.6,
+     "p95": 377.9
+    },
+    "longtask": {
+     "p50": 0.0,
+     "p75": 0.0,
+     "p95": 0.0
+    },
+    "requests": {
+     "p50": 5.0,
+     "p75": 5.0,
+     "p95": 5.0
+    },
+    "bytes_total": {
+     "p50": 269898.0,
+     "p75": 269898.0,
+     "p95": 269898.0
+    }
+   },
+   "runs": [
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 486.10000002384186,
+     "lcp": 496,
+     "longtask": 0,
+     "fcp": 440,
+     "dcl": 386.10000002384186,
+     "load": 386.10000002384186,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 757
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 459
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 351
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 93
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 445.69999998807907,
+     "lcp": 456,
+     "longtask": 0,
+     "fcp": 396,
+     "dcl": 360.69999998807907,
+     "load": 360.69999998807907,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 712
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 423
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 340
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 79
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 450,
+     "lcp": 460,
+     "longtask": 0,
+     "fcp": 404,
+     "dcl": 367.9000000357628,
+     "load": 367.9000000357628,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 712
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 429
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 340
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 86
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 442.39999997615814,
+     "lcp": 456,
+     "longtask": 0,
+     "fcp": 392,
+     "dcl": 355.69999998807907,
+     "load": 355.69999998807907,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 713
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 414
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 340
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 77
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 444,
+     "lcp": 452,
+     "longtask": 0,
+     "fcp": 388,
+     "dcl": 354.5,
+     "load": 354.5,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 713
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 417
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 336
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 77
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 413.39999997615814,
+     "lcp": 420,
+     "longtask": 0,
+     "fcp": 388,
+     "dcl": 353.30000001192093,
+     "load": 353.39999997615814,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 680
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 393
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 337
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 79
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 446.30000001192093,
+     "lcp": 456,
+     "longtask": 0,
+     "fcp": 396,
+     "dcl": 360.39999997615814,
+     "load": 360.39999997615814,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 712
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 423
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 338
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 80
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 450.80000001192093,
+     "lcp": 460,
+     "longtask": 0,
+     "fcp": 408,
+     "dcl": 365.89999997615814,
+     "load": 365.89999997615814,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 718
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 429
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 341
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 84
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 414.7999999523163,
+     "lcp": 424,
+     "longtask": 0,
+     "fcp": 384,
+     "dcl": 349.39999997615814,
+     "load": 349.39999997615814,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 138507,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 681
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 395
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 335
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 80
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8302/video/1",
+     "ok": true,
+     "ready": 418.10000002384186,
+     "lcp": 428,
+     "longtask": 0,
+     "fcp": 376,
+     "dcl": 345.80000001192093,
+     "load": 345.80000001192093,
+     "requests": 5,
+     "bytes_total": 269898,
+     "bytes_by_type": {
+      "script": 138507,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8302/api/thumbnails/bench_1.jpg",
+       "responseEnd": 680
+      },
+      {
+       "name": "http://127.0.0.1:8302/api/videos/1",
+       "responseEnd": 397
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-Cnya_SON.js",
+       "responseEnd": 334
+      },
+      {
+       "name": "http://127.0.0.1:8302/assets/index-B0hzsWSg.css",
+       "responseEnd": 80
+      }
+     ]
+    }
+   ]
+  },
+  "B": {
+   "url": "http://127.0.0.1:8303/video/1",
+   "summary": {
+    "n": 10,
+    "n_ok": 10,
+    "ready": {
+     "p50": 670.0,
+     "p75": 679.4,
+     "p95": 683.3
+    },
+    "lcp": {
+     "p50": 678.0,
+     "p75": 688.0,
+     "p95": 692.0
+    },
+    "fcp": {
+     "p50": 648.0,
+     "p75": 652.0,
+     "p95": 660.0
+    },
+    "dcl": {
+     "p50": 297.1,
+     "p75": 301.4,
+     "p95": 304.0
+    },
+    "load": {
+     "p50": 297.1,
+     "p75": 301.4,
+     "p95": 304.0
+    },
+    "longtask": {
+     "p50": 0.0,
+     "p75": 0.0,
+     "p95": 0.0
+    },
+    "requests": {
+     "p50": 16.0,
+     "p75": 16.0,
+     "p95": 16.0
+    },
+    "bytes_total": {
+     "p50": 257476.0,
+     "p75": 257476.0,
+     "p95": 257476.0
+    }
+   },
+   "runs": [
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 670.7999999523163,
+     "lcp": 680,
+     "longtask": 0,
+     "fcp": 644,
+     "dcl": 301.5999999642372,
+     "load": 301.5999999642372,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "link": 5851,
+      "script": 126085,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 938
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 646
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 392
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 389
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 383
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 668.8000000119209,
+     "lcp": 676,
+     "longtask": 0,
+     "fcp": 652,
+     "dcl": 297.10000002384186,
+     "load": 297.10000002384186,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 943
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 643
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 386
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 383
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 377
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 681.8999999761581,
+     "lcp": 692,
+     "longtask": 0,
+     "fcp": 660,
+     "dcl": 305.80000001192093,
+     "load": 305.80000001192093,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 950
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 658
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 400
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 398
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 389
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 655.9000000357628,
+     "lcp": 664,
+     "longtask": 0,
+     "fcp": 632,
+     "dcl": 286.9000000357628,
+     "load": 286.9000000357628,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 927
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 632
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 375
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 371
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 366
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 676.8999999761581,
+     "lcp": 688,
+     "longtask": 0,
+     "fcp": 660,
+     "dcl": 301.89999997615814,
+     "load": 301.89999997615814,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 944
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 649
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 395
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 391
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 383
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 665.1999999880791,
+     "lcp": 672,
+     "longtask": 0,
+     "fcp": 648,
+     "dcl": 290.80000001192093,
+     "load": 290.89999997615814,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 930
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 638
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 383
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 381
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 375
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 669.1999999880791,
+     "lcp": 676,
+     "longtask": 0,
+     "fcp": 644,
+     "dcl": 300.89999997615814,
+     "load": 300.89999997615814,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 941
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 647
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 395
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 391
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 386
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 666.8999999761581,
+     "lcp": 676,
+     "longtask": 0,
+     "fcp": 652,
+     "dcl": 296.80000001192093,
+     "load": 296.89999997615814,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 931
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 643
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 385
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 383
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 377
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 684.5,
+     "lcp": 692,
+     "longtask": 0,
+     "fcp": 648,
+     "dcl": 291,
+     "load": 291.0999999642372,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 946
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 666
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 384
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 380
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 378
+      }
+     ]
+    },
+    {
+     "url": "http://127.0.0.1:8303/video/1",
+     "ok": true,
+     "ready": 680.1999999880791,
+     "lcp": 688,
+     "longtask": 0,
+     "fcp": 644,
+     "dcl": 297.0999999642372,
+     "load": 297.0999999642372,
+     "requests": 16,
+     "bytes_total": 257476,
+     "bytes_by_type": {
+      "script": 126085,
+      "link": 5851,
+      "fetch": 1665,
+      "img": 123280
+     },
+     "slowest": [
+      {
+       "name": "http://127.0.0.1:8303/api/thumbnails/bench_1.jpg",
+       "responseEnd": 949
+      },
+      {
+       "name": "http://127.0.0.1:8303/api/videos/1",
+       "responseEnd": 654
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/chevron-down-BAGuWDpW.js",
+       "responseEnd": 389
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/VideoDetailPage-DrNzp62b.js",
+       "responseEnd": 385
+      },
+      {
+       "name": "http://127.0.0.1:8303/assets/trash-2-BJshUkSY.js",
+       "responseEnd": 377
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "ready_p75_reduction": -0.5128
+}

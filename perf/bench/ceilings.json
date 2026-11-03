@@ -1,0 +1,8 @@
+{
+ "detail::ready_p75": 439.7,
+ "detail::bytes_total_p75": 269898.0,
+ "library::ready_p75": 447.4,
+ "library::bytes_total_p75": 147149.0,
+ "apidocs::ready_p75": 433.2,
+ "apidocs::bytes_total_p75": 147154.0
+}

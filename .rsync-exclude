@@ -51,3 +51,6 @@ logs/
 
 # ── this file itself (remote may have its own) ──────────────────────────────
 .rsync-exclude
+
+# perf bench artifacts (huashu-flash round, 2026-11)
+perf/
