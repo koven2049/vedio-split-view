@@ -8,17 +8,22 @@ interface UsageDisplayProps {
 export default function UsageDisplay({ usage, className }: UsageDisplayProps) {
   const items: Array<{ label: string; value: string }> = [];
 
-  if (usage.asr_model && usage.asr_duration_seconds > 0) {
+  const asrSeconds = usage.asr_duration_seconds ?? 0;
+  const prompt = usage.llm_prompt_tokens ?? 0;
+  const completion = usage.llm_completion_tokens ?? 0;
+  const total = usage.llm_total_tokens ?? 0;
+
+  if (usage.asr_model && asrSeconds > 0) {
     items.push({
       label: `ASR (${usage.asr_model})`,
-      value: `${Math.round(usage.asr_duration_seconds)}s`,
+      value: `${Math.round(asrSeconds)}s`,
     });
   }
 
-  if (usage.llm_model && usage.llm_total_tokens > 0) {
+  if (usage.llm_model && total > 0) {
     items.push({
       label: `LLM (${usage.llm_model})`,
-      value: `${usage.llm_prompt_tokens.toLocaleString()}↑ ${usage.llm_completion_tokens.toLocaleString()}↓ (${usage.llm_total_tokens.toLocaleString()})`,
+      value: `${prompt.toLocaleString()}↑ ${completion.toLocaleString()}↓ (${total.toLocaleString()})`,
     });
   }
 

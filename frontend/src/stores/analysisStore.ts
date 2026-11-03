@@ -43,13 +43,14 @@ export interface Segment {
   end_seconds: number;
 }
 
+/** Parsed from stored usage_json — older/imported records may omit fields. */
 export interface UsageInfo {
-  asr_duration_seconds: number;
-  asr_model: string;
-  llm_prompt_tokens: number;
-  llm_completion_tokens: number;
-  llm_total_tokens: number;
-  llm_model: string;
+  asr_duration_seconds?: number;
+  asr_model?: string;
+  llm_prompt_tokens?: number;
+  llm_completion_tokens?: number;
+  llm_total_tokens?: number;
+  llm_model?: string;
 }
 
 export interface AnalysisResult {

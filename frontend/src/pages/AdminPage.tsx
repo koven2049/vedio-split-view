@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useT } from '../i18n';
+import { parseServerTime } from '../lib/utils';
 
 interface AdminUser {
   id: number;
@@ -316,7 +317,7 @@ export default function AdminPage() {
                   {user.video_count}
                 </td>
                 <td className="px-4 py-3" style={{ color: 'var(--color-text-secondary)' }}>
-                  {new Date(user.created_at).toLocaleDateString()}
+                  {parseServerTime(user.created_at).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3">
                   {user.is_active ? (

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useT } from '../i18n';
+import { parseServerTime } from '../lib/utils';
 
 interface LLMLogEntry {
   id: number;
@@ -29,7 +30,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 };
 
 function formatTime(iso: string): string {
-  const d = new Date(iso);
+  const d = parseServerTime(iso);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   const hh = String(d.getHours()).padStart(2, '0');

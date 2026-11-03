@@ -9,5 +9,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // Non-UTC zone so naive-UTC timestamp bugs reproduce on any machine.
+    env: { TZ: 'Asia/Shanghai' },
   },
 });
