@@ -76,7 +76,6 @@ async def test_external_endpoints_present(client: AsyncClient):
     paths = _all_paths(data)
     assert "/api/videos/analyze" in paths
     assert any("subtitles" in p for p in paths)
-    assert "/api/settings/tokens" in paths
 
 
 async def test_tasks_endpoints_present(client: AsyncClient):
@@ -86,12 +85,46 @@ async def test_tasks_endpoints_present(client: AsyncClient):
     assert any("/tasks" in p for p in paths)
 
 
-async def test_token_endpoints_not_duplicated(client: AsyncClient):
-    """api_keys routes carry both /api-keys and /tokens decorators; expose only /tokens."""
+async def test_docs_match_allowlist_exactly(client: AsyncClient):
+    """Docs = PUBLIC_ENDPOINTS, nothing more, nothing less.
+
+    Every allowlisted route must still exist (rename/delete drift fails here,
+    instead of silently vanishing from the docs).
+    """
+    from video_split.api.apidocs import PUBLIC_ENDPOINTS
+
     data = (await client.get("/api/docs-data")).json()
-    paths = _all_paths(data)
-    assert not any("/api/settings/api-keys" in p for p in paths)
-    assert "/api/settings/tokens" in paths
+    documented = [(ep["method"], ep["path"]) for ep in _all_endpoints(data)]
+    expected = [ep for eps in PUBLIC_ENDPOINTS.values() for ep in eps]
+    assert documented == expected
+
+
+async def test_ui_internal_endpoints_hidden(client: AsyncClient):
+    """Front-end-only routes are not part of the external API surface."""
+    data = (await client.get("/api/docs-data")).json()
+    paths = set(_all_paths(data))
+    for internal in (
+        "/api/auth/lang", "/api/auth/preferences", "/api/auth/usage-stats",
+        "/api/videos/usage-summary", "/api/videos/llm-logs", "/api/videos/bulk-share",
+        "/api/settings/tokens", "/api/videos/tasks/recoverable", "/api/videos/public",
+    ):
+        assert internal not in paths, internal
+
+
+async def test_id_meta_detail_documented(client: AsyncClient):
+    data = (await client.get("/api/docs-data")).json()
+    ids = _find(data, "GET", "/api/videos/ids")
+    meta = _find(data, "GET", "/api/videos/{video_id}/meta")
+    assert ids and "ids" in ids["response"] and "total" in ids["response"]
+    assert meta and "segment_count" in meta["response"]
+    assert "summary" not in meta["response"]
+
+
+async def test_docs_data_public_without_login(client: AsyncClient):
+    """API docs must be readable without logging in (no auth header)."""
+    resp = await client.get("/api/docs-data")
+    assert resp.status_code == 200
+    assert resp.json()["groups"]
 
 
 def test_deref_unwraps_optional_anyof():

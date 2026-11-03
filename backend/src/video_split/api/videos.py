@@ -4,20 +4,22 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, load_only, selectinload
 
 from video_split.database import get_db
 from video_split.dependencies import get_current_user, require_admin, require_authenticated
-from video_split.models import Tag, User, Video, video_tags
+from video_split.models import Segment, Tag, User, Video, video_tags
 from video_split.schemas import (
     DialogueOut,
     LLMLogOut,
     TagOut,
     TranscriptOut,
     TranscriptSegment,
+    VideoIdsOut,
     VideoListOut,
+    VideoMetaOut,
     VideoOut,
     VideoUpdate,
 )
@@ -29,6 +31,27 @@ from video_split.service.video_service import accumulate_usage, merge_llm_usage
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
+
+# List rows only render these columns. Loading whole Video rows would also
+# pull raw_transcript / subtitle_json (up to ~270 KB per row in prod) that
+# list endpoints never read. user_id stays loaded for the owner relationship.
+_LIST_COLUMNS = load_only(
+    Video.id, Video.user_id, Video.url, Video.platform, Video.title,
+    Video.thumbnail_url, Video.duration_seconds, Video.is_public, Video.created_at,
+)
+_META_COLUMNS = load_only(
+    Video.id, Video.user_id, Video.url, Video.platform, Video.video_id, Video.title,
+    Video.thumbnail_url, Video.upload_date, Video.uploader, Video.duration_seconds,
+    Video.is_public, Video.created_at, Video.updated_at,
+)
+
+
+def _filter_videos(stmt, q: str, tag: str):
+    if q:
+        stmt = stmt.where(Video.title.ilike(f"%{q}%"))
+    if tag:
+        stmt = stmt.join(video_tags).join(Tag).where(Tag.name == tag)
+    return stmt
 
 
 def _video_to_list_out(v: Video) -> VideoListOut:
@@ -84,15 +107,13 @@ async def list_my_videos(
     _user: User = Depends(require_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
-    # Whole library is visible to every logged-in account (admin + viewer).
-    stmt = (
-        select(Video)
-        .options(selectinload(Video.tags), selectinload(Video.owner))
-    )
-    if q:
-        stmt = stmt.where(Video.title.ilike(f"%{q}%"))
-    if tag:
-        stmt = stmt.join(video_tags).join(Tag).where(Tag.name == tag)
+    """Page through the library (newest first) with list-card fields.
+
+    Whole library is visible to every logged-in account (admin + viewer).
+    Use GET /api/videos/ids to enumerate every id in one call.
+    """
+    stmt = select(Video).options(_LIST_COLUMNS, selectinload(Video.tags), selectinload(Video.owner))
+    stmt = _filter_videos(stmt, q, tag)
     stmt = stmt.order_by(Video.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
 
     result = await db.execute(stmt)
@@ -111,13 +132,10 @@ async def list_public_videos(
 ):
     stmt = (
         select(Video)
-        .options(selectinload(Video.tags), selectinload(Video.owner))
+        .options(_LIST_COLUMNS, selectinload(Video.tags), selectinload(Video.owner))
         .where(Video.is_public == True)  # noqa: E712
     )
-    if q:
-        stmt = stmt.where(Video.title.ilike(f"%{q}%"))
-    if tag:
-        stmt = stmt.join(video_tags).join(Tag).where(Tag.name == tag)
+    stmt = _filter_videos(stmt, q, tag)
     stmt = stmt.order_by(Video.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
 
     result = await db.execute(stmt)
@@ -171,15 +189,78 @@ async def llm_logs(
     return result.scalars().all()
 
 
+@router.get("/ids", response_model=VideoIdsOut)
+async def list_video_ids(
+    q: str = Query("", max_length=128, description="Title substring filter"),
+    tag: str = Query("", max_length=64, description="Exact tag name filter"),
+    _user: User = Depends(require_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every video id in the library (newest first), unpaged.
+
+    Pair with GET /api/videos/{video_id}/meta for lightweight metadata or
+    GET /api/videos/{video_id} for the full detail.
+    """
+    stmt = _filter_videos(select(Video.id), q, tag).order_by(Video.created_at.desc(), Video.id.desc())
+    ids = list((await db.execute(stmt)).scalars().all())
+    return VideoIdsOut(total=len(ids), ids=ids)
+
+
+@router.get("/{video_id}/meta", response_model=VideoMetaOut)
+async def get_video_meta(
+    video_id: int,
+    _user: User = Depends(require_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lightweight metadata for one video: title, platform, url, duration,
+    uploader, tags, segment count and whether dialogue / mindmap exist.
+    No summary or body text — use GET /api/videos/{video_id} for that."""
+    segment_count = (
+        select(func.count(Segment.id)).where(Segment.video_id == Video.id).scalar_subquery()
+    )
+    stmt = (
+        select(
+            Video,
+            func.coalesce(func.length(Video.dialogue_json), 0) > 0,
+            func.coalesce(func.length(Video.mindmap_json), 0) > 0,
+            segment_count,
+        )
+        .options(_META_COLUMNS, selectinload(Video.tags), selectinload(Video.owner))
+        .where(Video.id == video_id)
+    )
+    row = (await db.execute(stmt)).first()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found")
+    v, has_dialogue, has_mindmap, n_segments = row
+    return VideoMetaOut(
+        id=v.id, url=v.url, platform=v.platform, video_id=v.video_id, title=v.title,
+        thumbnail_url=v.thumbnail_url, upload_date=v.upload_date, uploader=v.uploader,
+        duration_seconds=v.duration_seconds, is_public=v.is_public,
+        has_dialogue=bool(has_dialogue), has_mindmap=bool(has_mindmap),
+        segment_count=n_segments, tags=[TagOut.model_validate(t) for t in v.tags],
+        owner_name=v.owner.username if v.owner else "",
+        created_at=v.created_at, updated_at=v.updated_at,
+    )
+
+
 @router.get("/{video_id}", response_model=VideoOut)
 async def get_video(
     video_id: int,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Full detail: summary, essence, takeaways, segments, mindmap JSON, tags.
+
+    Transcript text is not included — fetch it from /transcript, /subtitles
+    or /dialogue.
+    """
     video = await _get_accessible_video(
         db, video_id, user,
-        load=(selectinload(Video.segments), selectinload(Video.tags), selectinload(Video.owner)),
+        load=(
+            # The detail view never reads these (they have their own endpoints).
+            defer(Video.raw_transcript), defer(Video.subtitle_json),
+            selectinload(Video.segments), selectinload(Video.tags), selectinload(Video.owner),
+        ),
     )
     return _video_to_out(video)
 

@@ -5,10 +5,15 @@ The single source of truth is the FastAPI route definitions themselves
 `app.openapi()` into the compact `{groups, endpoints}` contract the
 frontend ApiDocsPage consumes, so the docs can never drift from the code.
 
-To control what is exposed externally, edit `_VISIBLE_GROUPS` (tag → group
-name). Endpoints whose router tag is absent here are hidden (e.g. debug,
-admin). To improve an endpoint's docs, add a `response_model` and a
-docstring on the route — both flow through automatically.
+What is exposed externally is an explicit allowlist, `PUBLIC_ENDPOINTS`
+(group → (method, path)). Everything else — UI-internal routes (prefs,
+usage, bulk share, tag editing, token management), admin, debug, hooks — is
+hidden. Allowlisting by endpoint rather than router tag keeps new internal
+routes private by default. Details (params, response, description) still
+come from the route itself: add a `response_model` and a docstring there.
+
+The docs data is public (no login): it only describes the API surface; all
+listed endpoints themselves still require an API token.
 """
 from __future__ import annotations
 
@@ -18,19 +23,35 @@ from fastapi import APIRouter, Request
 
 router = APIRouter(prefix="/api/docs-data", tags=["docs"])
 
-# Router tag -> external group title. Only listed tags are exposed.
-_VISIBLE_GROUPS: dict[str, str] = {
-    "auth": "Authentication",
-    "api-keys": "Tokens",
-    "analysis": "Analysis",
-    "tasks": "Tasks",
-    "videos": "Videos",
-    "mindmap": "Mindmap",
-    "tags": "Tags",
+# Group title -> endpoints, in display order. Only these are documented.
+PUBLIC_ENDPOINTS: dict[str, list[tuple[str, str]]] = {
+    "Videos": [
+        ("GET", "/api/videos/ids"),
+        ("GET", "/api/videos/{video_id}/meta"),
+        ("GET", "/api/videos/{video_id}"),
+        ("GET", "/api/videos"),
+        ("GET", "/api/tags"),
+    ],
+    "Content": [
+        ("GET", "/api/videos/{video_id}/transcript"),
+        ("GET", "/api/videos/{video_id}/subtitles"),
+        ("GET", "/api/videos/{video_id}/dialogue"),
+        ("GET", "/api/videos/{video_id}/mindmap"),
+    ],
+    "Analysis": [
+        ("POST", "/api/videos/analyze"),
+        ("GET", "/api/videos/tasks/{task_id}/stream"),
+        ("POST", "/api/videos/tasks/{task_id}/confirm"),
+        ("DELETE", "/api/videos/tasks/{task_id}/cancel"),
+    ],
+    "Tasks": [
+        ("GET", "/api/videos/tasks"),
+        ("POST", "/api/videos/tasks/{task_id}/retry"),
+        ("DELETE", "/api/videos/tasks/{task_id}"),
+    ],
 }
 
 _AUTH_HEADER = "X-API-Key: <your-api-key>"
-_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
 
 
 def _deref(schema: dict[str, Any], components: dict[str, Any]) -> dict[str, Any]:
@@ -102,34 +123,22 @@ def _params(operation: dict[str, Any], components: dict[str, Any]) -> list[dict[
 async def get_api_docs(request: Request) -> dict[str, Any]:
     schema = request.app.openapi()
     components = schema.get("components", {}).get("schemas", {})
+    paths = schema.get("paths", {})
 
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for path, methods in schema.get("paths", {}).items():
-        # /api/settings/api-keys is a decorator alias of /api/settings/tokens
-        # (same handlers); document only the /tokens form to avoid duplicates.
-        if path.startswith("/api/settings/api-keys"):
-            continue
-        for method, operation in methods.items():
-            if method.lower() not in _HTTP_METHODS:
+    groups = []
+    for group, endpoints in PUBLIC_ENDPOINTS.items():
+        items = []
+        for method, path in endpoints:
+            operation = paths.get(path, {}).get(method.lower())
+            if operation is None:  # route removed; tests catch this drift
                 continue
-            group = next(
-                (_VISIBLE_GROUPS[t] for t in operation.get("tags", []) if t in _VISIBLE_GROUPS),
-                None,
-            )
-            if group is None:
-                continue
-            grouped.setdefault(group, []).append({
-                "method": method.upper(),
+            items.append({
+                "method": method,
                 "path": path,
                 "description": operation.get("description") or operation.get("summary", ""),
                 "params": _params(operation, components),
                 "response": _response_str(operation, components),
             })
-
-    # Preserve the declared group order from _VISIBLE_GROUPS.
-    groups = [
-        {"group": name, "endpoints": grouped[name]}
-        for name in dict.fromkeys(_VISIBLE_GROUPS.values())
-        if name in grouped
-    ]
+        if items:
+            groups.append({"group": group, "endpoints": items})
     return {"auth_header": _AUTH_HEADER, "base_url": "/api", "groups": groups}

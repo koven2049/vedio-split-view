@@ -235,6 +235,33 @@ class VideoListOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class VideoIdsOut(BaseModel):
+    total: int = Field(description="Number of matching videos")
+    ids: list[int] = Field(description="Video ids, newest first")
+
+
+class VideoMetaOut(BaseModel):
+    """Lightweight per-video metadata — no summary, segments or mindmap body."""
+
+    id: int
+    url: str
+    platform: str
+    video_id: str
+    title: str
+    thumbnail_url: str
+    upload_date: str = ""
+    uploader: str = ""
+    duration_seconds: int
+    is_public: bool
+    has_dialogue: bool
+    has_mindmap: bool
+    segment_count: int
+    tags: list[TagOut] = []
+    owner_name: str = ""
+    created_at: datetime
+    updated_at: datetime
+
+
 class VideoUpdate(BaseModel):
     title: str | None = None
     summary: str | None = None

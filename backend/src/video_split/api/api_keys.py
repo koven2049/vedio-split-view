@@ -45,7 +45,6 @@ def _hash_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-@router.get("/api/settings/api-keys", response_model=list[ApiKeyOut])
 @router.get("/api/settings/tokens", response_model=list[ApiKeyOut])
 async def list_api_keys(
     user: User = Depends(require_admin),
@@ -65,7 +64,6 @@ async def list_api_keys(
     ]
 
 
-@router.post("/api/settings/api-keys", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
 @router.post("/api/settings/tokens", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     body: ApiKeyCreate,
@@ -90,7 +88,6 @@ async def create_api_key(
     )
 
 
-@router.delete("/api/settings/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 @router.delete("/api/settings/tokens/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_api_key(
     key_id: int,
