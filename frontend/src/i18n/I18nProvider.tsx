@@ -10,8 +10,7 @@ export default function I18nProvider({ children }: { children: ReactNode }) {
   const setLocale = useMemo(
     () => (l: Locale) => {
       setLangStore(l);
-      // Logged-out visitors (public API docs) keep the choice locally; a
-      // tokenless PUT would 401 and the api layer would bounce to /login.
+      // Logged-out visitors (public API docs) keep the choice locally.
       if (useAuthStore.getState().token) api.put('/auth/lang', { lang: l }).catch(() => {});
     },
     [setLangStore],

@@ -109,3 +109,20 @@ async def test_sse_stream_not_gzipped(client, dist):
         r = await ac.get("/api/__sse_probe", headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and r.text.startswith("data: x")
     assert "content-encoding" not in r.headers
+
+
+@pytest.mark.asyncio
+async def test_thumbnails_not_gzipped(client, dist):
+    """JPEG thumbnails are already compressed; gzip would only cost CPU."""
+    from video_split.config import get_settings
+    from pathlib import Path
+
+    thumbs = Path(get_settings().storage.temp_dir).parent / "thumbnails"
+    thumbs.mkdir(parents=True, exist_ok=True)
+    (thumbs / "probe.jpg").write_bytes(b"\xff\xd8" + b"x" * 4096)
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/api/thumbnails/probe.jpg", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert "content-encoding" not in r.headers
+    assert r.headers["cache-control"] == "private, max-age=86400"

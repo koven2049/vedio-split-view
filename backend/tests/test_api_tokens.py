@@ -10,7 +10,7 @@ import hashlib
 
 from sqlalchemy import select
 
-from tests.conftest import admin_create_user, get_admin_token
+from tests.conftest import admin_create_user, create_api_key, get_admin_token
 from video_split.models import ApiKey
 
 
@@ -20,7 +20,7 @@ async def _jwt_headers(client) -> dict[str, str]:
 
 async def test_full_key_returned_once_and_stored_hashed(client, db_session):
     headers = await _jwt_headers(client)
-    created = (await client.post("/api/settings/tokens", json={"name": "bot"}, headers=headers)).json()
+    created = await create_api_key(client, "bot")
     full = created["full_key"]
     assert full.startswith("vsk_") and len(full) > 40
 
@@ -36,7 +36,7 @@ async def test_full_key_returned_once_and_stored_hashed(client, db_session):
 
 async def test_token_authenticates_until_deleted(client):
     headers = await _jwt_headers(client)
-    created = (await client.post("/api/settings/tokens", json={"name": "bot"}, headers=headers)).json()
+    created = await create_api_key(client, "bot")
     key_headers = {"X-API-Key": created["full_key"]}
     assert (await client.get("/api/videos/ids", headers=key_headers)).status_code == 200
 
@@ -47,7 +47,7 @@ async def test_token_authenticates_until_deleted(client):
 
 async def test_last_used_recorded(client):
     headers = await _jwt_headers(client)
-    created = (await client.post("/api/settings/tokens", json={"name": "bot"}, headers=headers)).json()
+    created = await create_api_key(client, "bot")
     assert created["last_used_at"] is None
     await client.get("/api/videos/ids", headers={"X-API-Key": created["full_key"]})
     listed = (await client.get("/api/settings/tokens", headers=headers)).json()

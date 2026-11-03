@@ -17,6 +17,17 @@ from video_split.database import get_db, init_db
 logger = logging.getLogger(__name__)
 
 
+class _GZipExceptImages(GZipMiddleware):
+    """GZip everything except /api/thumbnails: JPEGs are already compressed,
+    so gzipping them burns CPU on every library view for ~no size win."""
+
+    async def __call__(self, scope, receive, send):  # type: ignore[no-untyped-def]
+        if scope["type"] == "http" and scope["path"].startswith("/api/thumbnails/"):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from video_split.logging_setup import setup_logging
@@ -98,7 +109,7 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     # Nothing in front of uvicorn compresses (no nginx/CDN since the process
     # migration), so the ~470 KB SPA bundle and JSON went out raw. Starlette
     # skips text/event-stream, so SSE progress is never buffered.
-    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+    app.add_middleware(_GZipExceptImages, minimum_size=1024, compresslevel=6)
 
     @app.middleware("http")
     async def cache_thumbnails(request, call_next):  # type: ignore[no-untyped-def]

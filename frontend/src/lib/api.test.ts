@@ -41,3 +41,36 @@ describe('api.delete', () => {
     await expect(api.delete('/videos/9')).resolves.toBeUndefined();
   });
 });
+
+describe('401 handling', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useAuthStore.getState().logout();
+  });
+
+  const unauthorized = () =>
+    vi.fn().mockResolvedValue({
+      status: 401,
+      ok: false,
+      json: async () => ({ detail: 'Invalid credentials' }),
+      text: async () => '',
+    });
+
+  it('tokenless 401 is a normal ApiError (public pages, login form) — no redirect', async () => {
+    vi.stubGlobal('fetch', unauthorized());
+    useAuthStore.getState().logout();
+    const before = window.location.href;
+    await expect(api.post('/auth/login', {})).rejects.toMatchObject({
+      status: 401,
+      message: 'Invalid credentials',
+    });
+    expect(window.location.href).toBe(before);
+  });
+
+  it('401 with a session token logs out', async () => {
+    vi.stubGlobal('fetch', unauthorized());
+    useAuthStore.setState({ token: 'expired' });
+    await expect(api.get('/videos')).rejects.toThrow('Unauthorized');
+    expect(useAuthStore.getState().token).toBeNull();
+  });
+});

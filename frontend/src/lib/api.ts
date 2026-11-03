@@ -22,7 +22,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
 
-  if (res.status === 401) {
+  // Only an expired/invalid session bounces to /login. Tokenless calls
+  // (public pages, the login form itself) get a normal ApiError instead.
+  if (res.status === 401 && token) {
     useAuthStore.getState().logout();
     window.location.href = '/login';
     throw new Error('Unauthorized');

@@ -7,7 +7,7 @@ works with X-API-Key (the documented external auth), not just a browser JWT.
 """
 from __future__ import annotations
 
-from tests.conftest import get_admin_token
+from tests.conftest import create_api_key, get_admin_token
 from tests.test_videos import _admin_user, _create_video
 from video_split.models import Tag
 
@@ -19,12 +19,7 @@ _META_FIELDS = {
 
 
 async def _api_key_headers(client) -> dict[str, str]:
-    jwt = await get_admin_token(client)
-    resp = await client.post(
-        "/api/settings/tokens", json={"name": "ext"},
-        headers={"Authorization": f"Bearer {jwt}"},
-    )
-    return {"X-API-Key": resp.json()["full_key"]}
+    return {"X-API-Key": (await create_api_key(client))["full_key"]}
 
 
 async def test_ids_lists_all_with_total(client, db_session):

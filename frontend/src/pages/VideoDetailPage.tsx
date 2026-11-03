@@ -39,7 +39,7 @@ import {
 import LangToggle from '../components/LangToggle';
 import MindmapView from '../components/MindmapView';
 import UsageDisplay from '../components/UsageDisplay';
-import type { UsageInfo } from '../stores/analysisStore';
+import { parseUsage } from '../stores/analysisStore';
 import { useAuthStore } from '../stores/authStore';
 import { useLangPreference } from '../hooks/useLangPreference';
 import { useT } from '../i18n';
@@ -668,14 +668,7 @@ export default function VideoDetailPage() {
           );
         })()}
         {(() => {
-          let usage: UsageInfo | undefined;
-          if (video.usage_json) {
-            try {
-              usage = JSON.parse(video.usage_json);
-            } catch {
-              /* ignore */
-            }
-          }
+          const usage = parseUsage(video.usage_json);
           return usage ? (
             <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
               <UsageDisplay usage={usage} />

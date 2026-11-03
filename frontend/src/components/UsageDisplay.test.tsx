@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import UsageDisplay from './UsageDisplay';
+import { parseUsage } from '../stores/analysisStore';
 
-describe('UsageDisplay', () => {
-  it('renders partial usage_json instead of crashing the detail page', () => {
+describe('parseUsage + UsageDisplay', () => {
+  it('fills missing fields so partial usage_json cannot crash the detail page', () => {
     // Older / imported records may carry only the totals.
-    render(<UsageDisplay usage={{ llm_model: 'glm', llm_total_tokens: 1200 }} />);
+    const usage = parseUsage('{"llm_model":"glm","llm_total_tokens":1200}');
+    expect(usage?.llm_prompt_tokens).toBe(0);
+    render(<UsageDisplay usage={usage!} />);
     expect(screen.getByText('0↑ 0↓ (1,200)')).toBeInTheDocument();
+  });
+
+  it('returns undefined for empty or corrupt json', () => {
+    expect(parseUsage('')).toBeUndefined();
+    expect(parseUsage('{not json')).toBeUndefined();
   });
 
   it('renders full usage', () => {

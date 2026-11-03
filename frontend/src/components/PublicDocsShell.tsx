@@ -1,10 +1,10 @@
-import { Link } from 'react-router-dom';
+import { Link, Outlet } from 'react-router-dom';
 import { LayoutDashboard, LogIn } from 'lucide-react';
 import LangToggle from './LangToggle';
 import { useLocale } from '../i18n';
 
 /** Minimal chrome for pages readable without login (the API docs). */
-export default function PublicDocsShell({ children }: { children: React.ReactNode }) {
+export default function PublicDocsShell() {
   const { locale, setLocale, t } = useLocale();
   return (
     <div className="min-h-screen" style={{ background: 'var(--color-bg)' }}>
@@ -27,7 +27,9 @@ export default function PublicDocsShell({ children }: { children: React.ReactNod
           </Link>
         </div>
       </header>
-      <main className="max-w-6xl mx-auto px-6 py-6">{children}</main>
+      <main className="max-w-6xl mx-auto px-6 py-6">
+        <Outlet />
+      </main>
     </div>
   );
 }

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, BookOpen, Check, Copy, Key, Loader2, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, BookOpen, Key, Loader2, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatRelativeTime, parseServerTime } from '../lib/utils';
 import { useLocale } from '../i18n';
+import CopyButton from './CopyButton';
 
 export interface ApiTokenItem {
   id: number;
@@ -21,30 +22,7 @@ interface ApiTokenCreated extends ApiTokenItem {
 const TOKEN_ENDPOINT = '/settings/tokens';
 const HEADER_NAME = 'X-API-Key';
 
-function useCopy() {
-  const [copied, setCopied] = useState<string | null>(null);
-  const copy = async (id: string, text: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(id);
-    setTimeout(() => setCopied((c) => (c === id ? null : c)), 2000);
-  };
-  return { copied, copy };
-}
-
-function CodeLine({
-  text,
-  copyId,
-  copied,
-  onCopy,
-  label,
-}: {
-  text: string;
-  copyId: string;
-  copied: string | null;
-  onCopy: (id: string, text: string) => void;
-  label: string;
-}) {
-  const done = copied === copyId;
+function CodeLine({ text, label }: { text: string; label: string }) {
   return (
     <div className="flex items-stretch gap-2">
       <code
@@ -53,17 +31,7 @@ function CodeLine({
       >
         {text}
       </code>
-      <button
-        onClick={() => onCopy(copyId, text)}
-        className="inline-flex items-center gap-1.5 px-3 rounded-lg text-xs font-medium shrink-0"
-        style={{
-          border: '1px solid var(--color-border)',
-          color: done ? 'var(--color-success)' : 'var(--color-text)',
-        }}
-      >
-        {done ? <Check size={14} /> : <Copy size={14} />}
-        {label}
-      </button>
+      <CopyButton text={text} label={label} />
     </div>
   );
 }
@@ -74,7 +42,6 @@ export default function ApiTokensSection() {
   const [newName, setNewName] = useState('');
   const [created, setCreated] = useState<ApiTokenCreated | null>(null);
   const [confirmId, setConfirmId] = useState<number | null>(null);
-  const { copied, copy } = useCopy();
 
   const keysQuery = useQuery({
     queryKey: ['api-tokens'],
@@ -98,11 +65,6 @@ export default function ApiTokensSection() {
       queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
     },
   });
-
-  const submit = () => {
-    const name = newName.trim();
-    if (name && !createMutation.isPending) createMutation.mutate(name);
-  };
 
   const keys = keysQuery.data || [];
   const error =
@@ -175,24 +137,12 @@ export default function ApiTokensSection() {
             <AlertTriangle size={14} className="shrink-0 mt-px" />
             {t('settings.tokenOnceWarning')}
           </p>
-          <CodeLine
-            text={created.full_key}
-            copyId="key"
-            copied={copied}
-            onCopy={copy}
-            label={copied === 'key' ? t('settings.copied') : t('settings.copyToken')}
-          />
+          <CodeLine text={created.full_key} label={t('settings.copyToken')} />
           <div className="space-y-1.5">
             <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               {t('settings.tryIt')}
             </p>
-            <CodeLine
-              text={tryCurl(created.full_key)}
-              copyId="curl"
-              copied={copied}
-              onCopy={copy}
-              label={copied === 'curl' ? t('settings.copied') : t('common.copy')}
-            />
+            <CodeLine text={tryCurl(created.full_key)} label={t('common.copy')} />
           </div>
           <button
             onClick={() => setCreated(null)}
@@ -209,7 +159,7 @@ export default function ApiTokensSection() {
         className="flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          submit();
+          createMutation.mutate(newName.trim());
         }}
       >
         <input

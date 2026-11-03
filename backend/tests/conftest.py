@@ -123,6 +123,16 @@ async def get_admin_token(client: AsyncClient) -> str:
     return resp.json()["access_token"]
 
 
+async def create_api_key(client: AsyncClient, name: str = "test-key") -> dict:
+    """Issue an API token as admin; returns the create response (incl. full_key)."""
+    jwt = await get_admin_token(client)
+    resp = await client.post(
+        "/api/settings/tokens", json={"name": name},
+        headers={"Authorization": f"Bearer {jwt}"},
+    )
+    return resp.json()
+
+
 async def admin_create_user(
     client: AsyncClient,
     username: str,

@@ -38,17 +38,10 @@ export default function App() {
     <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/share/:id" element={<ShareNotePage />} />
-      {/* API docs are public: logged-out visitors get a standalone shell. */}
-      {!token && (
-        <Route
-          path="/api-docs"
-          element={
-            <PublicDocsShell>
-              <ApiDocsPage />
-            </PublicDocsShell>
-          }
-        />
-      )}
+      {/* API docs are public: app chrome when logged in, standalone shell otherwise. */}
+      <Route element={token ? <Layout /> : <PublicDocsShell />}>
+        <Route path="/api-docs" element={<ApiDocsPage />} />
+      </Route>
       <Route
         element={
           <ProtectedRoute>
@@ -78,14 +71,6 @@ export default function App() {
           element={
             <ProtectedRoute>
               <VideoDetailPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/api-docs"
-          element={
-            <ProtectedRoute>
-              <ApiDocsPage />
             </ProtectedRoute>
           }
         />

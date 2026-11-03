@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Copy, Check, ChevronDown, ChevronRight, BookOpen } from 'lucide-react';
+import { ChevronDown, ChevronRight, BookOpen } from 'lucide-react';
 import { api } from '../lib/api';
 import { useT } from '../i18n';
+import CopyButton from '../components/CopyButton';
 
 interface Param {
   name: string;
@@ -36,28 +37,6 @@ const METHOD_COLORS: Record<string, string> = {
   PUT: '#f59e0b',
   DELETE: '#ef4444',
 };
-
-function CopyButton({ text }: { text: string }) {
-  const t = useT();
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="p-1.5 rounded-md hover:opacity-80 transition-opacity"
-      style={{ color: copied ? 'var(--color-success)' : 'var(--color-text-secondary)' }}
-      title={t('common.copy')}
-    >
-      {copied ? <Check size={14} /> : <Copy size={14} />}
-    </button>
-  );
-}
 
 function buildCurlExample(ep: Endpoint, authHeader: string): string {
   const bodyParams = ep.params.filter((p) => p.in === 'body');

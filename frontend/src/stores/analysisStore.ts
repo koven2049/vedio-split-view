@@ -43,14 +43,31 @@ export interface Segment {
   end_seconds: number;
 }
 
-/** Parsed from stored usage_json — older/imported records may omit fields. */
 export interface UsageInfo {
-  asr_duration_seconds?: number;
-  asr_model?: string;
-  llm_prompt_tokens?: number;
-  llm_completion_tokens?: number;
-  llm_total_tokens?: number;
-  llm_model?: string;
+  asr_duration_seconds: number;
+  asr_model: string;
+  llm_prompt_tokens: number;
+  llm_completion_tokens: number;
+  llm_total_tokens: number;
+  llm_model: string;
+}
+
+/** Parse stored usage_json; older/imported records may omit fields, so fill defaults. */
+export function parseUsage(json: string | undefined): UsageInfo | undefined {
+  if (!json) return undefined;
+  try {
+    const raw = JSON.parse(json) as Partial<UsageInfo>;
+    return {
+      asr_duration_seconds: raw.asr_duration_seconds ?? 0,
+      asr_model: raw.asr_model ?? '',
+      llm_prompt_tokens: raw.llm_prompt_tokens ?? 0,
+      llm_completion_tokens: raw.llm_completion_tokens ?? 0,
+      llm_total_tokens: raw.llm_total_tokens ?? 0,
+      llm_model: raw.llm_model ?? '',
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export interface AnalysisResult {
@@ -581,19 +598,11 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   fetchResultDetails: (slotId: string, videoId: number) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     api.get<any>(`/videos/${videoId}`).then((v) => {
-      let usage: UsageInfo | undefined;
-      if (v.usage_json) {
-        try {
-          usage = JSON.parse(v.usage_json);
-        } catch {
-          /* ignore */
-        }
-      }
       const result: AnalysisResult = {
         ...v,
         video_id: v.id as number,
         videoId: v.video_id as string,
-        usage,
+        usage: parseUsage(v.usage_json),
       };
       updateSlot(set, slotId, () => ({ result }));
     });
