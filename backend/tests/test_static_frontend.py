@@ -72,3 +72,40 @@ async def test_no_dist_is_noop(client, monkeypatch, tmp_path):
     app = create_app()
     paths = [getattr(r, "path", "") for r in app.routes]
     assert "/{full_path:path}" not in paths
+
+
+# ─── gzip (2026-11 perf round: static + JSON were sent uncompressed) ───
+
+
+@pytest.mark.asyncio
+async def test_assets_gzipped_and_still_immutable(client, dist):
+    """A 470 KB SPA bundle went out raw; gzip cuts it ~3x on slow links."""
+    (dist / "assets" / "index-big.js").write_text("console.log('x');\n" * 2000, encoding="utf-8")
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/assets/index-big.js", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert r.headers["content-encoding"] == "gzip"
+    assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert r.text.startswith("console.log")  # httpx transparently decodes
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_not_gzipped(client, dist):
+    """Buffering compression would stall progress events; SSE must pass raw."""
+    from fastapi.responses import StreamingResponse
+
+    app = create_app()
+
+    @app.get("/api/__sse_probe")
+    async def _probe():
+        async def gen():
+            yield "data: " + "x" * 4096 + "\n\n"
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    app.router.routes.insert(0, app.router.routes.pop())  # ahead of SPA catch-all
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/api/__sse_probe", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.text.startswith("data: x")
+    assert "content-encoding" not in r.headers

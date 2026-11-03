@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from video_split.config import get_settings
@@ -93,6 +94,11 @@ def create_app(*, use_lifespan: bool = True) -> FastAPI:
     @app.get("/health")
     async def health():
         return {"status": "ok"}
+
+    # Nothing in front of uvicorn compresses (no nginx/CDN since the process
+    # migration), so the ~470 KB SPA bundle and JSON went out raw. Starlette
+    # skips text/event-stream, so SSE progress is never buffered.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
     @app.middleware("http")
     async def cache_thumbnails(request, call_next):  # type: ignore[no-untyped-def]
