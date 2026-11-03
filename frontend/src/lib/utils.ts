@@ -63,3 +63,25 @@ export function timeAgo(dateStr: string): string {
   if (days < 30) return `${days}d ago`;
   return new Date(dateStr).toLocaleDateString();
 }
+
+/**
+ * Parse a server timestamp. SQLite `CURRENT_TIMESTAMP` columns serialize
+ * without a zone ("2026-11-03T04:46:00") but are UTC; `new Date()` would
+ * read them as local time, so append Z when no offset is present.
+ */
+export function parseServerTime(value: string): Date {
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(value);
+  return new Date(hasZone ? value : `${value.replace(' ', 'T')}Z`);
+}
+
+/** "3 天前" / "3 days ago" style relative time; falls back to a date past 30 days. */
+export function formatRelativeTime(date: Date, locale: string, now: Date = new Date()): string {
+  const seconds = Math.round((date.getTime() - now.getTime()) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  const abs = Math.abs(seconds);
+  if (abs < 60) return rtf.format(0, 'second');
+  if (abs < 3600) return rtf.format(Math.round(seconds / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.round(seconds / 3600), 'hour');
+  if (abs < 86400 * 30) return rtf.format(Math.round(seconds / 86400), 'day');
+  return date.toLocaleDateString(locale);
+}

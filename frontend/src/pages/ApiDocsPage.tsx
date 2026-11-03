@@ -102,14 +102,18 @@ function EndpointCard({ ep, authHeader }: { ep: Endpoint; authHeader: string }) 
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:opacity-90 transition-opacity"
       >
-        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        {expanded ? (
+          <ChevronDown size={14} className="shrink-0" />
+        ) : (
+          <ChevronRight size={14} className="shrink-0" />
+        )}
         <span
-          className="text-xs font-bold px-2 py-0.5 rounded"
+          className="text-xs font-bold px-2 py-0.5 rounded shrink-0"
           style={{ background: METHOD_COLORS[ep.method] || '#888', color: '#fff' }}
         >
           {ep.method}
         </span>
-        <code className="text-sm font-mono flex-1">{ep.path}</code>
+        <code className="text-sm font-mono flex-1 min-w-0 break-all">{ep.path}</code>
         <CopyButton text={fullSnippet} />
       </button>
 

@@ -7,10 +7,7 @@ import {
   CheckCircle,
   RefreshCw,
   X,
-  Key,
-  Copy,
   Check,
-  Plus,
   Trash2,
   Shield,
   AlertTriangle,
@@ -20,9 +17,10 @@ import {
   BarChart3,
   type LucideIcon,
 } from 'lucide-react';
-import { ApiError, api } from '../lib/api';
+import { api } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import { useT } from '../i18n';
+import ApiTokensSection from '../components/ApiTokensSection';
 
 interface BiliStatus {
   connected: boolean;
@@ -40,17 +38,6 @@ interface TaskItem {
   status: string;
   video_title: string;
   error_message: string;
-}
-interface ApiTokenItem {
-  id: number;
-  name: string;
-  key_prefix: string;
-  is_active: boolean;
-  last_used_at: string | null;
-  created_at: string;
-}
-interface ApiTokenCreated extends ApiTokenItem {
-  full_key: string;
 }
 interface AdminCleanupSummary {
   orphan_exports: number;
@@ -77,21 +64,6 @@ interface YoutubeCookiesStatus {
   usable: boolean | null;
   usability_message: string;
   checked_at: string | null;
-}
-
-const TOKEN_ENDPOINT = '/settings/tokens';
-const LEGACY_TOKEN_ENDPOINT = '/settings/api-keys';
-const TOKEN_HEADER_EXAMPLE = 'X-API-Key: <your-token>';
-
-async function withTokenEndpoint<T>(request: (path: string) => Promise<T>): Promise<T> {
-  try {
-    return await request(TOKEN_ENDPOINT);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) {
-      return request(LEGACY_TOKEN_ENDPOINT);
-    }
-    throw error;
-  }
 }
 
 export default function SettingsPage() {
@@ -561,214 +533,6 @@ function YoutubeCookiesSection({
           </div>
         </>
       ) : null}
-    </section>
-  );
-}
-
-function ApiTokensSection() {
-  const t = useT();
-  const queryClient = useQueryClient();
-  const [newName, setNewName] = useState('');
-  const [createdKey, setCreatedKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [headerCopied, setHeaderCopied] = useState(false);
-
-  const keysQuery = useQuery({
-    queryKey: ['api-tokens'],
-    queryFn: () => withTokenEndpoint((path) => api.get<ApiTokenItem[]>(path)),
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (name: string) =>
-      withTokenEndpoint((path) => api.post<ApiTokenCreated>(path, { name })),
-    onSuccess: (data) => {
-      setCreatedKey(data.full_key);
-      setNewName('');
-      queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => withTokenEndpoint((path) => api.delete(`${path}/${id}`)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['api-tokens'] }),
-  });
-
-  const handleCopyKey = async () => {
-    if (!createdKey) return;
-    await navigator.clipboard.writeText(createdKey);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleCopyHeader = async () => {
-    await navigator.clipboard.writeText(TOKEN_HEADER_EXAMPLE);
-    setHeaderCopied(true);
-    setTimeout(() => setHeaderCopied(false), 2000);
-  };
-
-  const keys = keysQuery.data || [];
-  const tokenError =
-    (keysQuery.error as Error | null) ||
-    (createMutation.error as Error | null) ||
-    (deleteMutation.error as Error | null);
-
-  return (
-    <section
-      className="p-5 rounded-xl space-y-4"
-      style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
-    >
-      <h2 className="font-semibold flex items-center gap-2">
-        <Key size={18} /> {t('settings.apiTokens')}
-      </h2>
-      <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-        {t('settings.apiTokensDesc')}
-      </p>
-
-      <div className="p-3 rounded-lg space-y-2" style={{ background: 'var(--color-bg-tertiary)' }}>
-        <p
-          className="text-xs font-medium uppercase tracking-wide"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          {t('settings.requestHeader')}
-        </p>
-        <div className="flex items-center gap-2">
-          <code
-            className="text-xs flex-1 font-mono px-2 py-1.5 rounded"
-            style={{ background: 'var(--color-bg)' }}
-          >
-            {TOKEN_HEADER_EXAMPLE}
-          </code>
-          <button
-            onClick={handleCopyHeader}
-            className="p-1.5 rounded-md"
-            style={{ color: headerCopied ? 'var(--color-success)' : 'var(--color-text-secondary)' }}
-          >
-            {headerCopied ? <Check size={16} /> : <Copy size={16} />}
-          </button>
-        </div>
-      </div>
-
-      {tokenError && (
-        <div
-          className="p-3 rounded-lg text-sm"
-          style={{
-            background: 'rgba(239, 68, 68, 0.08)',
-            border: '1px solid rgba(239, 68, 68, 0.25)',
-            color: 'var(--color-danger)',
-          }}
-        >
-          {tokenError.message}
-        </div>
-      )}
-
-      {/* Created key banner */}
-      {createdKey && (
-        <div
-          className="p-3 rounded-lg space-y-2"
-          style={{
-            background: 'var(--color-bg-tertiary)',
-            border: '1px solid var(--color-success)',
-          }}
-        >
-          <p className="text-sm font-medium" style={{ color: 'var(--color-success)' }}>
-            {t('settings.tokenCreated')}
-          </p>
-          <div className="flex items-center gap-2">
-            <code
-              className="text-xs flex-1 font-mono px-2 py-1.5 rounded"
-              style={{ background: 'var(--color-bg)' }}
-            >
-              {createdKey}
-            </code>
-            <button
-              onClick={handleCopyKey}
-              className="p-1.5 rounded-md"
-              style={{ color: copied ? 'var(--color-success)' : 'var(--color-text-secondary)' }}
-            >
-              {copied ? <Check size={16} /> : <Copy size={16} />}
-            </button>
-          </div>
-          <button
-            onClick={() => setCreatedKey(null)}
-            className="text-xs underline"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            {t('common.dismiss')}
-          </button>
-        </div>
-      )}
-
-      {/* Create form */}
-      <div className="flex gap-2">
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder={t('settings.tokenNamePlaceholder')}
-          className="flex-1 text-sm px-3 py-2 rounded-lg"
-          style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && newName.trim()) createMutation.mutate(newName.trim());
-          }}
-        />
-        <button
-          onClick={() => newName.trim() && createMutation.mutate(newName.trim())}
-          disabled={!newName.trim() || createMutation.isPending}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-          style={{ background: 'var(--color-primary)' }}
-        >
-          {createMutation.isPending ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Plus size={14} />
-          )}
-          {t('settings.issueToken')}
-        </button>
-      </div>
-
-      {/* Keys list */}
-      {keysQuery.isPending ? (
-        <p
-          className="text-sm flex items-center gap-2"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          <Loader2 size={14} className="animate-spin" /> {t('settings.loadingTokens')}
-        </p>
-      ) : keys.length === 0 ? (
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('settings.noTokens')}
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {keys.map((k) => (
-            <div
-              key={k.id}
-              className="flex items-center justify-between py-2 px-3 rounded-lg"
-              style={{ background: 'var(--color-bg-tertiary)' }}
-            >
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">{k.name}</p>
-                <p className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                  {k.key_prefix}
-                  {k.last_used_at && (
-                    <span className="ml-2">
-                      · {t('settings.lastUsed')}: {new Date(k.last_used_at).toLocaleDateString()}
-                    </span>
-                  )}
-                </p>
-              </div>
-              <button
-                onClick={() => deleteMutation.mutate(k.id)}
-                disabled={deleteMutation.isPending}
-                className="p-1.5 rounded hover:opacity-70"
-                style={{ color: 'var(--color-danger)' }}
-                title={t('settings.deleteToken')}
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </section>
   );
 }

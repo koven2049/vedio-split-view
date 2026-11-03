@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Video } from 'lucide-react';
 import { useLogin } from '../hooks/useAuth';
 import { useT } from '../i18n';
@@ -100,6 +100,15 @@ export default function LoginPage() {
 
         <p className="text-center text-xs mt-6" style={{ color: 'var(--color-text-secondary)' }}>
           {t('login.contactAdmin')}
+        </p>
+        <p className="text-center text-xs mt-2">
+          <Link
+            to="/api-docs"
+            className="hover:underline"
+            style={{ color: 'var(--color-primary)' }}
+          >
+            {t('login.viewApiDocs')}
+          </Link>
         </p>
       </div>
     </div>

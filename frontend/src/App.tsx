@@ -10,6 +10,7 @@ import ApiDocsPage from './pages/ApiDocsPage';
 import AdminPage from './pages/AdminPage';
 import LLMLogsPage from './pages/LLMLogsPage';
 import ShareNotePage from './pages/ShareNotePage';
+import PublicDocsShell from './components/PublicDocsShell';
 
 function ProtectedRoute({
   children,
@@ -37,6 +38,17 @@ export default function App() {
     <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/share/:id" element={<ShareNotePage />} />
+      {/* API docs are public: logged-out visitors get a standalone shell. */}
+      {!token && (
+        <Route
+          path="/api-docs"
+          element={
+            <PublicDocsShell>
+              <ApiDocsPage />
+            </PublicDocsShell>
+          }
+        />
+      )}
       <Route
         element={
           <ProtectedRoute>
@@ -72,7 +84,7 @@ export default function App() {
         <Route
           path="/api-docs"
           element={
-            <ProtectedRoute adminOnly>
+            <ProtectedRoute>
               <ApiDocsPage />
             </ProtectedRoute>
           }

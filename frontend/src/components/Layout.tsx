@@ -23,7 +23,7 @@ const NAV_ITEMS: {
   { path: '/analyze', label: 'nav.analyze', icon: Video, roles: ['admin'] },
   { path: '/library', label: 'nav.library', icon: Library, roles: ['admin', 'viewer'] },
   { path: '/llm-logs', label: 'nav.llmLogs', icon: ScrollText, roles: ['admin'] },
-  { path: '/api-docs', label: 'nav.apiDocs', icon: BookOpen, roles: ['admin'] },
+  { path: '/api-docs', label: 'nav.apiDocs', icon: BookOpen, roles: ['admin', 'viewer'] },
   { path: '/settings', label: 'nav.settings', icon: Settings, roles: ['admin'] },
   { path: '/admin', label: 'nav.users', icon: Shield, roles: ['admin'] },
 ];
