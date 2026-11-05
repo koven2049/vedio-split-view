@@ -36,6 +36,7 @@ import {
   buildDownloadMbText,
   isXiaoyuzhouErrorCode,
   stagesForPlatform,
+  validateApplePodcastsUrl,
   validateXiaoyuzhouUrl,
 } from './analyzeHelpers';
 
@@ -79,6 +80,7 @@ function detectPlatform(url: string): AnalysisPlatform | null {
   if (/youtube\.com|youtu\.be/.test(url)) return 'youtube';
   if (/bilibili\.com|b23\.tv/.test(url)) return 'bilibili';
   if (/xiaoyuzhoufm\.com/.test(url)) return 'xiaoyuzhou';
+  if (/podcasts\.apple\.com\/[a-z]{2}\/podcast\//i.test(url)) return 'apple_podcasts';
   return null;
 }
 
@@ -718,6 +720,13 @@ export default function AnalyzePage() {
         return false;
       }
     }
+    if (activeTab === 'apple_podcasts') {
+      const errKey = validateApplePodcastsUrl(trimmed);
+      if (errKey) {
+        setValidationError(t(errKey));
+        return false;
+      }
+    }
     const detected = detectPlatform(trimmed);
     if (!detected) {
       const msg =
@@ -725,7 +734,9 @@ export default function AnalyzePage() {
           ? t('analyze.invalidYoutube')
           : activeTab === 'bilibili'
             ? t('analyze.invalidBilibili')
-            : t('analyze.invalidXiaoyuzhou');
+            : activeTab === 'apple_podcasts'
+              ? t('analyze.invalidApplePodcasts')
+              : t('analyze.invalidXiaoyuzhou');
       setValidationError(msg);
       return false;
     }

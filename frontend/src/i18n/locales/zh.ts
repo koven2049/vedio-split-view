@@ -56,6 +56,9 @@ const zh = {
   'analyze.invalidYoutube': '请输入有效的 YouTube 链接 (youtube.com / youtu.be)',
   'analyze.invalidBilibili': '请输入有效的 Bilibili 链接 (bilibili.com / b23.tv)',
   'analyze.invalidXiaoyuzhou': '请输入有效的小宇宙链接 (xiaoyuzhoufm.com)',
+  'analyze.invalidApplePodcasts': '请输入有效的 Apple Podcasts 单集链接',
+  'analyze.applePodcastsNotEpisode':
+    'Apple Podcasts 链接需要指向单集（需包含 ?i= 单集编号），播客频道页暂不支持',
   'analyze.xiaoyuzhouNotEpisode': '需要单集链接（/episode/...），不支持节目页或用户页',
   'analyze.xiaoyuzhouBadFormat': '链接格式不对，需包含 24 位 episode ID',
   'analyze.xiaoyuzhouTabHint': '支持公开单集；付费/私密内容暂不支持',

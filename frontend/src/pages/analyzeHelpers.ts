@@ -23,9 +23,10 @@ export const STAGES = [
   'complete',
 ];
 
-/** Stages that are meaningless for Xiaoyuzhou (no subtitles on podcasts). */
+/** Stages that are meaningless for audio-only podcasts (no subtitles). */
 const HIDDEN_STAGES_BY_PLATFORM: Partial<Record<AnalysisPlatform, Set<string>>> = {
   xiaoyuzhou: new Set(['subtitle_check']),
+  apple_podcasts: new Set(['subtitle_check']),
 };
 
 /** Map backend XiaoyuzhouError codes to i18n keys (spec 3.4). */
@@ -78,5 +79,14 @@ export function validateXiaoyuzhouUrl(url: string): TranslationKey | null {
   if (/xiaoyuzhoufm\.com\/(podcast|user|category)\b/i.test(url))
     return 'analyze.xiaoyuzhouNotEpisode';
   if (!/xiaoyuzhoufm\.com\/episode\/[0-9a-f]{24}/i.test(url)) return 'analyze.xiaoyuzhouBadFormat';
+  return null;
+}
+
+/** Pure Apple Podcasts URL validator: must be a single-episode link
+ *  (podcasts.apple.com/.../id<showId>?i=<episodeId>). */
+export function validateApplePodcastsUrl(url: string): TranslationKey | null {
+  if (!/podcasts\.apple\.com\/[a-z]{2}\/podcast\//i.test(url))
+    return 'analyze.invalidApplePodcasts';
+  if (!/[?&]i=\d+/.test(url)) return 'analyze.applePodcastsNotEpisode';
   return null;
 }

@@ -31,6 +31,11 @@ export function generatePlaybackUrl(
   if (platform === 'xiaoyuzhou') {
     return `https://www.xiaoyuzhoufm.com/episode/${videoId}?t=${startSeconds}`;
   }
+  if (platform === 'apple_podcasts') {
+    // videoId is "showId:episodeId"; the slug is optional for redirects.
+    const [showId = '', epId = ''] = videoId.split(':');
+    return `https://podcasts.apple.com/us/podcast/id${showId}?i=${epId}`;
+  }
   return '';
 }
 
@@ -39,6 +44,7 @@ export function platformLabel(platform: string): string {
     youtube: 'YouTube',
     bilibili: 'Bilibili',
     xiaoyuzhou: '小宇宙',
+    apple_podcasts: 'Apple Podcasts',
   };
   return labels[platform] || platform;
 }

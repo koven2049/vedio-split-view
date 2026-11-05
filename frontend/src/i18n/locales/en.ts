@@ -59,6 +59,9 @@ const en: Record<TranslationKey, string> = {
   'analyze.invalidYoutube': 'Please enter a valid YouTube link (youtube.com / youtu.be)',
   'analyze.invalidBilibili': 'Please enter a valid Bilibili link (bilibili.com / b23.tv)',
   'analyze.invalidXiaoyuzhou': 'Please enter a valid Xiaoyuzhou link (xiaoyuzhoufm.com)',
+  'analyze.invalidApplePodcasts': 'Enter a valid Apple Podcasts episode link',
+  'analyze.applePodcastsNotEpisode':
+    'Apple Podcasts link must point to a single episode (with the ?i= id); show pages are not supported',
   'analyze.xiaoyuzhouNotEpisode':
     'Episode link required (/episode/...); podcast/user pages are not supported',
   'analyze.xiaoyuzhouBadFormat': 'Invalid link format — must contain a 24-character episode ID',

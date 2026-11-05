@@ -26,6 +26,11 @@ from video_split.service.downloader import (
     fetch_bilibili_metadata_and_subtitles,
     fetch_youtube_subtitles,
 )
+from video_split.service.apple_podcasts import (
+    ApplePodcastsError,
+    download_apple_podcasts_audio,
+    extract_apple_podcasts_metadata,
+)
 from video_split.service.xiaoyuzhou import XiaoyuzhouError, download_xiaoyuzhou_audio, extract_xiaoyuzhou_metadata
 from video_split.service.task_manager import (
     cleanup_task_files,
@@ -40,6 +45,7 @@ _PLATFORM_TAG_MAP = {
     "youtube": ("YouTube", "#ff0000"),
     "bilibili": ("Bilibili", "#00a1d6"),
     "xiaoyuzhou": ("小宇宙", "#7c3aed"),
+    "apple_podcasts": ("Apple Podcasts", "#fa2c56"),
 }
 
 
@@ -329,6 +335,8 @@ async def run_analysis(
         platform_hint, _ = detect_platform(task.url)
         if platform_hint == "xiaoyuzhou":
             meta, audio_url = await extract_xiaoyuzhou_metadata(task.url)
+        elif platform_hint == "apple_podcasts":
+            meta, audio_url = await extract_apple_podcasts_metadata(task.url)
         else:
             meta = await extract_metadata(task.url, **cred_kw)
             audio_url = ""
@@ -350,14 +358,14 @@ async def run_analysis(
             )
 
         threshold = limits.get("confirm_threshold_seconds") or settings.video.confirm_threshold_seconds
-        if meta.platform == "xiaoyuzhou":
+        if meta.platform in ("xiaoyuzhou", "apple_podcasts"):
             threshold = (
                 limits.get("podcast_confirm_threshold_seconds")
                 or settings.video.podcast_confirm_threshold_seconds
             )
         if confirm_event and duration > threshold:
             duration_str_confirm = f"{duration // 60}m{duration % 60:02d}s"
-            if meta.platform == "xiaoyuzhou":
+            if meta.platform in ("xiaoyuzhou", "apple_podcasts"):
                 confirm_message = (
                     f"播客时长 {duration_str_confirm}（超过 {threshold // 60} 分钟阈值），"
                     f"转写耗时较长，确认开始？"
@@ -423,7 +431,7 @@ async def run_analysis(
                 message="Bilibili account not connected, will use audio transcription.",
                 detail={"hint": "bilibili_not_connected"},
             )
-        elif meta.platform == "xiaoyuzhou":
+        elif meta.platform in ("xiaoyuzhou", "apple_podcasts"):
             yield ProgressEvent(
                 stage="subtitle_check", progress=14,
                 message="Podcast — no subtitles available, will use audio transcription.",
@@ -445,14 +453,14 @@ async def run_analysis(
                 no_sub_reason = "No subtitles available for this YouTube video."
             elif meta.platform == "bilibili" and not bilibili_cred:
                 no_sub_reason = "Bilibili account not connected, cannot fetch subtitles."
-            elif meta.platform == "xiaoyuzhou":
+            elif meta.platform in ("xiaoyuzhou", "apple_podcasts"):
                 no_sub_reason = "Podcast platform (no subtitles)."
             else:
                 no_sub_reason = "No subtitles found."
 
             transcript_method = "whisper"
             logger.info("[analysis] Task #%d — no subtitles, using audio transcription", task.id)
-            if meta.platform != "xiaoyuzhou":
+            if meta.platform not in ("xiaoyuzhou", "apple_podcasts"):
                 yield ProgressEvent(
                     stage="subtitle_check", progress=14,
                     message=f"{no_sub_reason} Will download audio and use Whisper API.",
@@ -469,6 +477,9 @@ async def run_analysis(
             task_dir = get_task_temp_dir(task)
             if meta.platform == "xiaoyuzhou":
                 audio_path = task_dir / "audio.m4a"
+            elif meta.platform == "apple_podcasts":
+                existing = sorted(task_dir.glob("audio.*"))
+                audio_path = existing[0] if existing else task_dir / "audio.mp3"
             else:
                 audio_path = task_dir / "audio.mp3"
 
@@ -523,6 +534,22 @@ async def run_analysis(
                             cancel_event=cancel_event,
                         ):
                             yield ev
+                    elif meta.platform == "apple_podcasts":
+                        if not audio_url:
+                            raise RuntimeError("Missing Apple Podcasts episode audio URL")
+
+                        def _ap_factory(*, progress_callback=None):
+                            return download_apple_podcasts_audio(
+                                audio_url, task_dir, progress_callback=progress_callback,
+                            )
+
+                        async for ev in _relay_download_progress(
+                            "audio_download", 15, 40, _ap_factory,
+                            label=f"下载音频 · Apple Podcasts",
+                            cancel_event=cancel_event,
+                        ):
+                            yield ev
+                        audio_path = next(iter(sorted(task_dir.glob("audio.*"))), audio_path)
                     else:
                         def _ydbili_factory(*, progress_callback=None):
                             # download_audio's internal yt_dlp call is synchronous
@@ -940,8 +967,11 @@ async def resume_analysis(
 
     platform_hint, _ = detect_platform(task.url)
     xy_audio_url = ""
+    ap_audio_url = ""
     if platform_hint == "xiaoyuzhou":
         meta, xy_audio_url = await extract_xiaoyuzhou_metadata(task.url)
+    elif platform_hint == "apple_podcasts":
+        meta, ap_audio_url = await extract_apple_podcasts_metadata(task.url)
     else:
         meta = await extract_metadata(task.url, **cred_kw)
     local_thumb = await download_thumbnail(meta)
@@ -973,7 +1003,26 @@ async def resume_analysis(
             audio_path_dl = task_dir_dl / "audio.mp3"
 
         try:
-            if platform_hint == "xiaoyuzhou":
+            if platform_hint == "apple_podcasts":
+                if not ap_audio_url:
+                    raise RuntimeError("Missing Apple Podcasts episode audio URL")
+
+                def _ap_retry_factory(*, progress_callback=None):
+                    return download_apple_podcasts_audio(
+                        ap_audio_url, task_dir_dl, progress_callback=progress_callback,
+                    )
+
+                async for ev in _relay_download_progress(
+                    "audio_download", 15, 40, _ap_retry_factory,
+                    label="下载音频 · Apple Podcasts",
+                    cancel_event=cancel_event,
+                ):
+                    yield ev
+                audio_files = list(task_dir_dl.glob("audio.*"))
+                if not audio_files:
+                    raise RuntimeError("Audio download retry failed: no output file")
+                audio_path_dl = audio_files[0]
+            elif platform_hint == "xiaoyuzhou":
                 if not xy_audio_url:
                     raise RuntimeError("Missing 小宇宙 episode audio URL")
 
@@ -1010,6 +1059,14 @@ async def resume_analysis(
                 if not audio_files:
                     raise RuntimeError("Audio download retry failed: no output file")
                 audio_path_dl = audio_files[0]
+        except ApplePodcastsError as e:
+            logger.error("[analysis] Task #%d — apple_podcasts retry failed (%s): %s", task.id, e.code, e)
+            await update_task_status(db, task, "failed_download", describe_error(e))
+            yield ProgressEvent(
+                stage="error", progress=0, message=describe_error(e),
+                detail={"error_code": e.code},
+            )
+            return
         except XiaoyuzhouError as e:
             logger.error("[analysis] Task #%d — xiaoyuzhou retry failed (%s): %s", task.id, e.code, e)
             await update_task_status(db, task, "failed_download", describe_error(e))

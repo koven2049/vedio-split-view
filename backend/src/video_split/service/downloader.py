@@ -85,6 +85,18 @@ def detect_platform(url: str) -> tuple[str, str]:
         if m:
             return "xiaoyuzhou", m.group(1)
 
+    # podcasts.apple.com/{locale}/podcast/{slug}/id{showId}?i={episodeId}
+    # video_id keeps BOTH ids as "showId:episodeId": the episode id is the
+    # unique analysis key, the show id is needed to deep-link back (Apple
+    # redirects /podcast/{any-slug}/id{showId}?i={ep} fine).
+    apple_patterns = [
+        r"podcasts\.apple\.com/[a-z]{2}/podcast/[^/?#]+/id(\d+)(?:[?&]|.*[?&])i=(\d+)",
+    ]
+    for pat in apple_patterns:
+        m = re.search(pat, url)
+        if m:
+            return "apple_podcasts", f"{m.group(1)}:{m.group(2)}"
+
     return "unknown", ""
 
 
@@ -841,4 +853,10 @@ def generate_playback_url(platform: str, video_id: str, start_seconds: int) -> s
         return f"https://www.bilibili.com/video/{video_id}?t={start_seconds}"
     elif platform == "xiaoyuzhou":
         return f"https://www.xiaoyuzhoufm.com/episode/{video_id}?t={start_seconds}"
+    elif platform == "apple_podcasts":
+        # Apple's web player has no timestamp parameter — deep-link to the
+        # episode. video_id is "showId:episodeId"; the slug is optional for
+        # Apple's redirect.
+        show_id, _, ep_id = video_id.partition(":")
+        return f"https://podcasts.apple.com/us/podcast/id{show_id}?i={ep_id}"
     return ""

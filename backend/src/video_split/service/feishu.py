@@ -376,7 +376,7 @@ def card_started(url: str, platform: str) -> dict:
 
 
 def card_help() -> dict:
-    body = "只支持 YouTube / B站 / 小宇宙。私聊直接粘贴；群里先 @ 我再贴链接。"
+    body = "只支持 YouTube / B站 / 小宇宙 / Apple Podcasts。私聊直接粘贴；群里先 @ 我再贴链接。"
     if load_vfav_forward() is not None:
         body += "\nX（推特）链接会存入视频收藏。"
     return _md_card("发一个视频链接", body, color="grey")
