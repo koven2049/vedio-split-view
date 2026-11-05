@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from video_split.service import apple_podcasts as ap
+from video_split.service.downloader import SubtitleEntry
 from video_split.service.downloader import detect_platform, generate_playback_url
 
 EP_URL = (
@@ -130,3 +131,50 @@ async def test_page_without_enclosure_raises_page_changed(monkeypatch, test_conf
     with pytest.raises(ap.ApplePodcastsError) as ei:
         await ap.extract_apple_podcasts_metadata(EP_URL)
     assert ei.value.code == "page_changed"
+
+
+# ─── recovery paths must translate too (regression: video 58) ───
+
+
+@pytest.mark.asyncio
+async def test_ensure_chinese_subtitles_translates_english(monkeypatch, test_config_path):
+    from video_split.config import set_config_path
+
+    set_config_path(test_config_path)
+    from video_split.service import video_service as vs
+
+    async def _fake_translate(subs, progress_callback=None):
+        return [
+            type(s)(start=s.start, duration=s.duration, text="中文", speaker=s.speaker)
+            for s in subs
+        ]
+
+    from video_split.service import analyzer
+
+    monkeypatch.setattr(analyzer, "translate_subtitles_to_chinese", _fake_translate)
+    en = [SubtitleEntry(start=i * 2.0, duration=1.0, text=f"english line {i}") for i in range(5)]
+    out = await vs._ensure_chinese_subtitles(en)
+    assert all(s.text == "中文" for s in out)
+    assert out[0].start == en[0].start
+
+
+@pytest.mark.asyncio
+async def test_ensure_chinese_subtitles_skips_chinese(monkeypatch, test_config_path):
+    from video_split.config import set_config_path
+
+    set_config_path(test_config_path)
+    from video_split.service import video_service as vs
+
+    called = []
+
+    async def _no_call(subs, progress_callback=None):
+        called.append(1)
+        return subs
+
+    from video_split.service import analyzer
+
+    monkeypatch.setattr(analyzer, "translate_subtitles_to_chinese", _no_call)
+    zh = [SubtitleEntry(start=0, duration=1, text="中文内容" + "。")] * 30
+    out = await vs._ensure_chinese_subtitles(zh)
+    assert out is zh
+    assert called == []

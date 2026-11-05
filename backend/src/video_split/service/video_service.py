@@ -954,6 +954,23 @@ async def _relay_download_progress(
     )
 
 
+async def _ensure_chinese_subtitles(subtitles: list[SubtitleEntry]) -> list[SubtitleEntry]:
+    """Translate on RECOVERY paths (retry/resume skip stage 4.5 by accident).
+
+    The main pipeline translates as stage 4.5; the three recovery paths
+    (download-retry, transcribe-resume, analyze-resume) historically jumped
+    straight from transcription/restore to analysis. Chinese-first platforms
+    never noticed; an English Apple Podcasts episode surfaced it (video 58
+    shipped an English transcript through an otherwise-successful retry).
+    """
+    from video_split.service.analyzer import _is_mostly_chinese, translate_subtitles_to_chinese
+
+    if not subtitles or _is_mostly_chinese(subtitles):
+        return subtitles
+    logger.info("[analysis] recovery path — translating %d subtitles to Chinese", len(subtitles))
+    return await translate_subtitles_to_chinese(subtitles)
+
+
 async def resume_analysis(
     db: AsyncSession,
     task: Task,
@@ -1117,6 +1134,7 @@ async def resume_analysis(
         await update_task_status(db, task, "analyzing")
 
         meta.duration_seconds = _reconcile_duration(meta, subtitles_dl, task.id)
+        subtitles_dl = await _ensure_chinese_subtitles(subtitles_dl)
 
         try:
             analysis_dl = await analyze_transcript(
@@ -1284,6 +1302,7 @@ async def resume_analysis(
             yield ProgressEvent(stage="transcription", progress=85, message="Transcription complete.")
 
         meta.duration_seconds = _reconcile_duration(meta, subtitles, task.id)
+        subtitles = await _ensure_chinese_subtitles(subtitles)
 
         try:
             analysis = await analyze_transcript(
