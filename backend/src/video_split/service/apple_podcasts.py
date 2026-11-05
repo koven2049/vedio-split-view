@@ -23,6 +23,7 @@ from pathlib import Path
 
 import httpx
 
+from video_split.config import get_settings
 from video_split.service.downloader import (
     MIN_AUDIO_BYTES,
     DownloadProgress,
