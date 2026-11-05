@@ -272,12 +272,25 @@ def _asr_speaker_layout(subtitles: list[SubtitleEntry]) -> dict | None:
     if labeled < len(subtitles) * 0.8:
         return None
 
+    # Occasional untagged lines (speaker="") interleave with labeled ones —
+    # forward-fill them with the previous label so run-splitting never sees
+    # an unknown id (production KeyError('') on video 58/60, 2026-11-05).
+    eff: list[str] = []
+    last = ""
+    for s in subtitles:
+        if s.speaker:
+            last = s.speaker
+        eff.append(last)
+    if not eff[0]:
+        first_known = next((sp for sp in eff if sp), "")
+        eff = [sp or first_known for sp in eff]
+
     order: list[str] = []
     seen: set[str] = set()
-    for s in subtitles:
-        if s.speaker and s.speaker not in seen:
-            seen.add(s.speaker)
-            order.append(s.speaker)
+    for sp in eff:
+        if sp not in seen:
+            seen.add(sp)
+            order.append(sp)
     speakers = [
         {"id": f"S{i + 1}", "name": f"说话人{i + 1}", "role": ""} for i in range(len(order))
     ]
@@ -285,9 +298,9 @@ def _asr_speaker_layout(subtitles: list[SubtitleEntry]) -> dict | None:
 
     blocks: list[dict] = []
     run_start = 0
-    for i in range(1, len(subtitles) + 1):
-        if i == len(subtitles) or subtitles[i].speaker != subtitles[run_start].speaker:
-            blocks.extend(_split_run(subtitles, run_start, i - 1, sid_of[subtitles[run_start].speaker]))
+    for i in range(1, len(eff) + 1):
+        if i == len(eff) or eff[i] != eff[run_start]:
+            blocks.extend(_split_run(subtitles, run_start, i - 1, sid_of[eff[run_start]]))
             run_start = i
     return {
         "speakers": speakers,

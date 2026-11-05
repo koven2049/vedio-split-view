@@ -17,6 +17,7 @@ def _config(test_config_path):
 
     set_config_path(test_config_path)
 
+
 # ─── model routing / submit params ───
 
 
@@ -171,3 +172,26 @@ def test_split_reencodes_mono_mp3_for_diarization(monkeypatch, tmp_path):
     assert cmd[cmd.index("-ac") + 1] == "1", "diarization chunks must be mono"
     assert "libmp3lame" in cmd, "stream copy yields no speaker_id — must re-encode"
     assert all(c.suffix == ".mp3" for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_asr_labels_with_scattered_empty_lines_do_not_crash(monkeypatch, _config):
+    """Regression (video 58/60): diarization labels covering >80% but with
+    interleaved untagged lines raised KeyError('') and killed the dialogue."""
+
+    async def _no_llm(*a, **k):
+        raise AssertionError("LLM must not be called when ASR labels cover the transcript")
+
+    monkeypatch.setattr(dialogue_mod, "post_chat", _no_llm)
+    labels = ["0"] * 4 + [""] + ["1"] * 3 + [""] + ["0"] * 2  # 9/11 labeled
+    subs = _subs_with_speakers(labels)
+    result, usage = await format_dialogue(
+        subs, platform="xiaoyuzhou", uploader="u", title="t", duration_seconds=60
+    )
+    assert result["fallback"] is False
+    assert result["source"] == "asr"
+    covered = [i for b in result["blocks"] for i in range(b["f"], b["t"] + 1)]
+    assert covered == list(range(11))
+    # leading empty line inherits the first label; runs split on real changes
+    speakers = {b["s"] for b in result["blocks"]}
+    assert speakers == {"S1", "S2"}
