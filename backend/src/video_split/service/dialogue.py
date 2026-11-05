@@ -331,6 +331,38 @@ async def format_dialogue(
     title: str,
     duration_seconds: int,
 ) -> tuple[dict, dict]:
+    """Never-raises wrapper (the hard contract callers rely on).
+
+    Production 2026-11-05: an httpx.ReadTimeout escaped the inner guards
+    during a parallel-analysis write-contention window and killed the
+    dialogue for an otherwise-successful video. Whatever the leak path
+    (accounting DB write outside the guards, retry-exhausted transport,
+    ...), the last line of defense turns ANY escape into the fallback
+    layout instead of losing the dialogue entirely — it can always be
+    re-POSTed with force=true.
+    """
+    try:
+        return await _format_dialogue_impl(
+            subtitles,
+            platform=platform, uploader=uploader,
+            title=title, duration_seconds=duration_seconds,
+        )
+    except Exception as e:  # noqa: BLE001 — the never-raises contract
+        logger.warning(
+            "[dialogue] unexpected escape (%s: %.120s), falling back",
+            type(e).__name__, str(e),
+        )
+        return _fallback_dialogue(subtitles), {}
+
+
+async def _format_dialogue_impl(
+    subtitles: list[SubtitleEntry],
+    *,
+    platform: str,
+    uploader: str,
+    title: str,
+    duration_seconds: int,
+) -> tuple[dict, dict]:
     """Format a subtitle stream into the stored dialogue structure.
 
     Returns ``(dialogue, usage)`` where dialogue is ``{"speakers": [...],

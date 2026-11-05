@@ -515,3 +515,20 @@ async def test_video_detail_returns_takeaways_and_intro(client, db_session):
     assert data["show_intro"] == "一期关于测试的节目。"
     assert data["uploader"] == "测试播客"
     assert data["has_dialogue"] is False
+
+
+@pytest.mark.asyncio
+async def test_format_dialogue_never_raises_on_any_escape(monkeypatch, _config):
+    """Hard contract: even an exception leaking from the inner guards (e.g.
+    the accounting DB write, which sits outside them) must degrade to the
+    fallback layout instead of killing the dialogue for a saved video."""
+    async def _boom(*a, **k):
+        raise RuntimeError("sqlite is locked")
+
+    _mock_llm(monkeypatch, _VALID_PAYLOAD)
+    monkeypatch.setattr(dialogue_mod, "_log_dialogue_call", _boom)
+    subs = _ten_subs()
+    result, usage = await format_dialogue(
+        subs, platform="youtube", uploader="u", title="t", duration_seconds=60
+    )
+    _assert_fallback((result, usage), subs)
