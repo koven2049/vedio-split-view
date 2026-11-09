@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { type DialogueOut, formatDialogueTimestamp } from '../lib/exportMarkdown';
+import DialogueTranscript from '../components/DialogueTranscript';
+import { type DialogueOut } from '../lib/exportMarkdown';
 import { formatDuration, formatTimeRange, platformLabel, splitParagraphs } from '../lib/utils';
 
 interface PublicSegment {
@@ -25,33 +26,10 @@ interface PublicNote {
 }
 
 function DialogueSection({ dialogue }: { dialogue: DialogueOut }) {
-  const sectionByIndex = new Map(dialogue.sections.map((sec) => [sec.index, sec.title]));
   return (
     <section className="mt-8 border-t border-[var(--color-border)] pt-6">
-      <h2 className="mb-2 text-lg font-medium">逐字稿</h2>
-      {dialogue.blocks.map((block) => {
-        const sectionTitle = sectionByIndex.get(block.index);
-        // single-speaker content timestamps every block instead of names
-        const showTurn = block.new_turn || dialogue.single_speaker;
-        return (
-          <Fragment key={block.index}>
-            {sectionTitle !== undefined && (
-              <h3 className="pt-5 pb-1 text-base font-semibold">{sectionTitle}</h3>
-            )}
-            <p className="py-1.5 leading-7">
-              {showTurn && (
-                <span className="mr-2 font-mono text-xs tabular-nums text-[var(--color-primary)]">
-                  {formatDialogueTimestamp(block.start)}
-                </span>
-              )}
-              {showTurn && !dialogue.single_speaker && (
-                <strong className="mr-1.5">{block.speaker}：</strong>
-              )}
-              {block.text}
-            </p>
-          </Fragment>
-        );
-      })}
+      <h2 className="mb-5 text-lg font-medium">逐字稿</h2>
+      <DialogueTranscript dialogue={dialogue} />
     </section>
   );
 }

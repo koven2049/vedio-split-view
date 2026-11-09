@@ -16,7 +16,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../lib/api';
 import {
   formatDuration,
@@ -31,11 +31,11 @@ import {
   downloadMarkdown,
   safeFilename,
   pickExportMarkdown,
-  formatDialogueTimestamp,
   parseBoldSegments,
   parseTakeaways,
   type DialogueOut,
 } from '../lib/exportMarkdown';
+import DialogueTranscript from '../components/DialogueTranscript';
 import LangToggle from '../components/LangToggle';
 import MindmapView from '../components/MindmapView';
 import UsageDisplay from '../components/UsageDisplay';
@@ -308,59 +308,12 @@ function DialogueView({ video, isViewer }: { video: VideoDetail; isViewer: boole
   const dialogue = dialogueQuery.data;
   if (!dialogue) return null;
 
-  const sectionByIndex = new Map<number, string>();
-  for (const sec of dialogue.sections) sectionByIndex.set(sec.index, sec.title);
-
   return (
-    <div className="max-w-3xl">
-      {dialogue.blocks.map((block) => {
-        const sectionTitle = sectionByIndex.get(block.index);
-        // single-speaker content timestamps every block instead of names
-        const showTurn = block.new_turn || dialogue.single_speaker;
-        const playbackUrl = generatePlaybackUrl(video.platform, video.video_id, block.start);
-        return (
-          <Fragment key={block.index}>
-            {sectionTitle !== undefined && (
-              <h3 className="pt-6 pb-1 text-base font-semibold">{sectionTitle}</h3>
-            )}
-            {showTurn ? (
-              <p className="py-1.5 text-sm leading-relaxed">
-                {playbackUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => window.open(playbackUrl, '_blank', 'noopener noreferrer')}
-                    className="font-mono tabular-nums mr-2 rounded px-1.5 py-0.5 text-xs hover:opacity-80"
-                    style={{
-                      background: 'var(--color-bg-tertiary)',
-                      color: 'var(--color-primary)',
-                    }}
-                    title={t('detail.playFromHere')}
-                  >
-                    {formatDialogueTimestamp(block.start)}
-                  </button>
-                ) : (
-                  <span
-                    className="inline-block font-mono tabular-nums mr-2 text-xs align-middle"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {formatDialogueTimestamp(block.start)}
-                  </span>
-                )}
-                {!dialogue.single_speaker && <strong className="mr-1.5">{block.speaker}：</strong>}
-                {block.text}
-              </p>
-            ) : (
-              <p
-                className="py-1.5 text-sm leading-relaxed"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                {block.text}
-              </p>
-            )}
-          </Fragment>
-        );
-      })}
-    </div>
+    <DialogueTranscript
+      dialogue={dialogue}
+      playbackUrlFor={(start) => generatePlaybackUrl(video.platform, video.video_id, start)}
+      playTitle={t('detail.playFromHere')}
+    />
   );
 }
 

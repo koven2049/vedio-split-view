@@ -12,6 +12,13 @@
   --color-danger: #ef4444;
   --color-success: #22c55e;
   --color-warning: #f59e0b;
+  /* dialogue speaker accents (name + turn rule), assigned by speaker order */
+  --speaker-1: #2563eb;
+  --speaker-2: #c2410c;
+  --speaker-3: #047857;
+  --speaker-4: #7c3aed;
+  --speaker-5: #be185d;
+  --speaker-6: #0e7490;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -27,6 +34,12 @@
     --color-danger: #f87171;
     --color-success: #4ade80;
     --color-warning: #fbbf24;
+    --speaker-1: #60a5fa;
+    --speaker-2: #fb923c;
+    --speaker-3: #34d399;
+    --speaker-4: #a78bfa;
+    --speaker-5: #f472b6;
+    --speaker-6: #22d3ee;
   }
 }
 
