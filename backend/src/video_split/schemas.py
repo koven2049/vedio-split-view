@@ -134,6 +134,10 @@ class PublicNoteOut(BaseModel):
     essence: str = ""
     transcript: str = ""
     segments: list[PublicNoteSegmentOut] = []
+    dialogue: DialogueOut | None = Field(
+        default=None,
+        description="Speaker-paragraph layout; null when not generated (use transcript).",
+    )
 
 
 class TagOut(BaseModel):

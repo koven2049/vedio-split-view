@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from video_split.api.videos import _parse_stored_subtitles
 from video_split.database import get_db
 from video_split.models import Video
-from video_split.schemas import PublicNoteOut, PublicNoteSegmentOut
+from video_split.schemas import DialogueOut, PublicNoteOut, PublicNoteSegmentOut
+from video_split.service.dialogue import derive_dialogue_view
 from video_split.share_token import verify_view_sig
 
 router = APIRouter(tags=["public"])
@@ -30,6 +34,14 @@ async def public_note(
     video = result.scalar_one_or_none()
     if video is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    dialogue = None
+    subtitles = _parse_stored_subtitles(video)
+    if video.dialogue_json and subtitles:
+        try:
+            view = derive_dialogue_view(json.loads(video.dialogue_json), subtitles)
+            dialogue = DialogueOut(video_id=video.id, **view)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            dialogue = None  # page falls back to the raw transcript
     return PublicNoteOut(
         id=video.id,
         title=video.title or "",
@@ -49,4 +61,5 @@ async def public_note(
             )
             for s in video.segments
         ],
+        dialogue=dialogue,
     )

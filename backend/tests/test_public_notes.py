@@ -70,3 +70,49 @@ async def test_public_notes_hidden_from_apidocs(client: AsyncClient):
     data = (await client.get("/api/docs-data")).json()
     paths = [ep["path"] for g in data["groups"] for ep in g["endpoints"]]
     assert not any("/public/notes" in p for p in paths)
+
+
+async def test_public_note_includes_dialogue_paragraphs(client: AsyncClient, db_session):
+    """Share page must get speaker paragraphs, not just line-per-timestamp text."""
+    import json
+
+    video = await _insert_note(db_session)
+    video.subtitle_json = json.dumps(
+        [
+            {"start": 0.0, "duration": 2.0, "text": "你觉得新一代会是什么样子？"},
+            {"start": 2.0, "duration": 3.0, "text": "我是说，从根本上说，"},
+            {"start": 5.0, "duration": 3.0, "text": "是对寡头政治的关注。"},
+        ],
+        ensure_ascii=False,
+    )
+    video.dialogue_json = json.dumps(
+        {
+            "speakers": [
+                {"id": "A", "name": "主持人", "role": ""},
+                {"id": "B", "name": "嘉宾", "role": ""},
+            ],
+            "blocks": [{"s": "A", "f": 0, "t": 0}, {"s": "B", "f": 1, "t": 2}],
+            "sections": [{"i": 0, "title": "开场"}],
+            "fallback": False,
+        },
+        ensure_ascii=False,
+    )
+    await db_session.commit()
+
+    sig = make_view_sig(video.id)
+    body = (await client.get(f"/api/public/notes/{video.id}?sig={sig}")).json()
+    dlg = body["dialogue"]
+    assert dlg["single_speaker"] is False
+    assert [b["speaker"] for b in dlg["blocks"]] == ["主持人", "嘉宾"]
+    assert dlg["blocks"][1]["text"] == "我是说，从根本上说，是对寡头政治的关注。"
+    assert dlg["blocks"][1]["start"] == 2.0
+    assert dlg["sections"] == [{"index": 0, "title": "开场"}]
+    # Raw transcript stays available as the fallback for old notes.
+    assert body["transcript"] == "[00:00] hello"
+
+
+async def test_public_note_without_dialogue_is_null(client: AsyncClient, db_session):
+    video = await _insert_note(db_session)
+    sig = make_view_sig(video.id)
+    body = (await client.get(f"/api/public/notes/{video.id}?sig={sig}")).json()
+    assert body["dialogue"] is None
