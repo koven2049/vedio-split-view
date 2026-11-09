@@ -314,8 +314,86 @@ def test_derive_dialogue_view_tolerates_bad_entries():
     }
     view = derive_dialogue_view(stored, _subs(["a", "b", "c", "d"]))
     assert len(view["blocks"]) == 2  # malformed middle entry skipped
-    assert [b["index"] for b in view["blocks"]] == [0, 2]  # keeps array position
+    # index = position in the *output* blocks array (long blocks may be
+    # split into several paragraphs, so stored positions no longer line up)
+    assert [b["index"] for b in view["blocks"]] == [0, 1]
     assert view["sections"] == [{"index": 0, "title": "有效"}]
+
+
+def _sentence(n: int, tag: str) -> str:
+    """One subtitle line of exactly n chars ending in 。"""
+    return (tag * n)[: n - 1] + "。"
+
+
+def test_derive_dialogue_view_splits_long_turn_into_paragraphs():
+    # One 900-char guest turn (30 lines x 30 chars) between two short host lines.
+    lines = ["主持人提问吗？"] + [_sentence(30, "嘉") for _ in range(30)] + ["好的。"]
+    stored = {
+        "speakers": _SPEAKERS,
+        "blocks": [
+            {"s": "A", "f": 0, "t": 0},
+            {"s": "B", "f": 1, "t": 30},
+            {"s": "A", "f": 31, "t": 31},
+        ],
+        "sections": [{"i": 1, "title": "嘉宾长谈"}, {"i": 2, "title": "收尾"}],
+        "fallback": False,
+    }
+    view = derive_dialogue_view(stored, _subs(lines))
+    guest = [b for b in view["blocks"] if b["speaker_id"] == "B"]
+    assert len(guest) >= 5  # 900 chars → paragraphs of <=200
+    assert all(len(b["text"]) <= 200 for b in guest)
+    assert all(b["text"].endswith("。") for b in guest)  # cut at sentence ends
+    # Nothing lost or duplicated.
+    assert "".join(b["text"] for b in guest) == "".join(lines[1:31])
+    # Only the first guest paragraph opens a turn; continuations don't.
+    assert [b["new_turn"] for b in guest] == [True] + [False] * (len(guest) - 1)
+    # Each paragraph starts at its own first subtitle line, in order.
+    starts = [b["start"] for b in guest]
+    assert starts == sorted(starts) and starts[0] == 6.0
+    # index is the output position; sections follow their block's first paragraph.
+    assert [b["index"] for b in view["blocks"]] == list(range(len(view["blocks"])))
+    last = view["blocks"][-1]
+    assert view["sections"] == [
+        {"index": 1, "title": "嘉宾长谈"},
+        {"index": last["index"], "title": "收尾"},
+    ]
+
+
+def test_derive_dialogue_view_keeps_short_block_whole():
+    lines = [_sentence(60, "甲"), _sentence(60, "乙"), _sentence(60, "丙")]  # 180 chars
+    stored = {
+        "speakers": [{"id": "A", "name": "甲"}],
+        "blocks": [{"s": "A", "f": 0, "t": 2}],
+        "sections": [],
+    }
+    view = derive_dialogue_view(stored, _subs(lines))
+    assert len(view["blocks"]) == 1
+
+
+def test_derive_dialogue_view_prefers_sentence_end_over_even_split():
+    # Comma-ended lines must not be cut mid-sentence when a 。 is close by.
+    lines = [("逗" * 39) + "，"] * 3 + [_sentence(40, "句")] + [("逗" * 39) + "，"] * 2 + [
+        _sentence(40, "尾")
+    ] + [_sentence(40, "末")]
+    stored = {
+        "speakers": [{"id": "A", "name": "甲"}],
+        "blocks": [{"s": "A", "f": 0, "t": len(lines) - 1}],
+        "sections": [],
+    }
+    view = derive_dialogue_view(stored, _subs(lines))
+    assert len(view["blocks"]) >= 2
+    assert all(b["text"].endswith("。") for b in view["blocks"])
+
+
+def test_dialogue_prompt_asks_for_short_content_paragraphs():
+    from video_split.service.dialogue import _build_prompt
+
+    prompt = _build_prompt(
+        "[0]|00:00|hi", platform="youtube", uploader="", title="", duration_seconds=60,
+        total_lines=1,
+    )
+    assert "200 字" in prompt
+    assert "拆成多个" in prompt
 
 
 # ─── API endpoints ───

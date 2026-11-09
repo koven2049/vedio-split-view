@@ -81,10 +81,10 @@ def _build_prompt(
 ## 任务：说话人识别与分段
 1. 为每行字幕判断说话人，并把全部字幕切分成连续的 blocks（自然段）：
    - blocks 必须按顺序**无缝覆盖全部下标 0..{total_lines - 1}**：不重叠、不跳过、首尾相接
-   - 每个 block 是一个**完整的意群**（一个观点/一层意思讲完才换段）：
-     - 多人对话：每个说话轮一个 block，典型 4~12 行字幕（约 100~300 字）
-     - 单人独白/教程/播报：按话题弧切段，典型 8~20 行字幕（约 200~500 字）
-     - **宁长而完整，不要短而碎**；一个意思没讲完绝不要断段
+   - 每个 block 是一个**完整的意群**（一个观点/一层意思讲完才换段），长度约 80~200 字，一般不超过 200 字：
+     - 同一个人的长发言（超过约 200 字）要按内容层次（观点、论据、例子、转折、新话题）拆成多个连续 block，这些 block 的说话人相同
+     - 单人独白/教程/播报同样按内容层次切段，每段约 80~200 字
+     - 一句话不要拆到两个 block；一个意思没讲完不要断段；简短的问答、附和可以单独成段
      - 禁止按固定行数或固定时间间隔机械切段
    - 说话人变化必须开新 block
 2. 说话人识别规则：
@@ -518,13 +518,88 @@ async def _log_dialogue_call(
     )
 
 
+# Display paragraphs: a speaking turn longer than this is split into
+# several paragraphs at sentence ends (the LLM layout is per *turn*, and a
+# 900-char wall of text is unreadable). Paragraphs aim for ~_PARA_TARGET.
+_PARA_MAX_CHARS = 200
+_PARA_TARGET_CHARS = 170
+# How far (chars) from the even-split target a sentence end may sit before
+# a clause break (，；…) is accepted instead.
+_PARA_SNAP_CHARS = 60
+# "…" is not a paragraph break: in speech it usually marks a trailing-off
+# self-correction that the next line picks up ("这不只是一种……不只是…").
+_PARA_SENTENCE_END = tuple("。？！?!")
+_CLAUSE_END = tuple("，,；;：:、…")
+
+
+def _paragraph_ranges(subtitles: list[SubtitleEntry], f: int, t: int) -> list[tuple[int, int]]:
+    """Split subtitle range [f..t] into display paragraphs of <=~200 chars.
+
+    Cuts only between subtitle lines (start times stay exact). The k-1 cut
+    points sit near even fractions of the text, snapped to the nearest
+    sentence-final line; a clause break is used only when no sentence end
+    is within ``_PARA_SNAP_CHARS``, and any line boundary as a last resort.
+    A single over-long line is left whole. Never raises.
+    """
+    texts = [(subtitles[i].text or "").strip() for i in range(f, t + 1)]
+    total = sum(len(x) for x in texts)
+    if total <= _PARA_MAX_CHARS or f == t:
+        return [(f, t)]
+    k = -(-total // _PARA_TARGET_CHARS)  # ceil
+
+    # Boundary after line i (relative) → cumulative chars up to it.
+    cum: list[int] = []
+    acc = 0
+    for x in texts[:-1]:
+        acc += len(x)
+        cum.append(acc)
+
+    def _nearest(cands: list[int], target: float, lo: int) -> int | None:
+        best = None
+        for i in cands:
+            if i < lo:
+                continue
+            if best is None or abs(cum[i] - target) < abs(cum[best] - target):
+                best = i
+        return best
+
+    strong = [i for i, x in enumerate(texts[:-1]) if x.endswith(_PARA_SENTENCE_END)]
+    weak = [i for i, x in enumerate(texts[:-1]) if x.endswith(_CLAUSE_END)]
+    cuts: list[int] = []
+    for j in range(1, k):
+        target = total * j / k
+        lo = cuts[-1] + 1 if cuts else 0
+        pick = _nearest(strong, target, lo)
+        if pick is None or abs(cum[pick] - target) > _PARA_SNAP_CHARS:
+            alt = _nearest(weak, target, lo)
+            if alt is None or abs(cum[alt] - target) > _PARA_SNAP_CHARS:
+                alt = _nearest(list(range(len(cum))), target, lo)
+            if pick is None or (
+                alt is not None and abs(cum[alt] - target) < abs(cum[pick] - target)
+            ):
+                pick = alt
+        if pick is not None and pick not in cuts:
+            cuts.append(pick)
+
+    ranges: list[tuple[int, int]] = []
+    start = f
+    for c in sorted(cuts):
+        ranges.append((start, f + c))
+        start = f + c + 1
+    ranges.append((start, t))
+    return ranges
+
+
 def derive_dialogue_view(stored: dict, subtitles: list[SubtitleEntry]) -> dict:
     """Render the stored dialogue structure into the API-facing view.
 
     Paragraph text and start times are re-derived from ``subtitles`` so the
     stored JSON stays index-only (no duplicated text to drift out of sync).
-    Block ``index`` is the position in the stored blocks array, which is what
-    ``sections[i]`` refers to.
+    Long stored blocks are split into several display paragraphs
+    (``_paragraph_ranges``); continuation paragraphs carry ``new_turn=False``.
+    Block ``index`` is the position in the *output* blocks array; sections
+    are remapped from stored block positions to the first paragraph of that
+    block.
     """
     speakers_raw = stored.get("speakers") or []
     name_by_id = {
@@ -534,6 +609,7 @@ def derive_dialogue_view(stored: dict, subtitles: list[SubtitleEntry]) -> dict:
     }
     n = len(subtitles)
     blocks_out: list[dict] = []
+    first_para_of: dict[int, int] = {}  # stored block position → output index
     prev_speaker: str | None = None
     for idx, b in enumerate(stored.get("blocks") or []):
         if not isinstance(b, dict):
@@ -547,26 +623,27 @@ def derive_dialogue_view(stored: dict, subtitles: list[SubtitleEntry]) -> dict:
         if t < f:
             continue
         speaker_id = str(b.get("s", ""))
-        blocks_out.append(
-            {
-                "index": idx,
-                "speaker_id": speaker_id,
-                "speaker": name_by_id.get(speaker_id) or speaker_id,
-                "start": subtitles[f].start,
-                "text": _join_texts([s.text for s in subtitles[f : t + 1]]),
-                "new_turn": idx == 0 or speaker_id != prev_speaker,
-            }
-        )
-        prev_speaker = speaker_id
+        first_para_of[idx] = len(blocks_out)
+        for pf, pt in _paragraph_ranges(subtitles, f, t):
+            blocks_out.append(
+                {
+                    "index": len(blocks_out),
+                    "speaker_id": speaker_id,
+                    "speaker": name_by_id.get(speaker_id) or speaker_id,
+                    "start": subtitles[pf].start,
+                    "text": _join_texts([s.text for s in subtitles[pf : pt + 1]]),
+                    "new_turn": not blocks_out or speaker_id != prev_speaker,
+                }
+            )
+            prev_speaker = speaker_id
 
-    stored_blocks = stored.get("blocks") or []
     sections_out: list[dict] = []
     for sec in stored.get("sections") or []:
         if not isinstance(sec, dict) or not isinstance(sec.get("i"), int):
             continue
         title = str(sec.get("title", "")).strip()
-        if 0 <= sec["i"] < len(stored_blocks) and title:
-            sections_out.append({"index": sec["i"], "title": title})
+        if sec["i"] in first_para_of and title:
+            sections_out.append({"index": first_para_of[sec["i"]], "title": title})
     return {
         "speakers": [
             {

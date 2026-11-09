@@ -193,12 +193,19 @@ class DialogueSpeakerOut(BaseModel):
 
 
 class DialogueBlockOut(BaseModel):
-    index: int = Field(description="Position in the blocks array (sections reference this).")
+    index: int = Field(
+        description=(
+            "Position in the blocks array (sections reference this). A long "
+            "speaking turn is split into several paragraphs of ~200 chars or less."
+        )
+    )
     speaker_id: str
     speaker: str
     start: float = Field(description="Start seconds of the turn's first subtitle line.")
     text: str = Field(description="Paragraph text, joined deterministically from subtitles f..t.")
-    new_turn: bool = Field(description="True when this block starts a new speaking turn.")
+    new_turn: bool = Field(
+        description="True when this block starts a new speaking turn (false on continuation paragraphs)."
+    )
 
 
 class DialogueSectionOut(BaseModel):
