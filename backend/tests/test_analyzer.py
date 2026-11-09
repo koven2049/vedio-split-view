@@ -88,3 +88,23 @@ class TestParseLLMResponse:
         result = _parse_llm_response(raw)
         assert len(result.segments) == 1
         assert "trap theory" in result.segments[0].summary_en
+
+
+class TestTranslatePrompt:
+    """Per-line translation must not seal half-sentences with a full stop —
+    the dialogue view joins lines into paragraphs, and a stray 。 at every
+    ASR cut reads as "是聚焦于。寡头政治——" (video 62, 2026-11-09)."""
+
+    def test_prompt_keeps_fragments_open(self):
+        from video_split.service.analyzer import _build_translate_prompt
+
+        prompt = _build_translate_prompt(["it's focused on", "oligarchy and corruption."])
+        assert "[1] it's focused on" in prompt
+        assert "[2] oligarchy and corruption." in prompt
+        assert "半句" in prompt and "句号" in prompt
+
+    def test_prompt_forbids_untranslated_english(self):
+        from video_split.service.analyzer import _build_translate_prompt
+
+        prompt = _build_translate_prompt(["emerging from the midterms"])
+        assert "英文" in prompt

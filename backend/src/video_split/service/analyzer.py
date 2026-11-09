@@ -373,6 +373,28 @@ def _translate_cache_path(texts: list[str]) -> Path:
     return Path(settings.storage.temp_dir).parent / "translate_cache" / f"{digest}.json"
 
 
+def _build_translate_prompt(texts: list[str]) -> str:
+    """Line-numbered translation prompt for one batch.
+
+    ASR cuts lines at pauses, often mid-sentence. The dialogue view later
+    joins consecutive lines into paragraphs, so a translated fragment that
+    gets sealed with 。 reads as a broken sentence ("是聚焦于。寡头政治——").
+    """
+    numbered = "\n".join(f"[{j+1}] {t}" for j, t in enumerate(texts))
+    return (
+        "请将以下视频字幕逐行翻译成简体中文。保持口语化风格。\n"
+        "每行前有行号，请返回 JSON 对象，key 为行号，value 为中文翻译。\n"
+        "如果两行原文需要合并成一句翻译，请将它们拆回两行，每行独立翻译。\n"
+        "字幕按停顿切行，一句话常被切成好几行，各行译文最终会首尾相连拼成段落：\n"
+        "- 某行只是半句、句子在后面的行才说完时，译文也保持半句，"
+        "结尾用逗号或不加标点，不要加句号、问号、叹号；\n"
+        "- 只有原文一句话真正说完的那一行，译文才用句末标点；\n"
+        "- 英文单词和短语都要译成中文，不要夹带英文原词"
+        "（人名、机构名用通行中文译名；通用缩写如 AI、GDP 可保留）。\n\n"
+        + numbered
+    )
+
+
 async def translate_subtitles_to_chinese(
     subtitles: list[SubtitleEntry],
     progress_callback=None,
@@ -398,13 +420,7 @@ async def translate_subtitles_to_chinese(
 
     async def _translate_batch(texts: list[str]) -> list[str | None]:
         """Translate one batch; return list of translated-or-None strings."""
-        numbered = "\n".join(f"[{j+1}] {t}" for j, t in enumerate(texts))
-        prompt = (
-            "请将以下视频字幕逐行翻译成简体中文。保持口语化风格。\n"
-            "每行前有行号，请返回 JSON 对象，key 为行号，value 为中文翻译。\n"
-            "如果两行原文需要合并成一句翻译，请将它们拆回两行，每行独立翻译。\n\n"
-            + numbered
-        )
+        prompt = _build_translate_prompt(texts)
 
         async def _call_llm(model: str, api_key: str, llm_base: str, timeout_ms: int, max_tokens: int) -> str:
             payload: dict[str, object] = {
