@@ -6,7 +6,7 @@
 公网域名怎么挂、Multica 团队怎么接。
 何时读：开工不在本机、要部署、要挂域名、要访问外网、或需要派活给其它机器上的 agent。
 凭证 / 密码 / token 不写本文件；代理具体命令以各机 root 下 README 为准。
-last-reviewed: 2026-10-07
+last-reviewed: 2026-11-10
 ```
 
 开发目录（两台 Mac 相同）：`~/Documents/workspace/ai`
@@ -165,9 +165,9 @@ ingress 典型形态：`hostname` → `http://localhost:<port>`，最后一条 `
 | 机器 | 后台进程 | Shell |
 |---|---|---|
 | 三台云主机（AliyunOS / CentOS 系） | **systemd** unit | bash |
-| 两台 Mac | **LaunchDaemon**（`/Library/LaunchDaemons/`） | **bash，不是 zsh**。alias 写 `~/.bashrc` |
+| 两台 Mac | **系统 LaunchDaemon + `UserName=admin`**（2026-11-10 定稿） | **bash，不是 zsh**。alias 写 `~/.bashrc` |
 
-macmini 是双用户：开机常驻、两个人都要用的服务挂**系统** LaunchDaemon（`/Library/LaunchDaemons/`），不要挂某个用户的 LaunchAgent（只在该用户登录 GUI 时才有）。SSH 会话里 `launchctl load` 进的是临时会话域；查系统服务用 `launchctl print system/<label>`。
+**Mac 开机自启铁律（2026-11-10 定稿；曾短暂试过用户 LaunchAgent，因重启后不自启而废弃）**：常驻服务一律 `/Library/LaunchDaemons/<label>.plist` 并写 **`UserName=admin`**——开机即起（无需 GUI 登录）、进程以 admin 身份运行非 root。plist 要点：`UserName=admin`；`EnvironmentVariables` 显式 `HOME=/Users/admin` 与 `PATH`（含 `/opt/homebrew/bin`）；删 `LimitLoadToSessionType`；`install -o root -g wheel -m 644` 安装；前台跑服务 + `KeepAlive=true`（plist 里不得调 `manage.sh start`/nohup）。manage.sh 用 system 域：查状态 `launchctl print system/<label>`（无需 sudo）；重启/装载 `sudo launchctl kickstart -k|bootstrap|bootout system/...`——**sudo 由用户以 `!` 前缀自行执行**；托管判定看 `/Library/LaunchDaemons/<label>.plist` 存在。迁移脚本 mini `~/Services/to-system-daemons.sh`（回滚 `-reverse`），验收 `~/Services/check_services.sh` 开机自启段全绿。保留用户 Agent 的只有 GUI 应用（clash-verge、browseros、grok-bot 等 `open -a` 类）。
 
 工程生命周期入口统一 `./manage.sh`（`init/start/stop/restart/status/rebuild/deploy`）。
 
@@ -204,7 +204,7 @@ macmini 是双用户：开机常驻、两个人都要用的服务挂**系统** L
 
 1. 先判断自己在哪台机器（`hostname` / `whoami`），再选 SSH 目标与代理。  
 2. 部署默认 `dev@` 云主机；只有用户点名或高敏感服务才动 `root@aliyun-sz2`。  
-3. macmini 上放公共产物，用系统 LaunchDaemon，不要用用户 LaunchAgent。  
+3. macmini 上放公共产物；开机自启用系统 LaunchDaemon + UserName=admin（见上「Mac 开机自启铁律」）。  
 4. 挂公网域名：改那台机器的 `/etc/cloudflared/config.yml`，不要另造一份域名清单。  
 5. 出网失败先直连再代理；云主机代理命令只从该机 `root` 下 README 读。  
 6. 需要其它机器上的 agent 干活：走 Multica 派 issue，不要假设云主机能量产 SSH 回笔记本。
