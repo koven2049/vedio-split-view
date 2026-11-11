@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from typing import ClassVar
 
 import pytest
 
@@ -98,7 +99,7 @@ class _FakeCDN:
     def stream(self, method, url):
         class _Resp:
             status_code = 200
-            headers = {"content-length": str(MIN_AUDIO_BYTES * 2)}
+            headers: ClassVar[dict] = {"content-length": str(MIN_AUDIO_BYTES * 2)}
 
             def raise_for_status(self):
                 return None
@@ -196,3 +197,137 @@ async def test_healthy_download_passes_validation(monkeypatch, tmp_path):
         expected_duration_seconds=3600,
     )
     assert out.exists()
+
+
+# ---------------------------------------------------------------------------
+# mid-stream early abort (traffic saver for encrypted episodes)
+# ---------------------------------------------------------------------------
+
+
+@requires_ffmpeg
+def test_early_probe_ok_on_healthy_prefix(healthy_mp3, tmp_path):
+    """A healthy file's head decodes fully → verdict "ok"."""
+    prefix = tmp_path / "prefix.mp3"
+    prefix.write_bytes(healthy_mp3.read_bytes())
+    assert xy._early_probe(prefix) == "ok"
+
+
+@requires_ffmpeg
+def test_early_probe_flags_plaintext_frame_plus_ciphertext(healthy_mp3, tmp_path):
+    """One plaintext frame then random bytes — the exact Task #70 signature."""
+    import os
+    encrypted_like = tmp_path / "encrypted.mp3"
+    # keep the first few real frames (≥1 frame ≈ 400B at 64kbps), fill the
+    # rest with ciphertext
+    encrypted_like.write_bytes(healthy_mp3.read_bytes()[:600] + os.urandom(2 * 1024 * 1024))
+    assert xy._early_probe(encrypted_like) == "encrypted"
+
+
+@requires_ffmpeg
+def test_early_probe_unknown_when_still_inside_id3_art(tmp_path):
+    """A prefix entirely inside a giant cover-art tag is inconclusive, not
+    encrypted — the ID3 header itself declares the tag size."""
+    size = 8 * 1024 * 1024  # declared tag bigger than the 1MB prefix below
+    head = b"ID3" + bytes([3, 0, 0]) + bytes(
+        [(size >> 21) & 0x7F, (size >> 14) & 0x7F, (size >> 7) & 0x7F, size & 0x7F]
+    )
+    prefix = tmp_path / "art_only.mp3"
+    prefix.write_bytes(head + b"\x00" * (1024 * 1024 - 10))
+    assert xy._early_probe(prefix) == "unknown"
+
+
+@requires_ffmpeg
+def test_early_probe_never_flags_moov_at_end_m4a_prefix(tmp_path):
+    """An MP4 prefix without its (end-of-file) moov atom must never be called
+    encrypted — ffmpeg ≥7 either decodes the mdat directly ("ok") or refuses
+    to open the container ("unknown"); both continue the download and defer
+    to the post-download validation."""
+    whole = tmp_path / "tail_moov.m4a"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=20",
+         "-codec:a", "aac", str(whole)],  # no -movflags faststart → moov at end
+        check=True,
+    )
+    prefix = tmp_path / "prefix.m4a"
+    prefix.write_bytes(whole.read_bytes()[:256 * 1024])
+    assert xy._early_probe(prefix) in ("ok", "unknown")
+
+
+def _unlimited_cdn(state: dict, *, chunk_mb: int = 8, chunks: int = 25):
+    """httpx.AsyncClient stand-in streaming fixed-size chunks; records how
+    many bytes were actually pulled from the wire."""
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def stream(self, method, url):
+            class _Resp:
+                status_code = 200
+                headers: ClassVar[dict] = {"content-length": str(chunk_mb * chunks * 1024 * 1024)}
+
+                def raise_for_status(self):
+                    return None
+
+                async def aiter_bytes(self):
+                    for _ in range(chunks):
+                        state["pulled"] += chunk_mb * 1024 * 1024
+                        yield b"\x00" * (chunk_mb * 1024 * 1024)
+
+            class _StreamCtx:
+                async def __aenter__(self):
+                    return _Resp()
+
+                async def __aexit__(self, *exc):
+                    return False
+
+            return _StreamCtx()
+
+    return _Client
+
+
+@pytest.mark.asyncio
+async def test_download_aborts_early_on_encrypted(monkeypatch, tmp_path):
+    """Encrypted verdict mid-stream kills the download at ~4MB, not 200MB."""
+    state = {"pulled": 0}
+    monkeypatch.setattr(xy.httpx, "AsyncClient", _unlimited_cdn(state))
+    monkeypatch.setattr(xy, "_early_probe", lambda path: "encrypted")
+
+    with pytest.raises(xy.XiaoyuzhouError) as ei:
+        await xy.download_xiaoyuzhou_audio(
+            "https://cdn.example.com/e.mp3", tmp_path,
+            expected_duration_seconds=10875,
+        )
+    assert ei.value.code == "audio_undecodable"
+    # 4MB threshold crossed on the first 8MB chunk — must not pull a second one
+    assert state["pulled"] == 8 * 1024 * 1024, (
+        f"must abort after the first threshold-crossing chunk, pulled {state['pulled']}"
+    )
+    assert not (tmp_path / "audio.m4a").exists(), "aborted partial file must be cleaned"
+
+
+@pytest.mark.asyncio
+async def test_download_early_unknown_falls_through(monkeypatch, tmp_path):
+    """"unknown" (moov-at-end / art-only) must NOT abort — the full download
+    proceeds and the post-download validation makes the final call."""
+    state = {"pulled": 0}
+    monkeypatch.setattr(xy.httpx, "AsyncClient", _unlimited_cdn(state, chunk_mb=3, chunks=2))
+    probes = []
+    monkeypatch.setattr(xy, "_early_probe", lambda path: probes.append(1) or "unknown")
+    monkeypatch.setattr(
+        xy, "probe_decoded_seconds",
+        lambda path, *, start, window: 8.0,
+    )
+    out = await xy.download_xiaoyuzhou_audio(
+        "https://cdn.example.com/e.mp3", tmp_path,
+        expected_duration_seconds=3600,
+    )
+    assert out.exists()
+    assert probes, "early probe must have run"
+    assert state["pulled"] == 6 * 1024 * 1024, "unknown verdict must not abort the stream"
