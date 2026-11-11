@@ -24,7 +24,13 @@ export interface ProgressData {
 }
 
 /** Error codes surfaced from backend XiaoyuzhouError (spec 3.4). */
-export type XiaoyuzhouErrorCode = 'cdn_expired' | 'paid_private' | 'page_changed' | 'not_episode';
+export type XiaoyuzhouErrorCode =
+  | 'cdn_expired'
+  | 'paid_private'
+  | 'page_changed'
+  | 'not_episode'
+  | 'audio_undecodable'
+  | 'audio_truncated';
 
 export interface StepEntry {
   stage: string;

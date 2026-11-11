@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -111,6 +112,38 @@ def get_audio_duration(audio_path: Path) -> float:
         raise RuntimeError(
             f"无法解析音频时长（{audio_path.name}），文件可能不完整或损坏"
         ) from None
+
+
+def probe_decoded_seconds(audio_path: Path, *, start: float = 0.0, window: float = 8.0) -> float:
+    """Actually decode ``window`` seconds from ``start`` and return how much
+    audio was really produced.
+
+    Unlike :func:`get_audio_duration` (container metadata, which for raw MP3
+    is merely size÷bitrate and stays at the claimed value even when the file
+    is garbage), this runs a real decode and parses the final ``time=`` from
+    ffmpeg's progress line — the ground truth a transcription would see. An
+    encrypted CDN file (Task #70: 130 MB of ciphertext behind one plaintext
+    frame) decodes ~0.2s and is caught here; a healthy window decodes ≈
+    ``window`` seconds.
+
+    Input seeking before ``-i`` is byte-estimate based for raw MP3 and may
+    land a couple seconds off target on VBR files — irrelevant at the 8s
+    window size used by callers.
+    """
+    result = subprocess.run(
+        [
+            "ffmpeg", "-nostdin", "-v", "info",
+            "-ss", f"{start:.2f}", "-i", str(audio_path),
+            "-t", f"{window:.2f}", "-f", "null", "-",
+        ],
+        capture_output=True, text=True,
+    )
+    m = re.search(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+    if not m:
+        # No progress line at all — nothing decoded (or the file is unreadable).
+        return 0.0
+    hh, mm, ss = int(m.group(1)), int(m.group(2)), float(m.group(3))
+    return hh * 3600 + mm * 60 + ss
 
 
 def probe_audio_codec(audio_path: Path) -> str:
@@ -240,7 +273,8 @@ def _collect_chunks(
             raise RuntimeError(
                 f"音频切片校验失败：源音频 {source_duration:.0f}s 应切 {expected} 块，"
                 f"实际只产出 {len(chunks)} 块、实测共 {measured:.0f}s。"
-                "音频文件很可能被截断或损坏，请重新下载后再分析。"
+                "音频文件可解码内容与标称时长严重不符（可能下载不完整或内容受平台加密保护），"
+                "请重试分析；若持续失败，该单集暂不支持。"
             )
         logger.warning(
             "[split] produced %d chunks (planned %d) but coverage %.0fs ≈ %.0fs — continuing",

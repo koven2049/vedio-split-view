@@ -142,9 +142,10 @@ export function AnalysisSlotCard({
     return error;
   })();
 
-  // Deterministic failures (e.g. duration over the hard limit) can never
+  // Deterministic failures (e.g. duration over the hard limit, or an
+  // encrypted/DRM episode whose re-download yields identical bytes) can never
   // succeed on retry — hide the retry button instead of inviting a no-op.
-  const retryable = errorCode !== 'duration_exceeded';
+  const retryable = errorCode !== 'duration_exceeded' && errorCode !== 'audio_undecodable';
 
   const [elapsed, setElapsed] = useState(0);
   // analyzing 置位时在渲染期重置计时（adjust-during-render），effect 只负责 interval

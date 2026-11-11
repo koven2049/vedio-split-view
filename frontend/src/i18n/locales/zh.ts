@@ -66,6 +66,8 @@ const zh = {
   'analyze.xiaoyuzhouErrorPaidPrivate': '付费/私密内容暂不支持',
   'analyze.xiaoyuzhouErrorPageChanged': '小宇宙页面结构可能已变更，请联系维护者',
   'analyze.xiaoyuzhouErrorNotEpisode': '链接不是有效的单集',
+  'analyze.xiaoyuzhouErrorAudioUndecodable': '该单集音频受平台加密保护，无法解码，暂不支持分析',
+  'analyze.xiaoyuzhouErrorAudioTruncated': '音频下载不完整（已自动重试一次），请重试分析',
   'analyze.downloadProgressBytes': '{downloaded} / {total} MB',
   'analyze.downloadProgressDownloaded': '{downloaded} MB',
   'analyze.wrongPlatform': '当前在 {current} 标签页，但链接属于 {detected}，请切换到对应标签页',
