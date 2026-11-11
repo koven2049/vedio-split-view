@@ -71,6 +71,10 @@ const en: Record<TranslationKey, string> = {
   'analyze.xiaoyuzhouErrorPageChanged':
     'Xiaoyuzhou page structure may have changed. Please contact the maintainer.',
   'analyze.xiaoyuzhouErrorNotEpisode': 'The link is not a valid episode',
+  'analyze.xiaoyuzhouErrorAudioUndecodable':
+    'This episode is DRM-protected by the platform and cannot be decoded',
+  'analyze.xiaoyuzhouErrorAudioTruncated':
+    'Audio download was incomplete (auto-retried once); please retry',
   'analyze.downloadProgressBytes': '{downloaded} / {total} MB',
   'analyze.downloadProgressDownloaded': '{downloaded} MB',
   'analyze.wrongPlatform':

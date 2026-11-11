@@ -1,6 +1,7 @@
 """小宇宙 (Xiaoyuzhou) podcast episode metadata and audio download."""
 from __future__ import annotations
 
+import asyncio
 import html as html_module
 import json
 import logging
@@ -12,6 +13,7 @@ import httpx
 
 from video_split.config import get_settings
 from video_split.service.downloader import MIN_AUDIO_BYTES, DownloadProgress, VideoMeta, detect_platform, normalize_url
+from video_split.service.transcriber import probe_decoded_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,11 @@ class XiaoyuzhouError(RuntimeError):
         paid_private  — 付费 / 私密内容，本服务仅支持公开单集。
         page_changed  — og 元数据与 JSON-LD 全 miss，疑似页面结构改版。
         not_episode   — URL 非 ``/episode/<id>``，前端理论上已拦，后端兜底。
+        audio_undecodable — CDN 返回的音频受加密保护/完全损坏，重新下载
+                       拿到的是相同字节，重试无意义（Task #70：130MB 密文
+                       只带一个明文首帧）。
+        audio_truncated  — 下载不完整（中段/尾部无法解码），已在下载器内
+                       自动重试一次；仍失败时用户手动重试可能有效。
     """
 
     def __init__(self, code: str, message: str):
@@ -315,12 +322,75 @@ async def extract_xiaoyuzhou_metadata(url: str) -> tuple[VideoMeta, str]:
     return meta, audio_url
 
 
+# A probe window "passes" when this much of the requested 8s actually decodes
+# (byte-estimate seeking on VBR MP3 can land a couple seconds off target).
+_PROBE_PASS_SECONDS = 5.0
+
+
+def _probe_start_offsets(expected_duration: float) -> list[float]:
+    """Decode-probe window starts: head, plus middle/tail for long episodes.
+
+    The tail window keeps a 90s margin behind the claimed end so the
+    minute-rounded JSON-LD fallback (up to 59s short, see
+    ``_duration_from_next_data``) never pushes a probe past the real EOF.
+    Windows whose coverage the downstream split tolerance (max(60s, 2%))
+    already forgives are simply omitted.
+    """
+    offsets = [0.0]
+    if expected_duration >= 60:
+        offsets.append(expected_duration / 2)
+    if expected_duration >= 180:
+        offsets.append(max(60.0, expected_duration - 90))
+    return offsets
+
+
+def _validate_decodable(out_path: Path, expected_duration: float) -> None:
+    """Refuse files whose bytes do not decode, split by cause.
+
+    Raises :class:`XiaoyuzhouError` with ``audio_undecodable`` when even the
+    head window is garbage (CDN-encrypted content — deterministic, retry is
+    pointless) or ``_TruncatedDownload`` when head is fine but middle/tail
+    fail (network truncation — caller retries once with the same URL).
+    """
+    for start in _probe_start_offsets(expected_duration):
+        decoded = probe_decoded_seconds(out_path, start=start, window=8.0)
+        if decoded >= _PROBE_PASS_SECONDS:
+            continue
+        if start == 0.0:
+            raise XiaoyuzhouError(
+                "audio_undecodable",
+                f"该单集音频无法解码（实测仅 {decoded:.1f}s 可读，标称 {expected_duration:.0f}s）。"
+                "内容疑似受平台加密保护，重新下载会得到相同字节，该单集暂不支持分析。",
+            )
+        raise _TruncatedDownload(start, decoded)
+    logger.info(
+        "[xiaoyuzhou] decode probe OK: %s (windows at %s, expected %.0fs)",
+        out_path.name, [round(s) for s in _probe_start_offsets(expected_duration)], expected_duration,
+    )
+
+
+class _TruncatedDownload(Exception):
+    """Head decodes but middle/tail windows don't — transient, retry once."""
+
+    def __init__(self, start: float, decoded: float):
+        self.start = start
+        self.decoded = decoded
+        super().__init__(f"window at {start:.0f}s decoded only {decoded:.1f}s")
+
+
 async def download_xiaoyuzhou_audio(
     audio_url: str,
     output_dir: Path,
     progress_callback: Callable[[DownloadProgress], None] | None = None,
+    expected_duration_seconds: float | None = None,
 ) -> Path:
-    """Stream-download episode m4a to ``output_dir/audio.m4a``."""
+    """Stream-download episode audio to ``output_dir/audio.m4a``.
+
+    After the size floor check, the file is decode-probed at head/middle/tail
+    windows: encrypted CDN content fails instantly with ``audio_undecodable``
+    (Task #70), a truncated stream retries the download once before failing
+    with ``audio_truncated``.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / "audio.m4a"
 
@@ -329,66 +399,77 @@ async def download_xiaoyuzhou_audio(
     proxy = None
 
     headers = {"User-Agent": _CHROME_UA}
-    logger.info("[xiaoyuzhou] Downloading audio to %s", out_path)
 
-    try:
-        settings = get_settings()
-        dl_timeout = float(settings.network.download_timeout_seconds)
-        async with httpx.AsyncClient(
-            proxy=proxy,
-            timeout=dl_timeout,
-            follow_redirects=True,
-            headers=headers,
-        ) as client:
-            async with client.stream("GET", audio_url) as resp:
-                resp.raise_for_status()
-                total = int(resp.headers.get("content-length") or 0)
-                downloaded = 0
-                with open(out_path, "wb") as f:
-                    async for chunk in resp.aiter_bytes():
-                        if not chunk:
-                            continue
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if progress_callback:
-                            ratio = min(1.0, downloaded / total) if total > 0 else 0.0
-                            progress_callback({
-                                "ratio": ratio,
-                                "downloaded_bytes": downloaded,
-                                "total_bytes": total,
-                            })
-    except httpx.HTTPError as e:
-        # 403/410/connect-failure on the audio CDN almost always means the
-        # signed link has expired — re-running extract_xiaoyuzhou_metadata
-        # fetches the page again and yields a fresh CDN URL.
-        logger.exception("[xiaoyuzhou] Audio download HTTP error: %s", audio_url)
-        if out_path.exists():
-            try:
-                out_path.unlink()
-            except OSError:
-                pass
-        raise XiaoyuzhouError(
-            "cdn_expired",
-            f"Audio CDN request failed ({type(e).__name__}); retry will fetch a fresh link",
-        ) from e
-    except Exception:
-        logger.exception("[xiaoyuzhou] Audio download failed: %s", audio_url)
-        if out_path.exists():
-            try:
-                out_path.unlink()
-            except OSError:
-                pass
-        raise
+    for attempt in (1, 2):
+        logger.info("[xiaoyuzhou] Downloading audio to %s (attempt %d)", out_path, attempt)
+        try:
+            dl_timeout = float(settings.network.download_timeout_seconds)
+            async with httpx.AsyncClient(
+                proxy=proxy,
+                timeout=dl_timeout,
+                follow_redirects=True,
+                headers=headers,
+            ) as client:
+                async with client.stream("GET", audio_url) as resp:
+                    resp.raise_for_status()
+                    total = int(resp.headers.get("content-length") or 0)
+                    downloaded = 0
+                    with open(out_path, "wb") as f:
+                        async for chunk in resp.aiter_bytes():
+                            if not chunk:
+                                continue
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if progress_callback:
+                                ratio = min(1.0, downloaded / total) if total > 0 else 0.0
+                                progress_callback({
+                                    "ratio": ratio,
+                                    "downloaded_bytes": downloaded,
+                                    "total_bytes": total,
+                                })
+        except httpx.HTTPError as e:
+            # 403/410/connect-failure on the audio CDN almost always means the
+            # signed link has expired — re-running extract_xiaoyuzhou_metadata
+            # fetches the page again and yields a fresh CDN URL.
+            logger.exception("[xiaoyuzhou] Audio download HTTP error: %s", audio_url)
+            out_path.unlink(missing_ok=True)
+            raise XiaoyuzhouError(
+                "cdn_expired",
+                f"Audio CDN request failed ({type(e).__name__}); retry will fetch a fresh link",
+            ) from e
+        except Exception:
+            logger.exception("[xiaoyuzhou] Audio download failed: %s", audio_url)
+            out_path.unlink(missing_ok=True)
+            raise
 
-    if not out_path.exists() or out_path.stat().st_size < MIN_AUDIO_BYTES:
-        actual = out_path.stat().st_size if out_path.exists() else 0
-        out_path.unlink(missing_ok=True)
-        raise XiaoyuzhouError(
-            "cdn_expired",
-            f"Audio download produced an invalid file ({actual} bytes). "
-            "The CDN link may be expired or the episode may be unavailable.",
-        )
+        if not out_path.exists() or out_path.stat().st_size < MIN_AUDIO_BYTES:
+            actual = out_path.stat().st_size if out_path.exists() else 0
+            out_path.unlink(missing_ok=True)
+            raise XiaoyuzhouError(
+                "cdn_expired",
+                f"Audio download produced an invalid file ({actual} bytes). "
+                "The CDN link may be expired or the episode may be unavailable.",
+            )
 
-    size_mb = out_path.stat().st_size / (1024 * 1024)
-    logger.info("[xiaoyuzhou] Audio saved: %s (%.1f MB)", out_path, size_mb)
-    return out_path
+        expected = float(expected_duration_seconds or 0.0)
+        try:
+            # probe runs ffmpeg (subprocess) — keep the event loop responsive.
+            await asyncio.to_thread(_validate_decodable, out_path, expected)
+        except _TruncatedDownload as e:
+            if attempt == 1:
+                logger.warning(
+                    "[xiaoyuzhou] Download looks truncated (%s) — retrying once", e,
+                )
+                out_path.unlink(missing_ok=True)
+                continue
+            raise XiaoyuzhouError(
+                "audio_truncated",
+                f"音频下载不完整（{e.start:.0f}s 处实测仅 {e.decoded:.1f}s 可解码，"
+                f"标称 {expected:.0f}s），已自动重试一次仍失败，请重试分析。",
+            ) from e
+
+        size_mb = out_path.stat().st_size / (1024 * 1024)
+        logger.info("[xiaoyuzhou] Audio saved: %s (%.1f MB)", out_path, size_mb)
+        return out_path
+
+    raise AssertionError("unreachable")  # pragma: no cover

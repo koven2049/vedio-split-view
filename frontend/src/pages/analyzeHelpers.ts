@@ -35,6 +35,8 @@ export const XIAOYUZHOU_ERROR_KEYS: Record<XiaoyuzhouErrorCode, TranslationKey> 
   paid_private: 'analyze.xiaoyuzhouErrorPaidPrivate',
   page_changed: 'analyze.xiaoyuzhouErrorPageChanged',
   not_episode: 'analyze.xiaoyuzhouErrorNotEpisode',
+  audio_undecodable: 'analyze.xiaoyuzhouErrorAudioUndecodable',
+  audio_truncated: 'analyze.xiaoyuzhouErrorAudioTruncated',
 };
 
 export function isXiaoyuzhouErrorCode(code: string): code is XiaoyuzhouErrorCode {

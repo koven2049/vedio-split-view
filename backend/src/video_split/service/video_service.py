@@ -37,7 +37,7 @@ from video_split.service.task_manager import (
     get_task_temp_dir,
     update_task_status,
 )
-from video_split.service.transcriber import ASRUsage, TranscriptionProgress, get_audio_duration, transcribe_audio
+from video_split.service.transcriber import ASRUsage, TranscriptionProgress, get_audio_duration, probe_decoded_seconds, transcribe_audio
 
 logger = logging.getLogger(__name__)
 
@@ -486,17 +486,39 @@ async def run_analysis(
             if audio_path.exists() and audio_path.stat().st_size >= MIN_AUDIO_BYTES:
                 # Size alone doesn't prove the download finished — an
                 # interrupted stream leaves a large but truncated file that
-                # fails the split/transcribe step every time. Probe it and
-                # compare duration with metadata before trusting the cache.
+                # fails the split/transcribe step every time. Podcast files
+                # downloaded from a plain CDN additionally need a *decode*
+                # probe: their container duration is an estimate (size÷bitrate
+                # for raw MP3) that stays at the claimed value even when the
+                # payload is ciphertext (Task #70 encrypted episode), so the
+                # old metadata comparison was blind to it.
                 cached_ok = True
                 try:
-                    cached_duration = get_audio_duration(audio_path)
-                    if meta.duration_seconds > 0 and cached_duration < meta.duration_seconds - 5.0:
-                        cached_ok = False
-                        logger.warning(
-                            "[analysis] Task #%d — cached audio truncated (%.0fs of expected %ds), re-downloading",
-                            task.id, cached_duration, meta.duration_seconds,
-                        )
+                    if meta.platform in ("xiaoyuzhou", "apple_podcasts"):
+                        decoded = probe_decoded_seconds(audio_path, start=0.0, window=8.0)
+                        if decoded < 5.0:
+                            cached_ok = False
+                            logger.warning(
+                                "[analysis] Task #%d — cached audio decodes %.1fs at head (encrypted/corrupt), re-downloading",
+                                task.id, decoded,
+                            )
+                        elif meta.duration_seconds >= 180:
+                            tail_start = max(60.0, meta.duration_seconds - 90)
+                            tail = probe_decoded_seconds(audio_path, start=tail_start, window=8.0)
+                            if tail < 5.0:
+                                cached_ok = False
+                                logger.warning(
+                                    "[analysis] Task #%d — cached audio truncated (tail@%.0fs decodes %.1fs of expected %.0fs), re-downloading",
+                                    task.id, tail_start, tail, meta.duration_seconds,
+                                )
+                    else:
+                        cached_duration = get_audio_duration(audio_path)
+                        if meta.duration_seconds > 0 and cached_duration < meta.duration_seconds - 5.0:
+                            cached_ok = False
+                            logger.warning(
+                                "[analysis] Task #%d — cached audio truncated (%.0fs of expected %ds), re-downloading",
+                                task.id, cached_duration, meta.duration_seconds,
+                            )
                 except Exception as e:
                     cached_ok = False
                     logger.warning(
@@ -526,6 +548,7 @@ async def run_analysis(
                         def _xy_factory(*, progress_callback=None):
                             return download_xiaoyuzhou_audio(
                                 audio_url, task_dir, progress_callback=progress_callback,
+                                expected_duration_seconds=meta.duration_seconds,
                             )
 
                         async for ev in _relay_download_progress(
@@ -1046,6 +1069,7 @@ async def resume_analysis(
                 def _xy_factory(*, progress_callback=None):
                     return download_xiaoyuzhou_audio(
                         xy_audio_url, task_dir_dl, progress_callback=progress_callback,
+                        expected_duration_seconds=meta.duration_seconds,
                     )
 
                 async for ev in _relay_download_progress(
