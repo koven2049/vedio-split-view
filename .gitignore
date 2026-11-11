@@ -42,3 +42,7 @@ logs/
 # code-review-graph 本地图谱索引（每工程独立，不入 git）
 .code-review-graph/
 .worktree/
+
+# agent 本地工具目录（本机产物，不进 git）
+.video_agent/
+.v2c/
