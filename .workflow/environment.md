@@ -41,6 +41,13 @@ last-reviewed: 2026-11-10
 
 在 macmini 上部署：优先公共目录（`~/Services`、`~/Public`、`/opt`），不要把「两用户都要用」的东西塞进某个家目录的隐匿路径。
 
+**全局 git ignore 兜底（2026-11-11 起，两机 + mini 的 `admin`）。** `core.excludesFile` 指向各自的 `~/.config/git/ignore`（git 默认路径，所以 config 丢了也照样生效），里面登记了必然是本机产物的 agent 工具目录：`.code-review-graph/`、`.video_agent/`、`.v2c/`、`.zcode/`、`.claudian/`、`.codex/`、`.agents/`、`.worktree/`、`.worktrees/`、`.claude/worktrees/`。
+
+- **它是兜底，不是替代。** 全局文件不随仓库走，别人 clone 或新机器拉下来都没有——所以仓内 `.gitignore` 仍是主线，新工程照样要自己写。全局那层只覆盖「新仓刚建、新工具刚冒出来、还没人补仓内规则」的空窗期。
+- **三个模式故意没加**，别顺手补上：`.claude/`（仓库可能合法提交工程级 Claude 配置，只兜它的 `worktrees/`）、`.playwright-cli/`（vedio-split-view 有已跟踪文件）、`.obsidian/`（obsidian-backup 的用途可能就包含提交 vault 配置）。
+- 全局模式是**任意层级**匹配，不像仓内规则有路径上下文；加之前必须按任意层级查一遍有没有哪个仓在跟踪同名目录（只查顶层会漏）。已跟踪的文件不受 ignore 影响，但之后在那个目录里新增的文件会被静默挡掉，这是真正的代价。
+- mini 的 `shiyun` 没设（改不了，需密码）；agent 活都在 `admin` 下。
+
 ### 2.2 三台云主机
 
 | 帐户 | 用途 |
