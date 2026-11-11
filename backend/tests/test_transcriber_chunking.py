@@ -121,6 +121,68 @@ async def test_all_chunks_silent_raises(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Chunk-coverage validation (Task #69: a 10875s show yielded ONE ~90s chunk
+# because the download was truncated; ffmpeg exits 0 at EOF, so the old code
+# sliced [chunk_000] out of 19 planned chunks and the job "completed" with a
+# single segment — three hours of content silently lost).
+# ---------------------------------------------------------------------------
+
+
+def test_truncated_split_fails_instead_of_processing_one_chunk(monkeypatch, tmp_path):
+    """A huge coverage gap must fail the split, not transcribe chunk_000 only."""
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"x" * 2048)
+    # metadata promises 10875s (19 chunks of 600s); the stream stops at ~90s
+    monkeypatch.setattr(
+        transcriber, "get_audio_duration",
+        lambda p: 10875.0 if p == audio else 90.0,
+    )
+    monkeypatch.setattr(transcriber, "probe_audio_codec", lambda p: "mp3")
+
+    chunk_dir = tmp_path / "chunks"
+    chunk_dir.mkdir()
+
+    def _fake_run(cmd, **kwargs):
+        (chunk_dir / "chunk_000.mp3").write_bytes(b"y" * 2048)
+        return transcriber.subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(transcriber.subprocess, "run", _fake_run)
+
+    with pytest.raises(RuntimeError, match="音频切片校验失败"):
+        transcriber.split_audio(audio, chunk_seconds=600)
+
+    leftovers = list(chunk_dir.glob("chunk_*"))
+    assert not leftovers, f"partial chunks must be cleaned for a clean retry: {leftovers}"
+
+
+def test_metadata_drift_within_tolerance_still_splits(monkeypatch, tmp_path):
+    """One chunk short of the plan with full measured coverage is metadata
+    drift, not truncation — must not brick legitimate episodes."""
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"x" * 2048)
+    # metadata claims 10875s (19 planned); the stream really ends at 10790s →
+    # 18 chunks. 85s drift < tolerance max(60s, 2%) = 217s → continue.
+    monkeypatch.setattr(
+        transcriber, "get_audio_duration",
+        lambda p: 10875.0 if p == audio else 10790.0 / 18,
+    )
+    monkeypatch.setattr(transcriber, "probe_audio_codec", lambda p: "mp3")
+
+    chunk_dir = tmp_path / "chunks"
+    chunk_dir.mkdir()
+
+    def _fake_run(cmd, **kwargs):
+        for i in range(18):
+            (chunk_dir / f"chunk_{i:03d}.mp3").write_bytes(b"y" * 2048)
+        return transcriber.subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(transcriber.subprocess, "run", _fake_run)
+
+    chunks = transcriber.split_audio(audio, chunk_seconds=600)
+    assert len(chunks) == 18
+
+
+# ---------------------------------------------------------------------------
 # Real-ffmpeg codec routing tests (the production root cause: AAC→.mp3 copy
 # fails with exit 234). Skipped automatically when ffmpeg/ffprobe is absent.
 # ---------------------------------------------------------------------------
