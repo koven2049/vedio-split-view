@@ -48,10 +48,13 @@ FRONTEND_IMAGE="vedio-split-view_frontend"
 VENV_PY="$SCRIPT_DIR/backend/.venv/bin/python"
 DIST_DIR="$SCRIPT_DIR/frontend/dist"
 AGENT_LABEL="com.koven.vsplit.web"
-# The agent runs in the user's *background* domain (user/<uid>), not the GUI one:
-# a gui/<uid> agent is torn down when another user takes the console (fast user
-# switching, 2026-10-31 outage) and gui/<uid> cannot be bootstrapped over SSH or
-# from a LaunchDaemon (error 125). Lookups check both, for an older GUI instance.
+# Harness rule (2026-11-10): long-running services are system LaunchDaemons with
+# UserName=admin and KeepAlive. Status needs no sudo; a restart is "kill, launchd
+# respawns" (the process is admin's); bootstrap/bootout/kickstart need sudo and are
+# printed for the owner to run, never run here.
+DAEMON_PLIST="/Library/LaunchDaemons/${AGENT_LABEL}.plist"
+DAEMON_TARGET="system/${AGENT_LABEL}"
+# Legacy user agent (2026-10-31 … 11-10): looked up so a leftover one is still found.
 AGENT_BOOT_DOMAIN="user/$(id -u)"
 AGENT_PLIST_INSTALL="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
 AGENT_PLIST_SRC="$SCRIPT_DIR/scripts/com.koven.vsplit.web.plist"
@@ -59,7 +62,7 @@ AGENT_PLIST_SRC="$SCRIPT_DIR/scripts/com.koven.vsplit.web.plist"
 # Loaded launchd target (domain/label) or empty.
 _agent_target() {
     local d
-    for d in "$AGENT_BOOT_DOMAIN" "gui/$(id -u)"; do
+    for d in system "$AGENT_BOOT_DOMAIN" "gui/$(id -u)"; do
         if launchctl print "$d/$AGENT_LABEL" >/dev/null 2>&1; then
             echo "$d/$AGENT_LABEL"
             return 0
@@ -424,6 +427,32 @@ _ensure_dist() {
     }
 }
 
+# PID launchd reports for a loaded target, or empty.
+_target_pid() {
+    launchctl print "$1" 2>/dev/null | awk '/^\tpid = /{print $3; exit}'
+}
+
+# Waits until both listeners answer; exits 1 after 30s.
+_wait_healthy() {
+    local i
+    for i in $(seq 1 30); do
+        _ports_healthy && break
+        sleep 1
+    done
+    if _ports_healthy; then
+        log_ok "Web: http://localhost:$(get_frontend_port)  (API compat: http://localhost:$(get_app_port))"
+    else
+        log_error "Service did not come up within 30s — check logs/process.log"
+        exit 1
+    fi
+}
+
+_daemon_not_loaded() {
+    log_error "LaunchDaemon ${AGENT_LABEL} is installed but not loaded. Load it (sudo):"
+    echo "  sudo launchctl bootstrap system ${DAEMON_PLIST}"
+    exit 1
+}
+
 run_start() {
     ensure_config
     _ensure_venv
@@ -432,6 +461,15 @@ run_start() {
     log_step "Starting service (launchd) …"
 
     local target
+    if [[ -f "$DAEMON_PLIST" ]]; then
+        # Managed by the system daemon: never start a second copy here.
+        target="$(_agent_target)" && [[ "$target" == "$DAEMON_TARGET" ]] || _daemon_not_loaded
+        [[ -n "$(_target_pid "$DAEMON_TARGET")" ]] \
+            && log_info "Running under ${DAEMON_TARGET}." \
+            || log_info "Waiting for launchd (KeepAlive) to start it …"
+        _wait_healthy
+        return 0
+    fi
     if target="$(_agent_target)"; then
         launchctl kickstart -k "$target" \
             || { log_error "kickstart failed (agent still unloading? retry: $0 start)"; exit 1; }
@@ -448,22 +486,18 @@ run_start() {
     # Both listeners (:5180 SPA+API and :8080 API compat) must answer within
     # 30s; probing only the web port would report a healthy start while the
     # compat listener is dead.
-    local i
-    for i in $(seq 1 30); do
-        _ports_healthy && break
-        sleep 1
-    done
-    if _ports_healthy; then
-        log_ok "Web: http://localhost:$(get_frontend_port)  (API compat: http://localhost:$(get_app_port))"
-    else
-        log_error "Service did not come up within 30s — check logs/process.log"
-        exit 1
-    fi
+    _wait_healthy
 }
 
 run_stop() {
     log_step "Stopping service …"
     local target
+    if target="$(_agent_target)" && [[ "$target" == "$DAEMON_TARGET" ]]; then
+        # KeepAlive respawns a killed process; only bootout stops it, and that needs sudo.
+        log_error "Managed by LaunchDaemon ${AGENT_LABEL}; stopping needs sudo:"
+        echo "  sudo launchctl bootout ${DAEMON_TARGET}"
+        return 1
+    fi
     if target="$(_agent_target)"; then
         launchctl bootout "$target" || { log_error "bootout failed"; return 1; }
         # bootout returns before the agent is fully unloaded; until then
@@ -481,7 +515,36 @@ run_stop() {
     fi
 }
 
-run_restart() { run_stop; run_start; }
+# System daemon: kill the admin-owned process and let KeepAlive respawn it with the
+# code now on disk (no sudo). Otherwise the legacy user-agent path: stop + start.
+run_restart() {
+    local target old new i
+    if target="$(_agent_target)" && [[ "$target" == "$DAEMON_TARGET" ]]; then
+        log_step "Restarting service (${DAEMON_TARGET}) …"
+        ensure_config
+        _ensure_venv
+        _ensure_dist
+        old="$(_target_pid "$DAEMON_TARGET")"
+        if [[ -n "$old" ]]; then
+            kill "$old" || { log_error "kill $old failed"; exit 1; }
+        fi
+        for i in $(seq 1 30); do
+            new="$(_target_pid "$DAEMON_TARGET")"
+            [[ -n "$new" && "$new" != "$old" ]] && break
+            sleep 1
+        done
+        if [[ -z "$new" || "$new" == "$old" ]]; then
+            log_error "launchd did not respawn ${AGENT_LABEL} within 30s (old pid ${old:-none})"
+            exit 1
+        fi
+        log_info "pid ${old:-none} → ${new}"
+        _wait_healthy
+        return 0
+    fi
+    [[ -f "$DAEMON_PLIST" ]] && _daemon_not_loaded
+    run_stop
+    run_start
+}
 
 run_rebuild() {
     while [[ $# -gt 0 ]]; do
@@ -531,6 +594,13 @@ run_status() {
     api_port="$(get_app_port)"
 
     log_step "Process status:"
+    local target
+    if target="$(_agent_target)"; then
+        log_info "launchd: ${target} (pid $(_target_pid "$target"))"
+    elif [[ -f "$DAEMON_PLIST" ]]; then
+        log_error "launchd: ${DAEMON_PLIST} installed but not loaded"
+        fail=1
+    fi
     if pgrep -fl "multi_listen.py" 2>/dev/null; then
         log_ok "Process: running"
     else
@@ -858,45 +928,27 @@ run_clean() {
 # install it under ~/Library/LaunchAgents, and neutralize the legacy
 # container-era watchdogs so they cannot fight the process stack.
 run_install_launchd() {
-    local legacy_label="com.koven.vedio-split-view"
-
     [[ -f "$AGENT_PLIST_SRC" ]] || { log_error "missing $AGENT_PLIST_SRC"; exit 1; }
-    mkdir -p "$SCRIPT_DIR/logs" "$HOME/Library/LaunchAgents"
-    sed -e "s|__ROOT__|${SCRIPT_DIR}|g" "$AGENT_PLIST_SRC" > "$AGENT_PLIST_INSTALL"
-    log_info "Plist: $AGENT_PLIST_INSTALL"
+    mkdir -p "$SCRIPT_DIR/logs"
+    local rendered="$SCRIPT_DIR/logs/${AGENT_LABEL}.plist"
+    sed -e "s|__ROOT__|${SCRIPT_DIR}|g" -e "s|__HOME__|${HOME}|g" "$AGENT_PLIST_SRC" > "$rendered"
+    plutil -lint "$rendered" >/dev/null || { log_error "rendered plist is invalid: $rendered"; exit 1; }
 
-    # Legacy 1/2: user boot agent (podman machine starter) — remove outright.
-    if [[ -f "$HOME/Library/LaunchAgents/${legacy_label}.plist" ]]; then
-        launchctl bootout "gui/$(id -u)/${legacy_label}" 2>/dev/null || true
-        rm -f "$HOME/Library/LaunchAgents/${legacy_label}.plist"
-        log_ok "Removed legacy boot agent ${legacy_label}"
-    fi
-
-    # Legacy 2/2: system watchdog Daemon runs scripts/launchd-start.sh under
-    # root. Neutralize the script itself (user-writable) so the next cycle is
-    # a no-op; full sudo removal stays a manual follow-up.
-    if [[ -f "$SCRIPT_DIR/scripts/launchd-start.sh" ]] \
-        && ! grep -q "VSLP-NEUTRALIZED" "$SCRIPT_DIR/scripts/launchd-start.sh"; then
-        printf '#!/bin/bash\n# VSLP-NEUTRALIZED: process-mode deployment replaced this watchdog.\nexit 0\n' \
-            > "$SCRIPT_DIR/scripts/launchd-start.sh"
-        chmod +x "$SCRIPT_DIR/scripts/launchd-start.sh"
-        pkill -f "launchd-start.sh" 2>/dev/null || true
-        log_ok "Neutralized legacy system watchdog script + killed running instance"
-        log_warn "完整卸载旧系统 Daemon（可选，需 sudo）："
-        echo "  sudo launchctl bootout system/${legacy_label} 2>/dev/null || true"
-        echo "  sudo rm -f /Library/LaunchDaemons/${legacy_label}.plist"
+    # Leftover user agent from 2026-10-31 … 11-10: unload and remove (no sudo needed).
+    if [[ -f "$AGENT_PLIST_INSTALL" ]]; then
+        launchctl bootout "${AGENT_BOOT_DOMAIN}/${AGENT_LABEL}" 2>/dev/null || true
+        launchctl bootout "gui/$(id -u)/${AGENT_LABEL}" 2>/dev/null || true
+        rm -f "$AGENT_PLIST_INSTALL"
+        log_ok "Removed legacy user agent ${AGENT_PLIST_INSTALL}"
     fi
 
-    # An instance still in the GUI domain is moved to the background domain.
-    local target
-    if target="$(_agent_target)" && [[ "$target" == gui/* ]]; then
-        launchctl bootout "$target" 2>/dev/null || true
-        sleep 2
+    log_ok "Rendered system LaunchDaemon plist: $rendered"
+    log_warn "安装 / 更新需要 sudo，请自己执行："
+    if [[ -f "$DAEMON_PLIST" ]]; then
+        echo "  sudo launchctl bootout ${DAEMON_TARGET} 2>/dev/null; \\"
     fi
-    if ! _agent_target >/dev/null; then
-        launchctl bootstrap "$AGENT_BOOT_DOMAIN" "$AGENT_PLIST_INSTALL"
-    fi
-    log_ok "LaunchAgent ${AGENT_LABEL} installed (RunAtLoad + KeepAlive)"
+    echo "  sudo install -o root -g wheel -m 644 $rendered ${DAEMON_PLIST} && \\"
+    echo "  sudo launchctl bootstrap system ${DAEMON_PLIST}"
 }
 
 # ── usage ─────────────────────────────────────────────────────────────────────
@@ -906,12 +958,12 @@ Usage: $0 <command> [options]
 
 Lifecycle (native processes via launchd; no containers):
   init                       Create config, directories
-  start                      Start the service (bootstrap/kickstart LaunchAgent)
-  stop                       Stop the service (launchctl bootout)
-  restart                    Stop + start
+  start                      Check the LaunchDaemon is up and healthy
+  stop                       Print the sudo bootout command (KeepAlive respawns a kill)
+  restart                    Kill the process; launchd respawns it (no sudo)
   rebuild                    Reinstall backend deps (venv) + rebuild frontend, restart
-  status                     Process status + health checks + data health
-  install-launchd            Install LaunchAgent (no sudo) + neutralize legacy watchdogs
+  status                     launchd + process status + health checks + data health
+  install-launchd            Render the LaunchDaemon plist, print the sudo install steps
   clean                      Remove pip cache / __pycache__ / node_modules / dist
 
 Data:

@@ -197,6 +197,7 @@ def split_audio(audio_path: Path, *, chunk_seconds: int | None = None) -> list[P
             ],
             what=f"音频切片（{audio_path.name}, codec={codec}）",
         )
+        chunks = _collect_chunks(chunk_dir, chunk_ext, num_chunks, total_duration)
     except Exception:
         # Remove partial chunks (e.g. the 0-byte stub the segment muxer leaves
         # behind) so a later resume never mixes dirty state into a retry.
@@ -204,13 +205,48 @@ def split_audio(audio_path: Path, *, chunk_seconds: int | None = None) -> list[P
             stub.unlink(missing_ok=True)
         raise
 
+    logger.info(
+        "[split] %s → %d chunks (source %.0fs, chunk_len=%ds, planned=%d)",
+        audio_path.name, len(chunks), total_duration, chunk_dur, num_chunks,
+    )
+    return chunks
+
+
+def _collect_chunks(
+    chunk_dir: Path, chunk_ext: str, expected: int, source_duration: float
+) -> list[Path]:
+    """Collect finished chunks and refuse to continue on partial coverage.
+
+    A truncated download decodes until EOF and ffmpeg still exits 0, writing
+    far fewer chunks than the container metadata promised (Task #69: a 10875s
+    source yielded one ~90s chunk, and the job "completed" with 1 segment).
+    When the produced count disagrees with the plan, measure the audio we
+    actually got and fail the split instead of silently transcribing a
+    fraction of the show.
+    """
     chunks = sorted(chunk_dir.glob(f"chunk_*.{chunk_ext}"))
     # segment creates a stub for the "next" segment at EOF; remove if corrupt.
     if chunks and chunks[-1].stat().st_size < 1024:
         chunks[-1].unlink()
         chunks.pop()
 
-    return chunks[:num_chunks]
+    if len(chunks) != expected:
+        measured = sum(get_audio_duration(c) for c in chunks)
+        # Small container-metadata vs stream drift is normal; beyond a couple
+        # of percent (or a minute) it is real missing / phantom audio.
+        tolerance = max(2 * MIN_TAIL_SECONDS, 0.02 * source_duration)
+        drift = measured - source_duration
+        if abs(drift) > tolerance:
+            raise RuntimeError(
+                f"音频切片校验失败：源音频 {source_duration:.0f}s 应切 {expected} 块，"
+                f"实际只产出 {len(chunks)} 块、实测共 {measured:.0f}s。"
+                "音频文件很可能被截断或损坏，请重新下载后再分析。"
+            )
+        logger.warning(
+            "[split] produced %d chunks (planned %d) but coverage %.0fs ≈ %.0fs — continuing",
+            len(chunks), expected, measured, source_duration,
+        )
+    return chunks[:expected]
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +537,39 @@ async def _funasr_transcribe_single(
     return entries, dur
 
 
+class _EmptyASRResult(RuntimeError):
+    """DashScope says SUCCEEDED but billed no audio / parsed no text.
+
+    Task #69: a chunk came back ``succeeded (0.0s), billed_duration=0.0s``
+    with a hollow transcript; treating that as success completed the whole
+    job with an empty note. Retried once — still empty means the chunk (and
+    with it the task) must fail instead.
+    """
+
+
 async def _funasr_call(
+    audio_url: str,
+    *,
+    progress_callback: ProgressCB | None = None,
+    chunk_index: int = 1,
+    total_chunks: int = 1,
+) -> tuple[list[SubtitleEntry], float]:
+    for attempt in (1, 2):
+        try:
+            return await _funasr_task_once(
+                audio_url, progress_callback=progress_callback,
+                chunk_index=chunk_index, total_chunks=total_chunks,
+            )
+        except _EmptyASRResult as e:
+            if attempt == 2:
+                raise RuntimeError(
+                    f"Fun-ASR 空结果重试一次后仍为空（{e}），该音频块判定失败，任务中止"
+                ) from e
+            logger.warning("[funasr] %s — 重试一次（attempt 2/2）", e)
+    raise AssertionError("unreachable")
+
+
+async def _funasr_task_once(
     audio_url: str,
     *,
     progress_callback: ProgressCB | None = None,
@@ -581,6 +649,13 @@ async def _funasr_call(
                 api_duration = float(usage.get("duration", 0))
                 logger.info("[funasr] Task %s succeeded (%.1fs), billed_duration=%.1fs", task_id, elapsed, api_duration)
                 entries = await _parse_funasr_results(client, output)
+                # SUCCEEDED with nothing billable and nothing parsed is a sick
+                # result (truncated upload, decoder hiccup), not a transcript.
+                if api_duration <= 0 or not entries:
+                    raise _EmptyASRResult(
+                        f"task {task_id} 空结果：billed_duration={api_duration:.1f}s，"
+                        f"解析出 {len(entries)} 段文本"
+                    )
                 return entries, api_duration
             if status == "FAILED":
                 code = output.get("code", "")
