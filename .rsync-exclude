@@ -4,6 +4,7 @@
 
 # ── version control & IDE ────────────────────────────────────────────────────
 .git/
+.git
 .DS_Store
 .vscode/
 .idea/
