@@ -15,6 +15,8 @@ contract:
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from video_split.service import transcriber
@@ -39,7 +41,7 @@ class _FakeAsyncClient:
     were really submitted.
     """
 
-    instances: list["_FakeAsyncClient"] = []
+    instances: ClassVar[list[_FakeAsyncClient]] = []
 
     def __init__(self, script: list[dict], **kwargs):
         self._script = list(script)
@@ -54,7 +56,9 @@ class _FakeAsyncClient:
 
     async def post(self, url, **kwargs):
         self.submits += 1
-        return _FakeResponse({"output": {"task_id": f"task-{len(_FakeAsyncClient.instances)}-{self.submits}"}})
+        return _FakeResponse(
+            {"output": {"task_id": f"task-{len(_FakeAsyncClient.instances)}-{self.submits}"}}
+        )
 
     async def get(self, url, **kwargs):
         return _FakeResponse(self._script.pop(0))
@@ -64,18 +68,14 @@ def _poll_payload(duration: float) -> dict:
     return {
         "output": {
             "task_status": "SUCCEEDED",
-            "results": [
-                {"subtask_status": "SUCCEEDED", "transcription_url": "https://tr/x.json"}
-            ],
+            "results": [{"subtask_status": "SUCCEEDED", "transcription_url": "https://tr/x.json"}],
         },
         "usage": {"duration": duration},
     }
 
 
 _TRANSCRIPT_WITH_TEXT = {
-    "transcripts": [
-        {"sentences": [{"begin_time": 0, "end_time": 3200, "text": "欢迎收听"}]}
-    ]
+    "transcripts": [{"sentences": [{"begin_time": 0, "end_time": 3200, "text": "欢迎收听"}]}]
 }
 
 
@@ -128,7 +128,7 @@ async def test_empty_first_attempt_recovers_on_retry(monkeypatch, _settings, _fa
     _script_clients(
         monkeypatch,
         [
-            [_poll_payload(0.0), _TRANSCRIPT_WITH_TEXT],   # sick first task
+            [_poll_payload(0.0), _TRANSCRIPT_WITH_TEXT],  # sick first task
             [_poll_payload(120.0), _TRANSCRIPT_WITH_TEXT],  # healthy retry
         ],
     )
@@ -156,13 +156,17 @@ async def test_no_speech_failure_still_tolerated(monkeypatch, _settings, _fast_p
     """Silence in one chunk degrades to an empty transcript — no resubmit, no abort."""
     _script_clients(
         monkeypatch,
-        [[{
-            "output": {
-                "task_status": "FAILED",
-                "code": "ASR_RESPONSE_HAVE_NO_WORDS",
-                "message": "audio has no words",
-            }
-        }]],
+        [
+            [
+                {
+                    "output": {
+                        "task_status": "FAILED",
+                        "code": "ASR_RESPONSE_HAVE_NO_WORDS",
+                        "message": "audio has no words",
+                    }
+                }
+            ]
+        ],
     )
 
     entries, dur = await transcriber._funasr_call("https://oss/audio.mp3")
