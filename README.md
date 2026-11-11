@@ -60,7 +60,7 @@ bash manage.sh rebuild
 ```bash
 bash manage.sh status     # 进程状态 + 健康检查 + 数据库行数
 bash manage.sh rebuild     # 改完代码后重装依赖并重建前端（最常用）
-bash manage.sh restart     # 停止 + 启动（launchctl bootout/bootstrap）
+bash manage.sh restart     # 结束进程，由 LaunchDaemon（KeepAlive）拉起新进程，不用 sudo
 bash manage.sh stop        # 停止
 bash manage.sh start       # 启动
 ```

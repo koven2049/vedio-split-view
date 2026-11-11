@@ -13,8 +13,10 @@
     <string>__ROOT__</string>
     <key>EnvironmentVariables</key>
     <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <!-- Mirror compose.yaml: explicit empty proxies so a proxied shell can
              never leak B站/小宇宙 traffic abroad. -->
         <key>http_proxy</key>
@@ -26,9 +28,9 @@
         <key>HTTPS_PROXY</key>
         <string></string>
     </dict>
-    <!-- Background: loadable into user/<uid>, independent of who holds the console. -->
-    <key>LimitLoadToSessionType</key>
-    <string>Background</string>
+    <!-- System LaunchDaemon: boots without console login; process runs as admin. -->
+    <key>UserName</key>
+    <string>admin</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
