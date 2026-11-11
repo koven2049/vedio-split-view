@@ -213,13 +213,14 @@ def test_early_probe_ok_on_healthy_prefix(healthy_mp3, tmp_path):
 
 
 @requires_ffmpeg
-def test_early_probe_flags_plaintext_frame_plus_ciphertext(healthy_mp3, tmp_path):
-    """One plaintext frame then random bytes — the exact Task #70 signature."""
-    import os
+def test_early_probe_flags_opens_but_undecodable_prefix(monkeypatch, tmp_path, healthy_mp3):
+    """Container opens as audio yet the head decodes ≈0s — the Task #70
+    signature (real DRM keeps frame headers valid, payloads ciphertext; real
+    ffmpeg decode is monkeypatched because ffmpeg ≥9 noise-decodes such
+    prefixes, which is exactly why the two-threshold scheme exists)."""
     encrypted_like = tmp_path / "encrypted.mp3"
-    # keep the first few real frames (≥1 frame ≈ 400B at 64kbps), fill the
-    # rest with ciphertext
-    encrypted_like.write_bytes(healthy_mp3.read_bytes()[:600] + os.urandom(2 * 1024 * 1024))
+    encrypted_like.write_bytes(healthy_mp3.read_bytes())  # real container, real headers
+    monkeypatch.setattr(xy, "probe_decoded_seconds", lambda p, *, start, window: 0.2)
     assert xy._early_probe(encrypted_like) == "encrypted"
 
 
@@ -310,6 +311,41 @@ async def test_download_aborts_early_on_encrypted(monkeypatch, tmp_path):
         f"must abort after the first threshold-crossing chunk, pulled {state['pulled']}"
     )
     assert not (tmp_path / "audio.m4a").exists(), "aborted partial file must be cleaned"
+
+
+@pytest.mark.asyncio
+async def test_download_second_threshold_convicts(monkeypatch, tmp_path):
+    """ffmpeg ≥9 noise-decodes the 4MB prefix ("unknown"); the 64MB re-probe
+    is honest there and must abort — this is the two-threshold contract."""
+    state = {"pulled": 0}
+    monkeypatch.setattr(xy.httpx, "AsyncClient", _unlimited_cdn(state, chunk_mb=40, chunks=4))
+    verdicts = iter(["unknown", "encrypted"])
+    monkeypatch.setattr(xy, "_early_probe", lambda path: next(verdicts))
+    with pytest.raises(xy.XiaoyuzhouError) as ei:
+        await xy.download_xiaoyuzhou_audio(
+            "https://cdn.example.com/e.mp3", tmp_path,
+            expected_duration_seconds=10875,
+        )
+    assert ei.value.code == "audio_undecodable"
+    # first probe at 4MB (chunk 1), second at 64MB (chunk 2) → abort, chunk 3+ never pulled
+    assert state["pulled"] == 80 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_download_ok_does_not_skip_later_threshold(monkeypatch, tmp_path):
+    """A false "ok" at 4MB (ffmpeg ≥9 noise-decode) must not disable the 64MB
+    probe — that re-probe is the one that convicts on modern ffmpeg."""
+    state = {"pulled": 0}
+    monkeypatch.setattr(xy.httpx, "AsyncClient", _unlimited_cdn(state, chunk_mb=40, chunks=3))
+    verdicts = iter(["ok", "encrypted"])
+    monkeypatch.setattr(xy, "_early_probe", lambda path: next(verdicts))
+    with pytest.raises(xy.XiaoyuzhouError) as ei:
+        await xy.download_xiaoyuzhou_audio(
+            "https://cdn.example.com/e.mp3", tmp_path,
+            expected_duration_seconds=10875,
+        )
+    assert ei.value.code == "audio_undecodable"
+    assert state["pulled"] == 80 * 1024 * 1024, "abort must happen at the second threshold"
 
 
 @pytest.mark.asyncio

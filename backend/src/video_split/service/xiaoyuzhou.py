@@ -333,12 +333,19 @@ async def extract_xiaoyuzhou_metadata(url: str) -> tuple[VideoMeta, str]:
 # (byte-estimate seeking on VBR MP3 can land a couple seconds off target).
 _PROBE_PASS_SECONDS = 5.0
 
-# Stream-early encrypted-content detection: once this many bytes are on disk,
-# decode-probe the head; encrypted episodes are aborted here instead of
-# dragging the whole ciphertext (Task #70: 130 MB) over the network. 4 MB
-# stays safely past even an unusually large embedded cover-art ID3 tag (~3 MB
-# leaves ≥1 MB ≈ 80s of frames at podcast bitrates).
-_EARLY_PROBE_BYTES = 4 * 1024 * 1024
+# Stream-early encrypted-content detection: decode-probe the head each time a
+# threshold below is crossed; an "encrypted" verdict aborts the download
+# instead of dragging the whole file over the network (Task #70: 130 MB).
+#
+# Two thresholds exist because of ffmpeg demuxer behavior on the DRM'd files
+# (intact frame headers, ciphertext payloads): ffmpeg ≤8 on ANY truncated
+# prefix honestly decodes ≈0.2s → the first (4 MB) probe already convicts;
+# ffmpeg 9 happily decodes false frames in a prefix as noise (measured: ≤32 MB
+# prefixes "decode" 8s, ≥64 MB prefixes are honest again) → the second probe
+# at 64 MB convicts there. This is an empirical traffic optimization only —
+# correctness never depends on it: the post-download validation on the
+# complete file is reliable on every version observed.
+_EARLY_PROBE_THRESHOLDS = (4 * 1024 * 1024, 64 * 1024 * 1024)
 
 
 def _probe_start_offsets(expected_duration: float) -> list[float]:
@@ -402,18 +409,25 @@ def _container_opens(path: Path) -> bool:
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
+# --- MP3 frame-chain / reservoir scanners were tried and REMOVED ---
+#
+# The Task #70 DRM keeps every frame header valid (0xFFFB.. every 288 bytes,
+# frame 0 payload literal zeros) and encrypts only the payload — so a frame
+# chain never breaks (scanner said "ok" on the real ciphertext) and
+# main_data_begin constraints are confounded by legitimate multi-frame bit
+# reservoirs (healthy lame files "violate" the naive single-frame bound at
+# ~96%). Pure-byte discrimination is out; see _EARLY_PROBE_THRESHOLDS for
+# what we do instead.
+
+
 def _early_probe(path: Path) -> str:
     """Classify a partial download: ``ok`` / ``encrypted`` / ``unknown``.
 
-    The encrypted-CDN signature (Task #70) is a container that opens as valid
-    audio yet decodes ≈0s at the head — one plaintext frame up front, ciphertext
-    after. Two look-alikes must NOT be flagged:
-
-    - a prefix still inside a giant ID3v2 cover-art tag (no audio frames yet —
-      the tag header declares its size, so this is directly checkable), and
-    - an MP4 prefix whose moov atom sits at the file end (never received) —
-      both are ``unknown``: keep downloading, the post-download validation
-      makes the final call.
+    Runs one ffmpeg head-window decode: a prefix that decodes ≥5s is "ok"; a
+    prefix that opens as audio yet decodes ≈0s is the encrypted signature
+    ("encrypted"); a prefix that can't be judged yet (still inside a giant
+    cover-art ID3 tag, or a container that won't even open) is "unknown" and
+    defers to the post-download validation on the complete file.
     """
     decoded = probe_decoded_seconds(path, start=0.0, window=8.0)
     if decoded >= _PROBE_PASS_SECONDS:
@@ -437,11 +451,12 @@ async def download_xiaoyuzhou_audio(
 ) -> Path:
     """Stream-download episode audio to ``output_dir/audio.m4a``.
 
-    Encrypted CDN content is detected mid-stream: once ``_EARLY_PROBE_BYTES``
-    are on disk the head is decode-probed and ciphertext downloads abort
-    immediately (``audio_undecodable``, Task #70). After the size floor check
-    the finished file is probed at head/middle/tail windows — a truncated
-    stream retries the download once before failing with ``audio_truncated``.
+    Encrypted CDN content is detected mid-stream: each time an
+    ``_EARLY_PROBE_THRESHOLDS`` crossing is reached the head is decode-probed
+    and ciphertext downloads abort (``audio_undecodable``, Task #70). After
+    the size floor check the finished file is probed at head/middle/tail
+    windows — a truncated stream retries the download once before failing
+    with ``audio_truncated``.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / "audio.m4a"
@@ -466,7 +481,7 @@ async def download_xiaoyuzhou_audio(
                     resp.raise_for_status()
                     total = int(resp.headers.get("content-length") or 0)
                     downloaded = 0
-                    early_probe_done = False
+                    pending_probes = list(_EARLY_PROBE_THRESHOLDS)
                     with open(out_path, "wb") as f:
                         async for chunk in resp.aiter_bytes():
                             if not chunk:
@@ -480,21 +495,24 @@ async def download_xiaoyuzhou_audio(
                                     "downloaded_bytes": downloaded,
                                     "total_bytes": total,
                                 })
-                            if not early_probe_done and downloaded >= _EARLY_PROBE_BYTES:
-                                early_probe_done = True
+                            if pending_probes and downloaded >= pending_probes[0]:
+                                threshold = pending_probes.pop(0)
                                 f.flush()
                                 verdict = await asyncio.to_thread(_early_probe, out_path)
                                 if verdict == "encrypted":
                                     logger.warning(
-                                        "[xiaoyuzhou] early probe at %.1f MB: head decodes ≈0s — "
-                                        "encrypted CDN content, aborting download",
-                                        downloaded / (1024 * 1024),
+                                        "[xiaoyuzhou] early probe at %.1f MB (threshold %d MB): head "
+                                        "decodes ≈0s — encrypted CDN content, aborting download",
+                                        downloaded / (1024 * 1024), threshold // (1024 * 1024),
                                     )
                                     raise XiaoyuzhouError(
                                         "audio_undecodable",
                                         f"该单集音频无法解码（下载 {downloaded // (1024 * 1024)} MB 时即检出"
                                         "内容被平台加密）。重新下载会得到相同字节，该单集暂不支持分析。",
                                     )
+                                # NB: "ok" must NOT skip later thresholds — on ffmpeg ≥9
+                                # a 4 MB ciphertext prefix noise-decodes as a false "ok";
+                                # the 64 MB re-probe is the one that convicts there.
         except XiaoyuzhouError:
             out_path.unlink(missing_ok=True)
             raise
