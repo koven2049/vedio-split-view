@@ -6,13 +6,20 @@ import html as html_module
 import json
 import logging
 import re
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import httpx
 
 from video_split.config import get_settings
-from video_split.service.downloader import MIN_AUDIO_BYTES, DownloadProgress, VideoMeta, detect_platform, normalize_url
+from video_split.service.downloader import (
+    MIN_AUDIO_BYTES,
+    DownloadProgress,
+    VideoMeta,
+    detect_platform,
+    normalize_url,
+)
 from video_split.service.transcriber import probe_decoded_seconds
 
 logger = logging.getLogger(__name__)
@@ -326,6 +333,13 @@ async def extract_xiaoyuzhou_metadata(url: str) -> tuple[VideoMeta, str]:
 # (byte-estimate seeking on VBR MP3 can land a couple seconds off target).
 _PROBE_PASS_SECONDS = 5.0
 
+# Stream-early encrypted-content detection: once this many bytes are on disk,
+# decode-probe the head; encrypted episodes are aborted here instead of
+# dragging the whole ciphertext (Task #70: 130 MB) over the network. 4 MB
+# stays safely past even an unusually large embedded cover-art ID3 tag (~3 MB
+# leaves ≥1 MB ≈ 80s of frames at podcast bitrates).
+_EARLY_PROBE_BYTES = 4 * 1024 * 1024
+
 
 def _probe_start_offsets(expected_duration: float) -> list[float]:
     """Decode-probe window starts: head, plus middle/tail for long episodes.
@@ -378,6 +392,43 @@ class _TruncatedDownload(Exception):
         super().__init__(f"window at {start:.0f}s decoded only {decoded:.1f}s")
 
 
+def _container_opens(path: Path) -> bool:
+    """Whether ffprobe can identify the container at all (format name only)."""
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=format_name",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=False,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _early_probe(path: Path) -> str:
+    """Classify a partial download: ``ok`` / ``encrypted`` / ``unknown``.
+
+    The encrypted-CDN signature (Task #70) is a container that opens as valid
+    audio yet decodes ≈0s at the head — one plaintext frame up front, ciphertext
+    after. Two look-alikes must NOT be flagged:
+
+    - a prefix still inside a giant ID3v2 cover-art tag (no audio frames yet —
+      the tag header declares its size, so this is directly checkable), and
+    - an MP4 prefix whose moov atom sits at the file end (never received) —
+      both are ``unknown``: keep downloading, the post-download validation
+      makes the final call.
+    """
+    decoded = probe_decoded_seconds(path, start=0.0, window=8.0)
+    if decoded >= _PROBE_PASS_SECONDS:
+        return "ok"
+    with open(path, "rb") as f:
+        head = f.read(10)
+    if head[:3] == b"ID3":
+        tag_size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9]
+        if 10 + tag_size >= path.stat().st_size:
+            return "unknown"
+    if not _container_opens(path):
+        return "unknown"
+    return "encrypted"
+
+
 async def download_xiaoyuzhou_audio(
     audio_url: str,
     output_dir: Path,
@@ -386,10 +437,11 @@ async def download_xiaoyuzhou_audio(
 ) -> Path:
     """Stream-download episode audio to ``output_dir/audio.m4a``.
 
-    After the size floor check, the file is decode-probed at head/middle/tail
-    windows: encrypted CDN content fails instantly with ``audio_undecodable``
-    (Task #70), a truncated stream retries the download once before failing
-    with ``audio_truncated``.
+    Encrypted CDN content is detected mid-stream: once ``_EARLY_PROBE_BYTES``
+    are on disk the head is decode-probed and ciphertext downloads abort
+    immediately (``audio_undecodable``, Task #70). After the size floor check
+    the finished file is probed at head/middle/tail windows — a truncated
+    stream retries the download once before failing with ``audio_truncated``.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / "audio.m4a"
@@ -414,6 +466,7 @@ async def download_xiaoyuzhou_audio(
                     resp.raise_for_status()
                     total = int(resp.headers.get("content-length") or 0)
                     downloaded = 0
+                    early_probe_done = False
                     with open(out_path, "wb") as f:
                         async for chunk in resp.aiter_bytes():
                             if not chunk:
@@ -427,6 +480,24 @@ async def download_xiaoyuzhou_audio(
                                     "downloaded_bytes": downloaded,
                                     "total_bytes": total,
                                 })
+                            if not early_probe_done and downloaded >= _EARLY_PROBE_BYTES:
+                                early_probe_done = True
+                                f.flush()
+                                verdict = await asyncio.to_thread(_early_probe, out_path)
+                                if verdict == "encrypted":
+                                    logger.warning(
+                                        "[xiaoyuzhou] early probe at %.1f MB: head decodes ≈0s — "
+                                        "encrypted CDN content, aborting download",
+                                        downloaded / (1024 * 1024),
+                                    )
+                                    raise XiaoyuzhouError(
+                                        "audio_undecodable",
+                                        f"该单集音频无法解码（下载 {downloaded // (1024 * 1024)} MB 时即检出"
+                                        "内容被平台加密）。重新下载会得到相同字节，该单集暂不支持分析。",
+                                    )
+        except XiaoyuzhouError:
+            out_path.unlink(missing_ok=True)
+            raise
         except httpx.HTTPError as e:
             # 403/410/connect-failure on the audio CDN almost always means the
             # signed link has expired — re-running extract_xiaoyuzhou_metadata
