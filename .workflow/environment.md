@@ -47,6 +47,9 @@ last-reviewed: 2026-11-10
 - **三个模式故意没加**，别顺手补上：`.claude/`（仓库可能合法提交工程级 Claude 配置，只兜它的 `worktrees/`）、`.playwright-cli/`（vedio-split-view 有已跟踪文件）、`.obsidian/`（obsidian-backup 的用途可能就包含提交 vault 配置）。
 - 全局模式是**任意层级**匹配，不像仓内规则有路径上下文；加之前必须按任意层级查一遍有没有哪个仓在跟踪同名目录（只查顶层会漏）。已跟踪的文件不受 ignore 影响，但之后在那个目录里新增的文件会被静默挡掉，这是真正的代价。
 - mini 的 `shiyun` 没设（改不了，需密码）；agent 活都在 `admin` 下。
+- **动某仓时的自查**：全局有、本仓没有的条目，判断本仓会不会产出——会就补进仓内 `.gitignore` 并提交（补前按任意层级确认没在跟踪同名目录）；刻意不加的，把结论和理由写进本工程 `AGENTS.md` 专属段，否则下一个 agent 会当遗漏再补。
+
+**全局 git hook 与 Claude 守卫（2026-11-12 起，仅 macbook-air）。** `core.hooksPath` 指向 harness 根 `guardrails/git-hooks/`：commit-msg 校验 Conventional Commits、subject ≤50 字符、>10 行改动须有正文；pre-commit 拦凭证形文件名 + gitleaks 扫暂存区；之后链式执行各仓自己的 `.git/hooks/<name>`。仓内设了本地 `core.hooksPath` 的仓（如自带 `.githooks/`）不经过它。Claude Code 另挂 PreToolUse 守卫拦 agent 直接调用的 `rsync --delete-excluded` / 无排除清单的 `--delete`（manage.sh 脚本内部调用不经过它）。装/查/卸：`guardrails/install.sh [--check|--uninstall]`；mini 未装。
 
 ### 2.2 三台云主机
 
