@@ -49,7 +49,7 @@ last-reviewed: 2026-11-10
 - mini 的 `shiyun` 没设（改不了，需密码）；agent 活都在 `admin` 下。
 - **动某仓时的自查**：全局有、本仓没有的条目，判断本仓会不会产出——会就补进仓内 `.gitignore` 并提交（补前按任意层级确认没在跟踪同名目录）；刻意不加的，把结论和理由写进本工程 `AGENTS.md` 专属段，否则下一个 agent 会当遗漏再补。
 
-**全局 git hook 与 Claude 守卫（2026-11-12 起，仅 macbook-air）。** `core.hooksPath` 指向 harness 根 `guardrails/git-hooks/`：commit-msg 校验 Conventional Commits、subject ≤50 字符、>10 行改动须有正文；pre-commit 拦凭证形文件名 + gitleaks 扫暂存区；之后链式执行各仓自己的 `.git/hooks/<name>`。仓内设了本地 `core.hooksPath` 的仓（如自带 `.githooks/`）不经过它。Claude Code 另挂 PreToolUse 守卫拦 agent 直接调用的 `rsync --delete-excluded` / 无排除清单的 `--delete`（manage.sh 脚本内部调用不经过它）。装/查/卸：`guardrails/install.sh [--check|--uninstall]`；mini 未装。
+**全局 git hook 与 Claude 守卫（2026-11-12 起，macbook-air + mini 的 `admin`）。** `core.hooksPath` 指向 harness 根 `guardrails/git-hooks/`：commit-msg 校验 Conventional Commits、subject ≤50 字符、>10 行改动须有正文；pre-commit 拦凭证形文件名 + gitleaks 扫暂存区；之后链式执行各仓自己的 `.git/hooks/<name>`。仓内设了本地 `core.hooksPath` 的仓（如自带 `.githooks/`）不经过它。Claude Code 另挂 PreToolUse 守卫拦 agent 直接调用的 `rsync --delete-excluded` / 无排除清单的 `--delete`（manage.sh 脚本内部调用不经过它）。装/查/卸：`guardrails/install.sh [--check|--uninstall]`（各机在自己的 harness 根下跑）；mini 的 `shiyun` 未装。
 
 ### 2.2 三台云主机
 
