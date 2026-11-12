@@ -94,8 +94,6 @@ bash manage.sh deploy       # 同步代码（不含 data/、配置、密钥）
 | `oss` | 使用阿里云 Fun-ASR 时（Whisper 不需要） |
 | `network` | 下载 / 字幕需要代理，或 YouTube 需要登录态时 |
 | `feishu` | 飞书机器人收链即分析（凭证在 `config/feishu.yaml`，不要写进本文件） |
-
-构建源（镜像仓库、apt、PyPI）写在 `config/build.cfg`，不写死在 Dockerfile。该文件不含密钥、随代码同步，本地与生产用同一套源；环境变量（如 `REGISTRY=docker.io`）优先级更高。`config/deploy.cfg` 只放 SSH 目标，被 rsync 排除。
 | `app` (`port`, `frontend_port`) | 想改默认端口 8080 / 5180 时 |
 
 完整字段和默认值见 `config/app.yaml.example`。

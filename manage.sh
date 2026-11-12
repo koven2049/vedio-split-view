@@ -22,7 +22,6 @@ log_step()  { echo -e "${BLUE}[STEP]${NC}  $*"; }
 log_ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 
 # ── constants ─────────────────────────────────────────────────────────────────
-COMPOSE_FILE="compose.yaml"
 DATA_DIR="./data"
 CONFIG_DIR="./config"
 CONFIG_FILE="$CONFIG_DIR/app.yaml"
@@ -31,18 +30,10 @@ DEPLOY_CONFIG_FILE="$CONFIG_DIR/deploy.cfg"
 DEPLOY_CONFIG_EXAMPLE="$CONFIG_DIR/deploy.cfg.example"
 BUILD_CONFIG_FILE="$CONFIG_DIR/build.cfg"
 BUILD_CONFIG_EXAMPLE="$CONFIG_DIR/build.cfg.example"
-CERTS_DIR="$CONFIG_DIR/certs"  # no longer generated; dir kept in .rsync-exclude
-REGISTRY="${REGISTRY:-}"
 PODMAN_CMD="${PODMAN_CMD:-podman}"
-PODMAN_DNS="${PODMAN_DNS:-}"
-BUILD_CONFIG_LOADED=0
 
 DEPLOY_EXCLUDE_FILE=".rsync-exclude"
-NETWORK_NAME="vsplit-net"
 BACKEND_CONTAINER="vsplit-backend"
-FRONTEND_CONTAINER="vsplit-frontend"
-BACKEND_IMAGE="vedio-split-view_backend"
-FRONTEND_IMAGE="vedio-split-view_frontend"
 
 # ── process-mode constants ────────────────────────────────────────────────────
 VENV_PY="$SCRIPT_DIR/backend/.venv/bin/python"
@@ -99,51 +90,12 @@ read_yaml_value() {
     echo "${val:-$default}"
 }
 
-_read_cfg_value() {
-    local file="$1" key="$2" default="$3" val=""
-    if [[ -f "$file" ]]; then
-        val=$(grep -E "^${key}[[:space:]]*=" "$file" | head -1 | cut -d '=' -f2- | sed 's/[[:space:]]*#.*//' | xargs || true)
-    fi
-    echo "${val:-$default}"
-}
-
-read_deploy_value() { _read_cfg_value "$DEPLOY_CONFIG_FILE" "$1" "$2"; }
-
-# Build-time sources (registry / apt / pypi) live in config/build.cfg, not in
-# deploy.cfg: deploy.cfg is rsync-excluded (it holds the SSH target), so the
-# remote never receives it and a build there would fall back to defaults that
-# are unreachable from some networks. build.cfg carries no secrets and IS
-# synced, keeping local and production builds on the same configured mirrors.
-read_build_value() { _read_cfg_value "$BUILD_CONFIG_FILE" "$1" "$2"; }
-
-# Env vars win over build.cfg, which wins over the built-in defaults.
-load_build_config() {
-    [[ "$BUILD_CONFIG_LOADED" -eq 1 ]] && return
-    REGISTRY="${REGISTRY:-$(read_build_value registry "docker.io")}"
-    PODMAN_DNS="${PODMAN_DNS:-$(read_build_value podman_dns "")}"
-    BUILD_CONFIG_LOADED=1
-}
-
 get_app_port()      { read_yaml_value "app.port" "8080"; }
 get_frontend_port() { read_yaml_value "app.frontend_port" "5180"; }
 get_admin_password() { read_yaml_value "admin.password" ""; }
 
 ensure_config() {
     [[ -f "$CONFIG_FILE" ]] || { log_error "Config not found. Run: $0 init"; exit 1; }
-}
-
-ensure_podman() {
-    command -v "$PODMAN_CMD" &>/dev/null || {
-        log_error "Podman not found. Install podman or set PODMAN_CMD=/path/to/podman."
-        exit 1
-    }
-}
-
-export_compose_env() {
-    load_build_config
-    export APP_PORT="$(get_app_port)"
-    export FRONTEND_PORT="$(get_frontend_port)"
-    export REGISTRY
 }
 
 _admin_login() {
@@ -337,58 +289,6 @@ _ensure_build_config() {
     if [[ ! -f "$BUILD_CONFIG_FILE" ]]; then
         cp "$BUILD_CONFIG_EXAMPLE" "$BUILD_CONFIG_FILE"
         log_info "Created $BUILD_CONFIG_FILE (edit registry / mirrors for your network)"
-    fi
-}
-
-_ensure_podman_network() {
-    ensure_podman
-    "$PODMAN_CMD" network exists "$NETWORK_NAME" 2>/dev/null || "$PODMAN_CMD" network create "$NETWORK_NAME" >/dev/null
-}
-
-# Backend 固定 IP：frontend 的 nginx 在启动时把 proxy_pass 的主机名解析成 IP 后不再重查，
-# backend 单独重启（崩溃自动拉起）会换 IP，nginx 就永远 502。钉在同一子网的 .2 上，
-# 重启多少次 IP 都不变；解析失败则退回默认行为。
-backend_fixed_ip() {
-    local subnet
-    subnet="$("$PODMAN_CMD" network inspect "$NETWORK_NAME" --format '{{(index .Subnets 0).Subnet}}' 2>/dev/null | head -1)"
-    local ip
-    ip="$(echo "$subnet" | awk -F'/' '{n=split($1,a,"."); print a[1]"."a[2]"."a[3]".2"}')"
-    [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.2$ ]] || ip=""
-    echo "$ip"
-}
-
-# shellcheck disable=SC2046 # 空结果应展开为零个参数
-ip_opt() {
-    local ip; ip="$(backend_fixed_ip)"
-    [[ -n "$ip" ]] && echo "--ip $ip" || true
-}
-
-_ensure_images_exist() {
-    ensure_podman
-    local missing=()
-    "$PODMAN_CMD" image exists "$BACKEND_IMAGE" 2>/dev/null || missing+=("$BACKEND_IMAGE")
-    "$PODMAN_CMD" image exists "$FRONTEND_IMAGE" 2>/dev/null || missing+=("$FRONTEND_IMAGE")
-    if [[ "${#missing[@]}" -gt 0 ]]; then
-        log_error "Missing image(s): ${missing[*]}"
-        echo "Run: $0 rebuild"
-        exit 1
-    fi
-}
-
-_remove_container_if_exists() {
-    local name="$1"
-    if "$PODMAN_CMD" container exists "$name" 2>/dev/null; then
-        "$PODMAN_CMD" rm -f "$name" >/dev/null 2>&1 || true
-        # podman releases container names asynchronously (macOS VM): a
-        # compose-up right after rm used to lose the race with
-        # "container name is already in use". Poll until it's really gone.
-        local i
-        for i in 1 2 3 4 5 6 7 8 9 10; do
-            "$PODMAN_CMD" container exists "$name" 2>/dev/null || return 0
-            sleep 0.5
-        done
-        # Still held — retry loudly so the failure is visible, not silent.
-        "$PODMAN_CMD" rm -f "$name"
     fi
 }
 
@@ -620,9 +520,6 @@ run_status() {
 
     echo
     _report_data_health || fail=1
-    return "$fail"
-
-    echo
     return "$fail"
 }
 
