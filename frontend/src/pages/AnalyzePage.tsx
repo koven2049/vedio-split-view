@@ -132,12 +132,17 @@ export function AnalysisSlotCard({
       ? buildDownloadMbText(progress?.detail as DownloadProgressDetail | undefined, t)
       : null;
 
-  // For Xiaoyuzhou failures, surface the typed error code as a friendly,
-  // actionable message instead of the generic backend text (spec 3.4).
+  // For podcast-platform failures, surface the typed error code as a
+  // friendly, actionable message instead of the generic backend text
+  // (spec 3.4). audio_* codes are platform-agnostic (Apple emits them too);
+  // the xiaoyuzhou-specific codes stay gated on the platform.
   const errorDisplay = (() => {
     if (!error) return '';
-    if (slot.platform === 'xiaoyuzhou' && errorCode && isXiaoyuzhouErrorCode(errorCode)) {
-      return t(XIAOYUZHOU_ERROR_KEYS[errorCode]);
+    if (errorCode && isXiaoyuzhouErrorCode(errorCode)) {
+      const platformAgnostic = errorCode === 'audio_undecodable' || errorCode === 'audio_truncated';
+      if (platformAgnostic || slot.platform === 'xiaoyuzhou') {
+        return t(XIAOYUZHOU_ERROR_KEYS[errorCode]);
+      }
     }
     return error;
   })();

@@ -6,7 +6,6 @@ import html as html_module
 import json
 import logging
 import re
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -20,7 +19,13 @@ from video_split.service.downloader import (
     detect_platform,
     normalize_url,
 )
-from video_split.service.transcriber import probe_decoded_seconds
+from video_split.service.audio_integrity import (
+    EARLY_PROBE_THRESHOLDS as _EARLY_PROBE_THRESHOLDS,
+    UndecodableAudio,
+    TruncatedDownload as _TruncatedDownload,
+    early_probe as _early_probe,
+    validate_decodable as _validate_decodable_shared,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -329,118 +334,20 @@ async def extract_xiaoyuzhou_metadata(url: str) -> tuple[VideoMeta, str]:
     return meta, audio_url
 
 
-# A probe window "passes" when this much of the requested 8s actually decodes
-# (byte-estimate seeking on VBR MP3 can land a couple seconds off target).
-_PROBE_PASS_SECONDS = 5.0
-
-# Stream-early encrypted-content detection: decode-probe the head each time a
-# threshold below is crossed; an "encrypted" verdict aborts the download
-# instead of dragging the whole file over the network (Task #70: 130 MB).
-#
-# Two thresholds exist because of ffmpeg demuxer behavior on the DRM'd files
-# (intact frame headers, ciphertext payloads): ffmpeg ≤8 on ANY truncated
-# prefix honestly decodes ≈0.2s → the first (4 MB) probe already convicts;
-# ffmpeg 9 happily decodes false frames in a prefix as noise (measured: ≤32 MB
-# prefixes "decode" 8s, ≥64 MB prefixes are honest again) → the second probe
-# at 64 MB convicts there. This is an empirical traffic optimization only —
-# correctness never depends on it: the post-download validation on the
-# complete file is reliable on every version observed.
-_EARLY_PROBE_THRESHOLDS = (4 * 1024 * 1024, 64 * 1024 * 1024)
-
-
-def _probe_start_offsets(expected_duration: float) -> list[float]:
-    """Decode-probe window starts: head, plus middle/tail for long episodes.
-
-    The tail window keeps a 90s margin behind the claimed end so the
-    minute-rounded JSON-LD fallback (up to 59s short, see
-    ``_duration_from_next_data``) never pushes a probe past the real EOF.
-    Windows whose coverage the downstream split tolerance (max(60s, 2%))
-    already forgives are simply omitted.
-    """
-    offsets = [0.0]
-    if expected_duration >= 60:
-        offsets.append(expected_duration / 2)
-    if expected_duration >= 180:
-        offsets.append(max(60.0, expected_duration - 90))
-    return offsets
-
-
 def _validate_decodable(out_path: Path, expected_duration: float) -> None:
-    """Refuse files whose bytes do not decode, split by cause.
+    """Platform wrapper: map shared integrity exceptions to XiaoyuzhouError.
 
-    Raises :class:`XiaoyuzhouError` with ``audio_undecodable`` when even the
-    head window is garbage (CDN-encrypted content — deterministic, retry is
-    pointless) or ``_TruncatedDownload`` when head is fine but middle/tail
-    fail (network truncation — caller retries once with the same URL).
+    ``audio_undecodable`` — encrypted CDN content (deterministic, retry is
+    pointless); ``_TruncatedDownload`` propagates for the caller's one retry.
     """
-    for start in _probe_start_offsets(expected_duration):
-        decoded = probe_decoded_seconds(out_path, start=start, window=8.0)
-        if decoded >= _PROBE_PASS_SECONDS:
-            continue
-        if start == 0.0:
-            raise XiaoyuzhouError(
-                "audio_undecodable",
-                f"该单集音频无法解码（实测仅 {decoded:.1f}s 可读，标称 {expected_duration:.0f}s）。"
-                "内容疑似受平台加密保护，重新下载会得到相同字节，该单集暂不支持分析。",
-            )
-        raise _TruncatedDownload(start, decoded)
-    logger.info(
-        "[xiaoyuzhou] decode probe OK: %s (windows at %s, expected %.0fs)",
-        out_path.name, [round(s) for s in _probe_start_offsets(expected_duration)], expected_duration,
-    )
-
-
-class _TruncatedDownload(Exception):
-    """Head decodes but middle/tail windows don't — transient, retry once."""
-
-    def __init__(self, start: float, decoded: float):
-        self.start = start
-        self.decoded = decoded
-        super().__init__(f"window at {start:.0f}s decoded only {decoded:.1f}s")
-
-
-def _container_opens(path: Path) -> bool:
-    """Whether ffprobe can identify the container at all (format name only)."""
-    result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=format_name",
-         "-of", "csv=p=0", str(path)],
-        capture_output=True, text=True, check=False,
-    )
-    return result.returncode == 0 and bool(result.stdout.strip())
-
-
-# --- MP3 frame-chain / reservoir scanners were tried and REMOVED ---
-#
-# The Task #70 DRM keeps every frame header valid (0xFFFB.. every 288 bytes,
-# frame 0 payload literal zeros) and encrypts only the payload — so a frame
-# chain never breaks (scanner said "ok" on the real ciphertext) and
-# main_data_begin constraints are confounded by legitimate multi-frame bit
-# reservoirs (healthy lame files "violate" the naive single-frame bound at
-# ~96%). Pure-byte discrimination is out; see _EARLY_PROBE_THRESHOLDS for
-# what we do instead.
-
-
-def _early_probe(path: Path) -> str:
-    """Classify a partial download: ``ok`` / ``encrypted`` / ``unknown``.
-
-    Runs one ffmpeg head-window decode: a prefix that decodes ≥5s is "ok"; a
-    prefix that opens as audio yet decodes ≈0s is the encrypted signature
-    ("encrypted"); a prefix that can't be judged yet (still inside a giant
-    cover-art ID3 tag, or a container that won't even open) is "unknown" and
-    defers to the post-download validation on the complete file.
-    """
-    decoded = probe_decoded_seconds(path, start=0.0, window=8.0)
-    if decoded >= _PROBE_PASS_SECONDS:
-        return "ok"
-    with open(path, "rb") as f:
-        head = f.read(10)
-    if head[:3] == b"ID3":
-        tag_size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9]
-        if 10 + tag_size >= path.stat().st_size:
-            return "unknown"
-    if not _container_opens(path):
-        return "unknown"
-    return "encrypted"
+    try:
+        _validate_decodable_shared(out_path, expected_duration)
+    except UndecodableAudio as e:
+        raise XiaoyuzhouError(
+            "audio_undecodable",
+            f"该单集音频无法解码（实测仅 {e.head_decoded:.1f}s 可读，标称 {expected_duration:.0f}s）。"
+            "内容疑似受平台加密保护，重新下载会得到相同字节，该单集暂不支持分析。",
+        ) from e
 
 
 async def download_xiaoyuzhou_audio(

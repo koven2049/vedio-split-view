@@ -14,6 +14,7 @@ typed error instead of a confusing downstream download failure.
 
 from __future__ import annotations
 
+import asyncio
 import html as html_module
 import json
 import logging
@@ -24,6 +25,13 @@ from pathlib import Path
 import httpx
 
 from video_split.config import get_settings
+from video_split.service.audio_integrity import (
+    EARLY_PROBE_THRESHOLDS,
+    TruncatedDownload,
+    UndecodableAudio,
+    early_probe,
+    validate_decodable,
+)
 from video_split.service.downloader import (
     MIN_AUDIO_BYTES,
     DownloadProgress,
@@ -48,6 +56,11 @@ class ApplePodcastsError(RuntimeError):
         exclusive        — episode has no downloadable audio (Apple-exclusive
                            / paywalled content).
         download_failed  — audio CDN request failed.
+        audio_undecodable — the CDN serves a DRM'd stream: valid container
+                       headers, ciphertext payloads (Task #71). Re-downloading
+                       returns identical bytes; retrying is pointless.
+        audio_truncated  — download incomplete (middle/tail undecodable);
+                       auto-retried once by the downloader already.
     """
 
     def __init__(self, code: str, message: str):
@@ -218,11 +231,15 @@ async def download_apple_podcasts_audio(
     audio_url: str,
     output_dir: Path,
     progress_callback: Callable[[DownloadProgress], None] | None = None,
+    expected_duration_seconds: float | None = None,
 ) -> Path:
-    """Stream-download the episode audio to ``output_dir/audio.mp3``.
+    """Stream-download the episode audio to ``output_dir/audio.<ext>``.
 
     Publisher CDNs serve plain mp3/m4a with content-length; downloads honor
-    the platform proxy (same routing as the page fetch).
+    the platform proxy (same routing as the page fetch). DRM'd episodes
+    (valid headers, ciphertext payloads — Task #71) are detected mid-stream
+    at the shared early-probe thresholds and the finished file is validated
+    at head/middle/tail windows; a truncated stream retries once.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     ext = "m4a" if ".m4a" in audio_url.lower() else "mp3"
@@ -230,54 +247,100 @@ async def download_apple_podcasts_audio(
 
     settings = get_settings()
     proxy = _proxy_for_platform("apple_podcasts")
-    logger.info("[apple_podcasts] Downloading audio to %s (proxy=%s)", out_path, bool(proxy))
 
-    try:
-        dl_timeout = float(settings.network.download_timeout_seconds)
-        async with httpx.AsyncClient(
-            proxy=proxy,
-            timeout=dl_timeout,
-            follow_redirects=True,
-            headers={"User-Agent": _CHROME_UA},
-        ) as client, client.stream("GET", audio_url) as resp:
-            resp.raise_for_status()
-            total = int(resp.headers.get("content-length") or 0)
-            downloaded = 0
-            with open(out_path, "wb") as f:
-                async for chunk in resp.aiter_bytes():
-                    if not chunk:
-                        continue
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_callback:
-                        ratio = min(1.0, downloaded / total) if total > 0 else 0.0
-                        progress_callback(
-                            {
-                                "ratio": ratio,
-                                "downloaded_bytes": downloaded,
-                                "total_bytes": total,
-                            }
-                        )
-    except httpx.HTTPError as e:
-        logger.exception("[apple_podcasts] audio download HTTP error: %s", audio_url[:80])
-        if out_path.exists():
-            try:
-                out_path.unlink()
-            except OSError:
-                pass
-        raise ApplePodcastsError(
-            "download_failed",
-            f"Audio CDN request failed ({type(e).__name__})",
-        ) from e
+    for attempt in (1, 2):
+        logger.info("[apple_podcasts] Downloading audio to %s (proxy=%s, attempt %d)",
+                    out_path, bool(proxy), attempt)
+        try:
+            dl_timeout = float(settings.network.download_timeout_seconds)
+            async with httpx.AsyncClient(
+                proxy=proxy,
+                timeout=dl_timeout,
+                follow_redirects=True,
+                headers={"User-Agent": _CHROME_UA},
+            ) as client, client.stream("GET", audio_url) as resp:
+                resp.raise_for_status()
+                total = int(resp.headers.get("content-length") or 0)
+                downloaded = 0
+                pending_probes = list(EARLY_PROBE_THRESHOLDS)
+                with open(out_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes():
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_callback:
+                            ratio = min(1.0, downloaded / total) if total > 0 else 0.0
+                            progress_callback(
+                                {
+                                    "ratio": ratio,
+                                    "downloaded_bytes": downloaded,
+                                    "total_bytes": total,
+                                }
+                            )
+                        if pending_probes and downloaded >= pending_probes[0]:
+                            threshold = pending_probes.pop(0)
+                            f.flush()
+                            verdict = await asyncio.to_thread(early_probe, out_path)
+                            if verdict == "encrypted":
+                                logger.warning(
+                                    "[apple_podcasts] early probe at %.1f MB (threshold %d MB): "
+                                    "encrypted CDN content, aborting download",
+                                    downloaded / (1024 * 1024), threshold // (1024 * 1024),
+                                )
+                                raise ApplePodcastsError(
+                                    "audio_undecodable",
+                                    f"该单集音频无法解码（下载 {downloaded // (1024 * 1024)} MB 时即检出"
+                                    "内容被平台加密）。重新下载会得到相同字节，该单集暂不支持分析。",
+                                )
+                            # NB: "ok" must NOT skip later thresholds — on ffmpeg ≥9
+                            # a 4 MB ciphertext prefix noise-decodes as a false "ok";
+                            # the 64 MB re-probe is the one that convicts there.
+        except ApplePodcastsError:
+            out_path.unlink(missing_ok=True)
+            raise
+        except httpx.HTTPError as e:
+            logger.exception("[apple_podcasts] audio download HTTP error: %s", audio_url[:80])
+            out_path.unlink(missing_ok=True)
+            raise ApplePodcastsError(
+                "download_failed",
+                f"Audio CDN request failed ({type(e).__name__})",
+            ) from e
+        except Exception:
+            logger.exception("[apple_podcasts] audio download failed: %s", audio_url[:80])
+            out_path.unlink(missing_ok=True)
+            raise
 
-    if not out_path.exists() or out_path.stat().st_size < MIN_AUDIO_BYTES:
-        actual = out_path.stat().st_size if out_path.exists() else 0
-        out_path.unlink(missing_ok=True)
-        raise ApplePodcastsError(
-            "download_failed",
-            f"Audio download produced an invalid file ({actual} bytes).",
-        )
+        if not out_path.exists() or out_path.stat().st_size < MIN_AUDIO_BYTES:
+            actual = out_path.stat().st_size if out_path.exists() else 0
+            out_path.unlink(missing_ok=True)
+            raise ApplePodcastsError(
+                "download_failed",
+                f"Audio download produced an invalid file ({actual} bytes).",
+            )
 
-    size_mb = out_path.stat().st_size / (1024 * 1024)
-    logger.info("[apple_podcasts] Audio saved: %s (%.1f MB)", out_path, size_mb)
-    return out_path
+        expected = float(expected_duration_seconds or 0.0)
+        try:
+            await asyncio.to_thread(validate_decodable, out_path, expected)
+        except UndecodableAudio as e:
+            raise ApplePodcastsError(
+                "audio_undecodable",
+                f"该单集音频无法解码（实测仅 {e.head_decoded:.1f}s 可读，标称 {expected:.0f}s）。"
+                "内容疑似受平台加密保护，重新下载会得到相同字节，该单集暂不支持分析。",
+            ) from e
+        except TruncatedDownload as e:
+            if attempt == 1:
+                logger.warning("[apple_podcasts] Download looks truncated (%s) — retrying once", e)
+                out_path.unlink(missing_ok=True)
+                continue
+            raise ApplePodcastsError(
+                "audio_truncated",
+                f"音频下载不完整（{e.start:.0f}s 处实测仅 {e.decoded:.1f}s 可解码，"
+                f"标称 {expected:.0f}s），已自动重试一次仍失败，请重试分析。",
+            ) from e
+
+        size_mb = out_path.stat().st_size / (1024 * 1024)
+        logger.info("[apple_podcasts] Audio saved: %s (%.1f MB)", out_path, size_mb)
+        return out_path
+
+    raise AssertionError("unreachable")  # pragma: no cover

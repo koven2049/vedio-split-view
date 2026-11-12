@@ -564,6 +564,7 @@ async def run_analysis(
                         def _ap_factory(*, progress_callback=None):
                             return download_apple_podcasts_audio(
                                 audio_url, task_dir, progress_callback=progress_callback,
+                                expected_duration_seconds=meta.duration_seconds,
                             )
 
                         async for ev in _relay_download_progress(
@@ -1050,6 +1051,7 @@ async def resume_analysis(
                 def _ap_retry_factory(*, progress_callback=None):
                     return download_apple_podcasts_audio(
                         ap_audio_url, task_dir_dl, progress_callback=progress_callback,
+                        expected_duration_seconds=meta.duration_seconds,
                     )
 
                 async for ev in _relay_download_progress(

@@ -17,6 +17,7 @@ from typing import ClassVar
 
 import pytest
 
+from video_split.service import audio_integrity as ai
 from video_split.service import xiaoyuzhou as xy
 from video_split.service.downloader import MIN_AUDIO_BYTES
 from video_split.service.transcriber import probe_decoded_seconds
@@ -69,11 +70,11 @@ def test_probe_returns_zero_seeking_past_eof(healthy_mp3):
 
 
 def test_probe_start_offsets_scale_with_duration():
-    assert xy._probe_start_offsets(0) == [0.0]            # unknown duration: head only
-    assert xy._probe_start_offsets(30) == [0.0]           # short episode: head covers it
-    mid = xy._probe_start_offsets(120)
+    assert ai.probe_start_offsets(0) == [0.0]            # unknown duration: head only
+    assert ai.probe_start_offsets(30) == [0.0]           # short episode: head covers it
+    mid = ai.probe_start_offsets(120)
     assert mid[0] == 0.0 and len(mid) == 2 and 55 <= mid[1] <= 65
-    long_eps = xy._probe_start_offsets(10875)
+    long_eps = ai.probe_start_offsets(10875)
     assert len(long_eps) == 3
     # tail keeps a 90s margin behind the claimed end (minute-rounded metadata)
     assert 60.0 <= long_eps[2] <= 10875 - 90 + 1
@@ -127,7 +128,7 @@ async def test_undecodable_head_fails_without_retry(monkeypatch, tmp_path):
         attempts.append(start)
         return 0.2 if start == 0.0 else 0.0
 
-    monkeypatch.setattr(xy, "probe_decoded_seconds", _probe)
+    monkeypatch.setattr(ai, "probe_decoded_seconds", _probe)
 
     with pytest.raises(xy.XiaoyuzhouError) as ei:
         await xy.download_xiaoyuzhou_audio(
@@ -147,14 +148,14 @@ async def test_truncated_retries_once_then_raises(monkeypatch, tmp_path):
         # head fine, tail missing — network truncation signature
         return 8.0 if start == 0.0 else 0.0
 
-    monkeypatch.setattr(xy, "probe_decoded_seconds", _probe)
-    real_validate = xy._validate_decodable
+    monkeypatch.setattr(ai, "probe_decoded_seconds", _probe)
+    real_validate = xy._validate_decodable_shared
 
     def _counted_validate(path, expected):
         attempts.append(path.read_bytes()[:1])  # one entry per download attempt
         return real_validate(path, expected)
 
-    monkeypatch.setattr(xy, "_validate_decodable", _counted_validate)
+    monkeypatch.setattr(xy, "_validate_decodable_shared", _counted_validate)
 
     with pytest.raises(xy.XiaoyuzhouError) as ei:
         await xy.download_xiaoyuzhou_audio(
@@ -176,7 +177,7 @@ async def test_truncated_retry_can_succeed(monkeypatch, tmp_path):
         calls["n"] += 1
         return 0.0 if calls["n"] == 1 else 8.0  # first tail probe fails, second passes
 
-    monkeypatch.setattr(xy, "probe_decoded_seconds", _probe)
+    monkeypatch.setattr(ai, "probe_decoded_seconds", _probe)
 
     out = await xy.download_xiaoyuzhou_audio(
         "https://cdn.example.com/e.mp3", tmp_path,
@@ -189,7 +190,7 @@ async def test_truncated_retry_can_succeed(monkeypatch, tmp_path):
 async def test_healthy_download_passes_validation(monkeypatch, tmp_path):
     monkeypatch.setattr(xy.httpx, "AsyncClient", _FakeCDN)
     monkeypatch.setattr(
-        xy, "probe_decoded_seconds",
+        ai, "probe_decoded_seconds",
         lambda path, *, start, window: 8.0,
     )
     out = await xy.download_xiaoyuzhou_audio(
@@ -209,7 +210,7 @@ def test_early_probe_ok_on_healthy_prefix(healthy_mp3, tmp_path):
     """A healthy file's head decodes fully → verdict "ok"."""
     prefix = tmp_path / "prefix.mp3"
     prefix.write_bytes(healthy_mp3.read_bytes())
-    assert xy._early_probe(prefix) == "ok"
+    assert ai.early_probe(prefix) == "ok"
 
 
 @requires_ffmpeg
@@ -220,8 +221,8 @@ def test_early_probe_flags_opens_but_undecodable_prefix(monkeypatch, tmp_path, h
     prefixes, which is exactly why the two-threshold scheme exists)."""
     encrypted_like = tmp_path / "encrypted.mp3"
     encrypted_like.write_bytes(healthy_mp3.read_bytes())  # real container, real headers
-    monkeypatch.setattr(xy, "probe_decoded_seconds", lambda p, *, start, window: 0.2)
-    assert xy._early_probe(encrypted_like) == "encrypted"
+    monkeypatch.setattr(ai, "probe_decoded_seconds", lambda p, *, start, window: 0.2)
+    assert ai.early_probe(encrypted_like) == "encrypted"
 
 
 @requires_ffmpeg
@@ -234,7 +235,7 @@ def test_early_probe_unknown_when_still_inside_id3_art(tmp_path):
     )
     prefix = tmp_path / "art_only.mp3"
     prefix.write_bytes(head + b"\x00" * (1024 * 1024 - 10))
-    assert xy._early_probe(prefix) == "unknown"
+    assert ai.early_probe(prefix) == "unknown"
 
 
 @requires_ffmpeg
@@ -251,7 +252,7 @@ def test_early_probe_never_flags_moov_at_end_m4a_prefix(tmp_path):
     )
     prefix = tmp_path / "prefix.m4a"
     prefix.write_bytes(whole.read_bytes()[:256 * 1024])
-    assert xy._early_probe(prefix) in ("ok", "unknown")
+    assert ai.early_probe(prefix) in ("ok", "unknown")
 
 
 def _unlimited_cdn(state: dict, *, chunk_mb: int = 8, chunks: int = 25):
@@ -357,7 +358,7 @@ async def test_download_early_unknown_falls_through(monkeypatch, tmp_path):
     probes = []
     monkeypatch.setattr(xy, "_early_probe", lambda path: probes.append(1) or "unknown")
     monkeypatch.setattr(
-        xy, "probe_decoded_seconds",
+        ai, "probe_decoded_seconds",
         lambda path, *, start, window: 8.0,
     )
     out = await xy.download_xiaoyuzhou_audio(
