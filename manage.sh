@@ -38,6 +38,7 @@ BACKEND_CONTAINER="vsplit-backend"
 # ── process-mode constants ────────────────────────────────────────────────────
 VENV_PY="$SCRIPT_DIR/backend/.venv/bin/python"
 DIST_DIR="$SCRIPT_DIR/frontend/dist"
+SERVICE="vedio-split-view"
 LAUNCHD_LABEL="${LAUNCHD_LABEL:-com.koven.vsplit.web}"
 PIDFILE="$SCRIPT_DIR/logs/multi_listen.pid"
 # 双形态（2026-11-13 规约）：生产（mini）= 系统 LaunchDaemon（UserName=admin +
