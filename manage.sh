@@ -660,7 +660,7 @@ run_deploy() {
         exit 1
     fi
 
-    _check_deploy_target "${ssh_target}" || exit 1
+    _check_deploy_target "${ssh_target}" || { log_error "若确属同机部署（本机开发=本机生产），请用 ./manage.sh deploy-local"; exit 1; }
 
     _ensure_deploy_exclude
 
@@ -699,6 +699,52 @@ run_deploy() {
         echo "On the remote:"
         echo "  cd ${remote_path} && ./manage.sh rebuild"
         echo "  cd ${remote_path} && ./manage.sh install-launchd   # once, needs sudo"
+    fi
+}
+
+run_deploy_local() {
+    # Same-machine deploy front door (dev dir = prod dir on this machine):
+    # local rsync, no SSH, no deploy-check — that guard intentionally blocks
+    # target=self to catch a cross-machine deploy.cfg pointing at itself.
+    local dry_run=false target=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -d|--dry-run) dry_run=true ;;
+            -*) log_error "Unknown option: $1"; exit 1 ;;
+            *) [[ -n "$target" ]] && { log_error "多余的参数: $1"; exit 1; }; target="$1" ;;
+        esac
+        shift
+    done
+
+    target="${target:-$HOME/Services/$(basename "$SCRIPT_DIR")}"
+    local excl="$SCRIPT_DIR/.rsync-exclude"
+    [[ -f "$excl" ]] || { log_error ".rsync-exclude 不存在 —— 拒绝裸 --delete 部署"; exit 1; }
+    [[ -d "$target" ]] || { log_error "目标目录不存在: ${target}（不自动创建，防拼错路径静默部署；确认后 mkdir -p）"; exit 1; }
+    [[ "$(cd "$target" && pwd)" == "$SCRIPT_DIR" ]] && { log_error "目标与源目录相同，拒绝执行"; exit 1; }
+
+    local rsync_args=(-avz --delete --exclude-from="$excl")
+    if [[ "$dry_run" == true ]]; then
+        rsync_args+=(--dry-run)
+        log_step "[DRY RUN] Deploying code (local) → ${target} …"
+    else
+        log_step "Deploying code (local) → ${target} …"
+    fi
+    log_info "Exclusion rules: $excl"
+
+    rsync "${rsync_args[@]}" "$SCRIPT_DIR/" "$target/" || {
+        log_error "rsync 失败：请检查目标路径权限"
+        exit 1
+    }
+
+    if [[ "$dry_run" == true ]]; then
+        echo
+        log_ok "Dry run complete — no files were transferred."
+        log_warn "检查列表：不得出现 data/ logs/ config/*.cfg —— 确认后去掉 -d 正式部署"
+    else
+        log_ok "Deploy complete."
+        echo
+        echo "On this machine:"
+        echo "  cd ${target} && ./manage.sh rebuild"
     fi
 }
 
@@ -874,11 +920,16 @@ Deploy (between machines):
     -d, --dry-run                        Preview what would be transferred
                                          Exclusion rules:    $DEPLOY_EXCLUDE_FILE
 
+Deploy (same machine, local rsync):
+  deploy-local [-d] [path]             Sync source code to local prod dir
+                                       (default $HOME/Services/vedio-split-view; must exist)
+
 Examples:
   $0 rebuild                              # reinstall deps + rebuild frontend + restart
 
   $0 deploy -d                            # dry run — preview code sync
   $0 deploy                               # push code, then rebuild on remote
+  $0 deploy-local -d                      # dry run — preview same-machine sync
   $0 deploy-data -d                       # dry run — preview data sync
   $0 export && $0 deploy-data             # export + push data, then import on remote
 EOF
@@ -900,6 +951,7 @@ main() {
         import)      run_import "$@" ;;
         backup)      run_backup "$@" ;;
         deploy)        run_deploy "$@" ;;
+        deploy-local)  run_deploy_local "$@" ;;
         deploy-data)   run_deploy_data "$@" ;;
         clean-exports) run_clean_exports "$@" ;;
         clean)         run_clean ;;
