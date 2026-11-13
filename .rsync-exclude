@@ -42,6 +42,8 @@ config/*_cookies.txt
 config/feishu.yaml
 config/*.pem
 config/*.key
+# 部署盖章文件（deploy 成功后写入，唯一写入点；排除防 --delete 删掉已有章）
+config/env
 
 # ── runtime data & logs (never overwrite remote DB / logs) ───────────────────
 data/

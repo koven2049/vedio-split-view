@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.koven.vsplit.web</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/admin/Services/vedio-split-view/backend/.venv/bin/python</string>
+        <string>/Users/admin/Services/vedio-split-view/scripts/multi_listen.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/admin/Services/vedio-split-view</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- Mirror compose.yaml: explicit empty proxies so a proxied shell can
+             never leak B站/小宇宙 traffic abroad. -->
+        <key>http_proxy</key>
+        <string></string>
+        <key>https_proxy</key>
+        <string></string>
+        <key>HTTP_PROXY</key>
+        <string></string>
+        <key>HTTPS_PROXY</key>
+        <string></string>
+    </dict>
+    <!-- System LaunchDaemon: boots without console login; process runs as admin. -->
+    <key>UserName</key>
+    <string>admin</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/admin/Services/vedio-split-view/logs/process.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/admin/Services/vedio-split-view/logs/process.log</string>
+</dict>
+</plist>
