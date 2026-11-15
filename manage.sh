@@ -130,6 +130,11 @@ daemon_managed_here() {
 # bootout/bootstrap/kickstart 三个动作）。缺失时相关操作降级为指引，不硬错。
 SVC_CTL=/usr/local/bin/svc-ctl
 svc_ctl() { sudo -n "$SVC_CTL" "$@"; }
+# v2 helper（disable/enable/status 透传）缺失时 is_disabled 恒 false——四态退化旧三态。
+plist_present() { [[ -f "/Library/LaunchDaemons/$LAUNCHD_LABEL.plist" ]]; }
+is_disabled() {
+    [[ "$(svc_ctl status "$LAUNCHD_LABEL" 2>/dev/null | awk '$1=="disabled"{print $NF}')" == "true" ]]
+}
 
 # 系统域托管守卫（仅当本目录实例被 Daemon 托管时触发）：软停无意义——kill 后
 # KeepAlive 立即拉起。真停 = svc_ctl bootout；helper 未装时降级为准确指引。
@@ -137,11 +142,13 @@ svc_ctl() { sudo -n "$SVC_CTL" "$@"; }
 # 未装、无法免密真停（调用方必须拒绝软停，exit 1）。
 guard_prod_daemon_stop() {
     daemon_managed_here || return 1
+    # 方案二：意图先落 disabled DB（跨重启持久、bootstrap 被拒防误启）再摘除。
+    svc_ctl disable "system/$LAUNCHD_LABEL" 2>/dev/null || true
     if svc_ctl bootout "system/$LAUNCHD_LABEL" 2>/dev/null; then
         sleep 1
         local pid; pid="$(confirmed_server_pids | head -n 1)"
         [[ -n "$pid" ]] && stop_pid "$pid" || true
-        log_ok "已停用（svc_ctl bootout）。重新上线：./manage.sh start（走 bootstrap）。"
+        log_ok "已停用（disable + bootout，跨重启持久）。重新上线：./manage.sh start（enable + bootstrap）。"
         return 0
     fi
     log_warn "本目录实例由系统 LaunchDaemon 托管（KeepAlive），软停会被立即拉起。"
@@ -442,6 +449,7 @@ run_start() {
     fi
     # 有章 = 生产副本（此前被 bootout 停用）：走 bootstrap 回托管，而非 nohup。
     if is_prod_instance; then
+        svc_ctl enable "system/$LAUNCHD_LABEL" 2>/dev/null || true
         if svc_ctl bootstrap "system/$LAUNCHD_LABEL" 2>/dev/null; then
             sleep 2
             if wait_health; then
@@ -481,7 +489,8 @@ run_start() {
 }
 
 run_stop() {
-    guard_prod_daemon_stop; local grc=$?
+    # 0/1/2 三态须捕获后分流；裸调用会让 set -e 在 guard rc=1（非托管）时直接杀脚本。
+    local grc=0; guard_prod_daemon_stop || grc=$?
     [[ "$grc" -eq 0 ]] && return 0   # guard 已真停
     [[ "$grc" -eq 2 ]] && exit 1     # 托管但 helper 缺失：拒绝假成功（面板如实显示失败）
     if port_held_elsewhere; then
@@ -648,6 +657,15 @@ run_status() {
     web_port="$(get_frontend_port)"
     api_port="$(get_app_port)"
 
+    # 生命周期四态（方案二；互斥完备，巡检者按 Lifecycle 行豁免/判异常）。
+    local lifecycle="not installed"
+    if plist_present; then
+        if system_managed; then lifecycle="running"
+        elif is_disabled; then lifecycle="stopped (intentional)"
+        else lifecycle="down"
+        fi
+    fi
+
     log_step "Process status:"
     local pid
     pid="$(service_pid)"
@@ -657,8 +675,7 @@ run_status() {
         log_error "Process: NOT running"
         fail=1
     fi
-    # 托管形态只在托管时显示（Test 本目录跑不占行）。
-    if system_managed; then log_info "托管: system LaunchDaemon ($LAUNCHD_LABEL)"; fi
+    echo "Lifecycle: $lifecycle"
     echo
 
     for port in "$web_port" "$api_port"; do
@@ -672,6 +689,8 @@ run_status() {
 
     echo
     _report_data_health || fail=1
+    # 有意停用是合法状态不算故障 → exit 0（巡检豁免的机器依据）。
+    [[ "$lifecycle" == "stopped (intentional)" ]] && return 0
     return "$fail"
 }
 
