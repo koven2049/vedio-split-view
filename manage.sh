@@ -133,7 +133,8 @@ svc_ctl() { sudo -n "$SVC_CTL" "$@"; }
 # v2 helper（disable/enable/status 透传）缺失时 is_disabled 恒 false——四态退化旧三态。
 plist_present() { [[ -f "/Library/LaunchDaemons/$LAUNCHD_LABEL.plist" ]]; }
 is_disabled() {
-    [[ "$(svc_ctl status "$LAUNCHD_LABEL" 2>/dev/null | awk '$1=="disabled"{print $NF}')" == "true" ]]
+  # 读 plist Disabled 键（launchctl disable 在 darwin 27 静默无效）；plist 用户态可读。
+[[ "$(plutil -extract Disabled -raw -o - "/Library/LaunchDaemons/$LAUNCHD_LABEL.plist" 2>/dev/null || echo false)" == "true" ]]
 }
 
 # 系统域托管守卫（仅当本目录实例被 Daemon 托管时触发）：软停无意义——kill 后
