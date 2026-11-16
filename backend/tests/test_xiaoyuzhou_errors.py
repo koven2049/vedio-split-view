@@ -452,3 +452,39 @@ async def test_duration_falls_back_to_json_ld_without_next_data(monkeypatch):
         "https://www.xiaoyuzhoufm.com/episode/6a7bf13836641f136d86f3cc"
     )
     assert meta.duration_seconds == 95 * 60
+
+
+@pytest.mark.asyncio
+async def test_paid_episode_with_placeholder_enclosure_is_paid_private(monkeypatch):
+    """WHY (Task #71, 2026-11-16): paid episodes now ship a public enclosure
+    that is a 10-second silent placeholder, so the "no audio link" paywall
+    heuristic never fires and the 9 KB download surfaced as a misleading
+    cdn_expired. __NEXT_DATA__ states payType/isOwned for the episode."""
+    eid = "6af7d02814d01a26f8a99ab4"
+    html = _build_html(
+        title="Vol.05 黄金的局与势",
+        audio="https://media.xyzcdn.net/placeholder.m4a",
+        json_ld=_podcast_episode_ld(duration="PT45M"),
+    ) + _next_data([{"eid": eid, "duration": 2737, "payType": "PAY_EPISODE", "isOwned": False}])
+    _patch_async_client(monkeypatch, html=html)
+
+    with pytest.raises(xy.XiaoyuzhouError) as ei:
+        await xy.extract_xiaoyuzhou_metadata(f"https://www.xiaoyuzhoufm.com/episode/{eid}")
+    assert ei.value.code == "paid_private"
+
+
+@pytest.mark.asyncio
+async def test_free_episode_with_paid_sibling_is_not_paid_private(monkeypatch):
+    eid = "6a7bf13836641f136d86f3cc"
+    html = _build_html(
+        title="Free one",
+        audio="https://cdn.xiaoyuzhoufm.com/a.m4a",
+        json_ld=_podcast_episode_ld(duration="PT45M"),
+    ) + _next_data([
+        {"eid": eid, "duration": 2700, "payType": "FREE", "isOwned": False},
+        {"eid": "sibling", "duration": 100, "payType": "PAY_EPISODE", "isOwned": False},
+    ])
+    _patch_async_client(monkeypatch, html=html)
+
+    _, audio_url = await xy.extract_xiaoyuzhou_metadata(f"https://www.xiaoyuzhoufm.com/episode/{eid}")
+    assert audio_url

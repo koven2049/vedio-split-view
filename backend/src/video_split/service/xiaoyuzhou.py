@@ -48,9 +48,9 @@ class XiaoyuzhouError(RuntimeError):
         paid_private  — 付费 / 私密内容，本服务仅支持公开单集。
         page_changed  — og 元数据与 JSON-LD 全 miss，疑似页面结构改版。
         not_episode   — URL 非 ``/episode/<id>``，前端理论上已拦，后端兜底。
-        audio_undecodable — CDN 返回的音频受加密保护/完全损坏，重新下载
-                       拿到的是相同字节，重试无意义（Task #70：130MB 密文
-                       只带一个明文首帧）。
+        audio_undecodable — 文件头部即无法解码（损坏/不支持的编码），重下
+                       无意义。注：Task #70 曾被误判为「加密」，实为 ffmpeg 9
+                       遇内嵌封面图的解码 bug，已在 transcriber 用 -vn 修复。
         audio_truncated  — 下载不完整（中段/尾部无法解码），已在下载器内
                        自动重试一次；仍失败时用户手动重试可能有效。
     """
@@ -167,6 +167,49 @@ def _parse_podcast_ld_json(html: str) -> dict:
     return {}
 
 
+def _load_next_data(html: str) -> object:
+    """Parsed Next.js hydration payload (``__NEXT_DATA__``), or None."""
+    m = re.search(
+        r'<script id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1))
+    except json.JSONDecodeError:
+        logger.debug("[xiaoyuzhou] __NEXT_DATA__ is not valid JSON")
+        return None
+
+
+def _is_unowned_paid_episode(html: str, video_id: str) -> bool:
+    """Whether ``__NEXT_DATA__`` marks this episode as paid and not owned.
+
+    Paid episodes ship a public enclosure that is only a ~10s silent
+    placeholder (Task #71: 9.9 KB for a 2737s episode), so the "audio link
+    missing" paywall heuristic never fires for them.
+    """
+    def walk(node: object) -> dict | None:
+        if isinstance(node, dict):
+            if node.get("eid") == video_id and "payType" in node:
+                return node
+            children = node.values()
+        elif isinstance(node, list):
+            children = node
+        else:
+            return None
+        for value in children:
+            if found := walk(value):
+                return found
+        return None
+
+    episode = walk(_load_next_data(html))
+    if not episode:
+        return False
+    return episode.get("payType") not in (None, "", "FREE") and not episode.get("isOwned")
+
+
 def _duration_from_next_data(html: str, video_id: str) -> int:
     """Exact episode duration in seconds from Next.js hydration data, else 0.
 
@@ -175,17 +218,8 @@ def _duration_from_next_data(html: str, video_id: str) -> int:
     the player then can't reach the end and the last segment stops short.
     ``__NEXT_DATA__`` carries the exact second count for the same episode.
     """
-    m = re.search(
-        r'<script id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
-        html,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not m:
-        return 0
-    try:
-        data = json.loads(m.group(1))
-    except json.JSONDecodeError:
-        logger.debug("[xiaoyuzhou] __NEXT_DATA__ is not valid JSON")
+    data = _load_next_data(html)
+    if data is None:
         return 0
 
     fallback = 0
@@ -293,7 +327,9 @@ async def extract_xiaoyuzhou_metadata(url: str) -> tuple[VideoMeta, str]:
     #      will re-fetch the page and likely get a fresh CDN URL.
     #   3. page_changed: og + JSON-LD both miss — structural change, retry
     #      unlikely to help until code is updated.
-    if _looks_paid_private(page_html, has_audio=has_audio):
+    if _is_unowned_paid_episode(page_html, video_id) or _looks_paid_private(
+        page_html, has_audio=has_audio
+    ):
         logger.warning("[xiaoyuzhou] paywall/private markers found for %s", url)
         raise XiaoyuzhouError(
             "paid_private", "Episode is paywalled or private; only public episodes are supported",
@@ -337,7 +373,7 @@ async def extract_xiaoyuzhou_metadata(url: str) -> tuple[VideoMeta, str]:
 def _validate_decodable(out_path: Path, expected_duration: float) -> None:
     """Platform wrapper: map shared integrity exceptions to XiaoyuzhouError.
 
-    ``audio_undecodable`` — encrypted CDN content (deterministic, retry is
+    ``audio_undecodable`` — head does not decode (deterministic, retry is
     pointless); ``_TruncatedDownload`` propagates for the caller's one retry.
     """
     try:
@@ -346,7 +382,7 @@ def _validate_decodable(out_path: Path, expected_duration: float) -> None:
         raise XiaoyuzhouError(
             "audio_undecodable",
             f"该单集音频无法解码（实测仅 {e.head_decoded:.1f}s 可读，标称 {expected_duration:.0f}s）。"
-            "内容疑似受平台加密保护，重新下载会得到相同字节，该单集暂不支持分析。",
+            "文件可能已损坏或编码不受支持，该单集暂不支持分析。",
         ) from e
 
 
@@ -358,9 +394,9 @@ async def download_xiaoyuzhou_audio(
 ) -> Path:
     """Stream-download episode audio to ``output_dir/audio.m4a``.
 
-    Encrypted CDN content is detected mid-stream: each time an
+    Undecodable content is detected mid-stream: each time an
     ``_EARLY_PROBE_THRESHOLDS`` crossing is reached the head is decode-probed
-    and ciphertext downloads abort (``audio_undecodable``, Task #70). After
+    and an undecodable download aborts (``audio_undecodable``). After
     the size floor check the finished file is probed at head/middle/tail
     windows — a truncated stream retries the download once before failing
     with ``audio_truncated``.
@@ -406,20 +442,19 @@ async def download_xiaoyuzhou_audio(
                                 threshold = pending_probes.pop(0)
                                 f.flush()
                                 verdict = await asyncio.to_thread(_early_probe, out_path)
-                                if verdict == "encrypted":
+                                if verdict == "undecodable":
                                     logger.warning(
                                         "[xiaoyuzhou] early probe at %.1f MB (threshold %d MB): head "
-                                        "decodes ≈0s — encrypted CDN content, aborting download",
+                                        "decodes ≈0s — undecodable content, aborting download",
                                         downloaded / (1024 * 1024), threshold // (1024 * 1024),
                                     )
                                     raise XiaoyuzhouError(
                                         "audio_undecodable",
                                         f"该单集音频无法解码（下载 {downloaded // (1024 * 1024)} MB 时即检出"
-                                        "内容被平台加密）。重新下载会得到相同字节，该单集暂不支持分析。",
+                                        "音频无法解码）。该单集暂不支持分析。",
                                     )
-                                # NB: "ok" must NOT skip later thresholds — on ffmpeg ≥9
-                                # a 4 MB ciphertext prefix noise-decodes as a false "ok";
-                                # the 64 MB re-probe is the one that convicts there.
+                                # NB: "ok" must NOT skip later thresholds — re-probing at
+                                # 64 MB is a cheap second look before the full-file check.
         except XiaoyuzhouError:
             out_path.unlink(missing_ok=True)
             raise

@@ -490,8 +490,7 @@ async def run_analysis(
                 # downloaded from a plain CDN additionally need a *decode*
                 # probe: their container duration is an estimate (size÷bitrate
                 # for raw MP3) that stays at the claimed value even when the
-                # payload is ciphertext (Task #70 encrypted episode), so the
-                # old metadata comparison was blind to it.
+                # payload is garbage, so a metadata comparison is blind to it.
                 cached_ok = True
                 try:
                     if meta.platform in ("xiaoyuzhou", "apple_podcasts"):
@@ -499,7 +498,7 @@ async def run_analysis(
                         if decoded < 5.0:
                             cached_ok = False
                             logger.warning(
-                                "[analysis] Task #%d — cached audio decodes %.1fs at head (encrypted/corrupt), re-downloading",
+                                "[analysis] Task #%d — cached audio decodes %.1fs at head (corrupt), re-downloading",
                                 task.id, decoded,
                             )
                         elif meta.duration_seconds >= 180:

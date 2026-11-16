@@ -56,9 +56,8 @@ class ApplePodcastsError(RuntimeError):
         exclusive        — episode has no downloadable audio (Apple-exclusive
                            / paywalled content).
         download_failed  — audio CDN request failed.
-        audio_undecodable — the CDN serves a DRM'd stream: valid container
-                       headers, ciphertext payloads (Task #71). Re-downloading
-                       returns identical bytes; retrying is pointless.
+        audio_undecodable — the file's head does not decode (corrupt /
+                       unsupported codec); retrying is pointless.
         audio_truncated  — download incomplete (middle/tail undecodable);
                        auto-retried once by the downloader already.
     """
@@ -236,9 +235,8 @@ async def download_apple_podcasts_audio(
     """Stream-download the episode audio to ``output_dir/audio.<ext>``.
 
     Publisher CDNs serve plain mp3/m4a with content-length; downloads honor
-    the platform proxy (same routing as the page fetch). DRM'd episodes
-    (valid headers, ciphertext payloads — Task #71) are detected mid-stream
-    at the shared early-probe thresholds and the finished file is validated
+    the platform proxy (same routing as the page fetch). Undecodable files
+    are detected mid-stream at the shared early-probe thresholds and the finished file is validated
     at head/middle/tail windows; a truncated stream retries once.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -282,20 +280,19 @@ async def download_apple_podcasts_audio(
                             threshold = pending_probes.pop(0)
                             f.flush()
                             verdict = await asyncio.to_thread(early_probe, out_path)
-                            if verdict == "encrypted":
+                            if verdict == "undecodable":
                                 logger.warning(
                                     "[apple_podcasts] early probe at %.1f MB (threshold %d MB): "
-                                    "encrypted CDN content, aborting download",
+                                    "undecodable content, aborting download",
                                     downloaded / (1024 * 1024), threshold // (1024 * 1024),
                                 )
                                 raise ApplePodcastsError(
                                     "audio_undecodable",
                                     f"该单集音频无法解码（下载 {downloaded // (1024 * 1024)} MB 时即检出"
-                                    "内容被平台加密）。重新下载会得到相同字节，该单集暂不支持分析。",
+                                    "音频无法解码）。该单集暂不支持分析。",
                                 )
-                            # NB: "ok" must NOT skip later thresholds — on ffmpeg ≥9
-                            # a 4 MB ciphertext prefix noise-decodes as a false "ok";
-                            # the 64 MB re-probe is the one that convicts there.
+                            # NB: "ok" must NOT skip later thresholds — re-probing at
+                            # 64 MB is a cheap second look before the full-file check.
         except ApplePodcastsError:
             out_path.unlink(missing_ok=True)
             raise
@@ -326,7 +323,7 @@ async def download_apple_podcasts_audio(
             raise ApplePodcastsError(
                 "audio_undecodable",
                 f"该单集音频无法解码（实测仅 {e.head_decoded:.1f}s 可读，标称 {expected:.0f}s）。"
-                "内容疑似受平台加密保护，重新下载会得到相同字节，该单集暂不支持分析。",
+                "文件可能已损坏或编码不受支持，该单集暂不支持分析。",
             ) from e
         except TruncatedDownload as e:
             if attempt == 1:

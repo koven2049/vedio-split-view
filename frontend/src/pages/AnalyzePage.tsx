@@ -148,7 +148,7 @@ export function AnalysisSlotCard({
   })();
 
   // Deterministic failures (e.g. duration over the hard limit, or an
-  // encrypted/DRM episode whose re-download yields identical bytes) can never
+  // undecodable episode whose re-download yields identical bytes) can never
   // succeed on retry — hide the retry button instead of inviting a no-op.
   const retryable = errorCode !== 'duration_exceeded' && errorCode !== 'audio_undecodable';
 

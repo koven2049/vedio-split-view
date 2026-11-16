@@ -222,7 +222,7 @@ def test_early_probe_flags_opens_but_undecodable_prefix(monkeypatch, tmp_path, h
     encrypted_like = tmp_path / "encrypted.mp3"
     encrypted_like.write_bytes(healthy_mp3.read_bytes())  # real container, real headers
     monkeypatch.setattr(ai, "probe_decoded_seconds", lambda p, *, start, window: 0.2)
-    assert ai.early_probe(encrypted_like) == "encrypted"
+    assert ai.early_probe(encrypted_like) == "undecodable"
 
 
 @requires_ffmpeg
@@ -299,7 +299,7 @@ async def test_download_aborts_early_on_encrypted(monkeypatch, tmp_path):
     """Encrypted verdict mid-stream kills the download at ~4MB, not 200MB."""
     state = {"pulled": 0}
     monkeypatch.setattr(xy.httpx, "AsyncClient", _unlimited_cdn(state))
-    monkeypatch.setattr(xy, "_early_probe", lambda path: "encrypted")
+    monkeypatch.setattr(xy, "_early_probe", lambda path: "undecodable")
 
     with pytest.raises(xy.XiaoyuzhouError) as ei:
         await xy.download_xiaoyuzhou_audio(
@@ -320,7 +320,7 @@ async def test_download_second_threshold_convicts(monkeypatch, tmp_path):
     is honest there and must abort — this is the two-threshold contract."""
     state = {"pulled": 0}
     monkeypatch.setattr(xy.httpx, "AsyncClient", _unlimited_cdn(state, chunk_mb=40, chunks=4))
-    verdicts = iter(["unknown", "encrypted"])
+    verdicts = iter(["unknown", "undecodable"])
     monkeypatch.setattr(xy, "_early_probe", lambda path: next(verdicts))
     with pytest.raises(xy.XiaoyuzhouError) as ei:
         await xy.download_xiaoyuzhou_audio(
@@ -338,7 +338,7 @@ async def test_download_ok_does_not_skip_later_threshold(monkeypatch, tmp_path):
     probe — that re-probe is the one that convicts on modern ffmpeg."""
     state = {"pulled": 0}
     monkeypatch.setattr(xy.httpx, "AsyncClient", _unlimited_cdn(state, chunk_mb=40, chunks=3))
-    verdicts = iter(["ok", "encrypted"])
+    verdicts = iter(["ok", "undecodable"])
     monkeypatch.setattr(xy, "_early_probe", lambda path: next(verdicts))
     with pytest.raises(xy.XiaoyuzhouError) as ei:
         await xy.download_xiaoyuzhou_audio(

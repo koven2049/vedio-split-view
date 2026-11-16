@@ -131,7 +131,7 @@ async def test_midstream_encrypted_aborts_early(monkeypatch, tmp_path):
     """Encrypted verdict at a threshold aborts before the stream drains."""
     state = {"pulled": 0}
     monkeypatch.setattr(ap.httpx, "AsyncClient", _unlimited_cdn(state))
-    monkeypatch.setattr(ap, "early_probe", lambda path: "encrypted")
+    monkeypatch.setattr(ap, "early_probe", lambda path: "undecodable")
     with pytest.raises(ap.ApplePodcastsError) as ei:
         await ap.download_apple_podcasts_audio(
             "https://cdn.example.com/e.mp3", tmp_path,

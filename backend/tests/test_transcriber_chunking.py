@@ -187,6 +187,7 @@ def test_metadata_drift_within_tolerance_still_splits(monkeypatch, tmp_path):
 # fails with exit 234). Skipped automatically when ffmpeg/ffprobe is absent.
 # ---------------------------------------------------------------------------
 
+import math
 import shutil
 import subprocess as _sp
 
@@ -281,3 +282,67 @@ def test_get_audio_duration_on_garbage_file_raises_readably(tmp_path):
 
     with pytest.raises(RuntimeError, match="探测音频时长|无法解析音频时长"):
         transcriber.get_audio_duration(bad)
+
+
+# ---------------------------------------------------------------------------
+# Embedded cover art (Tasks #69/#70, 2026-11). Podcast MP3s routinely carry an
+# ID3 APIC picture, which ffmpeg exposes as an mjpeg ``attached_pic`` stream.
+# On ffmpeg 9.0.1 (production), once such a file is larger than ~50 MB, letting
+# that stream into the output graph stops the decode at ~0.15s and makes the
+# segment muxer emit one tiny chunk — misdiagnosed as "DRM ciphertext". Every
+# ffmpeg call that measures or splits audio must drop non-audio streams.
+# The fixture mirrors real feeds: a tag written by a tagging tool (no
+# timestamps on the picture) in front of plain CBR frames, padded past the
+# size threshold by repeating a short seed. ffmpeg 7 is unaffected, so these
+# only go red on ffmpeg >=9.
+# ---------------------------------------------------------------------------
+
+import struct as _struct
+
+_COVER_ART_FIXTURE_BYTES = 55_000_000
+
+
+@pytest.fixture(scope="module")
+def cover_art_mp3(tmp_path_factory):
+    d = tmp_path_factory.mktemp("cover_art")
+    seed, jpg = d / "seed.mp3", d / "cover.jpg"
+    _sp.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=60",
+         "-c:a", "libmp3lame", "-b:a", "128k", "-id3v2_version", "0", "-write_xing", "0",
+         str(seed)],
+        check=True, capture_output=True,
+    )
+    _sp.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64",
+         "-frames:v", "1", str(jpg)],
+        check=True, capture_output=True,
+    )
+    frames = seed.read_bytes()
+    audio = frames * (_COVER_ART_FIXTURE_BYTES // len(frames) + 1)
+    body = b"\x00image/jpeg\x00\x03\x00" + jpg.read_bytes()
+    apic = b"APIC" + _struct.pack(">I", len(body)) + b"\x00\x00" + body
+    n = len(apic)
+    syncsafe = bytes([(n >> 21) & 127, (n >> 14) & 127, (n >> 7) & 127, n & 127])
+    path = d / "audio.mp3"
+    path.write_bytes(b"ID3\x03\x00\x00" + syncsafe + apic + audio)
+    return path
+
+
+@requires_ffmpeg
+def test_cover_art_mp3_decode_probe_measures_audio(cover_art_mp3):
+    assert transcriber.probe_decoded_seconds(cover_art_mp3, start=0.0, window=8.0) >= 7.5
+    assert transcriber.probe_decoded_seconds(cover_art_mp3, start=1800.0, window=8.0) >= 7.5
+
+
+@requires_ffmpeg
+@pytest.mark.parametrize("diarization", [False, True])
+def test_cover_art_mp3_splits_into_full_chunks(monkeypatch, tmp_path, cover_art_mp3, diarization):
+    audio = tmp_path / "audio.mp3"
+    audio.symlink_to(cover_art_mp3)
+    monkeypatch.setattr(transcriber, "_model_supports_diarization", lambda m: diarization)
+
+    total = transcriber.get_audio_duration(audio)
+    chunks = transcriber.split_audio(audio, chunk_seconds=900)
+
+    assert len(chunks) == math.ceil(total / 900), [c.name for c in chunks]
+    assert sum(transcriber.get_audio_duration(c) for c in chunks) == pytest.approx(total, abs=60)

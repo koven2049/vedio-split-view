@@ -1,23 +1,17 @@
 """Download-time audio integrity checks shared by the podcast platforms.
 
-Both xiaoyuzhou and Apple Podcasts serve episodes from plain CDN URLs, and
-both have been observed (Tasks #70/#71, 2026-11) hosting DRM'd episodes that
-download "successfully" — HTTP 200, full content-length, valid container
-headers — while the audio payloads are ciphertext:
+Podcast CDNs serve plain files whose container duration is an estimate
+(size÷bitrate for raw MP3), so only a real decode tells whether the bytes are
+usable. Platform downloaders use these helpers to (a) abort an undecodable
+download mid-stream, (b) validate the finished file at head/middle/tail
+windows, and (c) retry a genuinely truncated download once.
 
-- Every MP3 frame header is valid and correctly spaced (the ff fb .. sync
-  repeats at exact frame-length intervals, first frame literal zeros), so
-  any header/size/chain inspection passes.
-- Real decoding of the complete file yields ~0.2s (the first frame) and
-  stops; ffprobe's format duration (size÷bitrate estimate) reports the full
-  claimed length, so metadata comparisons are blind.
-- ffmpeg ≥9 additionally "decodes" 5–8s of noise from a truncated PREFIX of
-  such files (false frames accepted), which is why mid-stream probes use two
-  thresholds — see EARLY_PROBE_THRESHOLDS.
-
-Platform downloaders use these helpers to (a) abort ciphertext downloads
-mid-stream, (b) validate the finished file at head/middle/tail windows, and
-(c) retry a genuinely truncated download once.
+History: Tasks #69/#70/#71 (2026-11) were first diagnosed here as "DRM'd
+episodes with ciphertext payloads". That was wrong — the files were healthy
+MP3s with embedded ID3 cover art, which ffmpeg 9 lets stop the decode at
+~0.15s once the file exceeds ~50 MB (hence the "only ≥64 MB prefixes fail"
+observation). The fix is ``-vn`` in transcriber's ffmpeg calls; verify with a
+second decoder (macOS ``afinfo``, ffmpeg 7) before blaming the platform.
 """
 from __future__ import annotations
 
@@ -33,18 +27,10 @@ logger = logging.getLogger(__name__)
 # (byte-estimate seeking on VBR MP3 can land a couple seconds off target).
 PROBE_PASS_SECONDS = 5.0
 
-# Stream-early encrypted-content detection: decode-probe the head each time a
-# threshold below is crossed; an "encrypted" verdict aborts the download
-# instead of dragging the whole file over the network (Task #70: 130 MB).
-#
-# Two thresholds exist because of ffmpeg demuxer behavior on the DRM'd files
-# (intact frame headers, ciphertext payloads): ffmpeg ≤8 on ANY truncated
-# prefix honestly decodes ≈0.2s → the first (4 MB) probe already convicts;
-# ffmpeg 9 happily decodes false frames in a prefix as noise (measured: ≤32 MB
-# prefixes "decode" 8s, ≥64 MB prefixes are honest again) → the second probe
-# at 64 MB convicts there. This is an empirical traffic optimization only —
-# correctness never depends on it: the post-download validation on the
-# complete file is reliable on every version observed.
+# Stream-early detection: decode-probe the head each time a threshold below
+# is crossed; an "undecodable" verdict aborts the download instead of
+# dragging the whole file over the network. A traffic optimization only —
+# correctness rests on the post-download validation of the complete file.
 EARLY_PROBE_THRESHOLDS = (4 * 1024 * 1024, 64 * 1024 * 1024)
 
 
@@ -59,13 +45,13 @@ def container_opens(path: Path) -> bool:
 
 
 def early_probe(path: Path) -> str:
-    """Classify a partial download: ``ok`` / ``encrypted`` / ``unknown``.
+    """Classify a partial download: ``ok`` / ``undecodable`` / ``unknown``.
 
     Runs one ffmpeg head-window decode: a prefix that decodes ≥5s is "ok"; a
-    prefix that opens as audio yet decodes ≈0s is the encrypted signature
-    ("encrypted"); a prefix that can't be judged yet (still inside a giant
-    cover-art ID3 tag, or a container that won't even open) is "unknown" and
-    defers to the post-download validation on the complete file.
+    prefix that opens as audio yet decodes ≈0s is "undecodable"; a prefix
+    that can't be judged yet (still inside a giant cover-art ID3 tag, or a
+    container that won't even open) is "unknown" and defers to the
+    post-download validation on the complete file.
     """
     decoded = probe_decoded_seconds(path, start=0.0, window=8.0)
     if decoded >= PROBE_PASS_SECONDS:
@@ -78,7 +64,7 @@ def early_probe(path: Path) -> str:
             return "unknown"
     if not container_opens(path):
         return "unknown"
-    return "encrypted"
+    return "undecodable"
 
 
 class TruncatedDownload(Exception):
@@ -111,10 +97,10 @@ def validate_decodable(path: Path, expected_duration: float) -> None:
 
     Raises :class:`TruncatedDownload` when head decodes but middle/tail
     windows fail (network truncation — caller retries once), and returns
-    silently otherwise — callers map the encrypted case themselves (their
+    silently otherwise — callers map the undecodable case themselves (their
     typed error classes differ per platform), so this only measures.
     For the head-window failure the caller should treat the file as
-    undecodable (encrypted CDN content — deterministic, retry is pointless).
+    undecodable (deterministic, retry is pointless).
     """
     for start in probe_start_offsets(expected_duration):
         decoded = probe_decoded_seconds(path, start=start, window=8.0)
@@ -130,8 +116,8 @@ def validate_decodable(path: Path, expected_duration: float) -> None:
 
 
 class UndecodableAudio(Exception):
-    """Container opens as audio yet the head decodes ≈0s — encrypted CDN
-    content; re-downloading yields identical bytes, retrying is pointless."""
+    """Container opens as audio yet the head decodes ≈0s — re-downloading
+    yields identical bytes, retrying is pointless."""
 
     def __init__(self, head_decoded: float):
         self.head_decoded = head_decoded

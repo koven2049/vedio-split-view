@@ -121,10 +121,14 @@ def probe_decoded_seconds(audio_path: Path, *, start: float = 0.0, window: float
     Unlike :func:`get_audio_duration` (container metadata, which for raw MP3
     is merely size÷bitrate and stays at the claimed value even when the file
     is garbage), this runs a real decode and parses the final ``time=`` from
-    ffmpeg's progress line — the ground truth a transcription would see. An
-    encrypted CDN file (Task #70: 130 MB of ciphertext behind one plaintext
-    frame) decodes ~0.2s and is caught here; a healthy window decodes ≈
-    ``window`` seconds.
+    ffmpeg's progress line — the ground truth a transcription would see. A
+    truncated or garbage file decodes far less than ``window``; a healthy
+    window decodes ≈ ``window`` seconds.
+
+    ``-vn`` is load-bearing: podcast MP3s embed ID3 cover art (an mjpeg
+    ``attached_pic`` stream), and ffmpeg 9 with that stream in the graph stops
+    after ~0.15s on files over ~50 MB — the Task #69/#70 "encrypted episode"
+    misdiagnosis was exactly this.
 
     Input seeking before ``-i`` is byte-estimate based for raw MP3 and may
     land a couple seconds off target on VBR files — irrelevant at the 8s
@@ -133,7 +137,7 @@ def probe_decoded_seconds(audio_path: Path, *, start: float = 0.0, window: float
     result = subprocess.run(
         [
             "ffmpeg", "-nostdin", "-v", "info",
-            "-ss", f"{start:.2f}", "-i", str(audio_path),
+            "-ss", f"{start:.2f}", "-i", str(audio_path), "-vn",
             "-t", f"{window:.2f}", "-f", "null", "-",
         ],
         capture_output=True, text=True,
@@ -222,7 +226,8 @@ def split_audio(audio_path: Path, *, chunk_seconds: int | None = None) -> list[P
     try:
         _run_checked(
             [
-                "ffmpeg", "-y", "-i", str(audio_path),
+                # -vn: drop embedded cover art (see probe_decoded_seconds).
+                "ffmpeg", "-y", "-i", str(audio_path), "-vn",
                 "-f", "segment", "-segment_time", str(chunk_dur),
                 *codec_args,
                 "-v", "error",
@@ -273,7 +278,7 @@ def _collect_chunks(
             raise RuntimeError(
                 f"音频切片校验失败：源音频 {source_duration:.0f}s 应切 {expected} 块，"
                 f"实际只产出 {len(chunks)} 块、实测共 {measured:.0f}s。"
-                "音频文件可解码内容与标称时长严重不符（可能下载不完整或内容受平台加密保护），"
+                "音频文件可解码内容与标称时长严重不符（可能下载不完整或文件损坏），"
                 "请重试分析；若持续失败，该单集暂不支持。"
             )
         logger.warning(
