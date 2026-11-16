@@ -55,91 +55,35 @@ def test_legacy_watchdog_script_is_neutralized_template() -> None:
     assert "containers_up" not in text
 
 
-def _run_stop_with_fake_launchctl(lingering_prints: int) -> subprocess.CompletedProcess[str]:
-    """Execute the real _agent_target + run_stop against a launchctl stub
-    whose `print` keeps finding the agent for N calls after bootout (launchd
-    unloads asynchronously)."""
-    script = f"""
-set -euo pipefail
-AGENT_LABEL=com.koven.vsplit.web.test
-AGENT_BOOT_DOMAIN=user/501
-booted_out=0; lingering={lingering_prints}; booted_target=""
-log_step() {{ :; }}; log_ok() {{ echo "OK $*"; }}; log_error() {{ echo "ERR $*"; }}
+# ---------------------------------------------------------------------------
+# Hosting contract (2026-11-13): production = system LaunchDaemon
+# com.koven.vsplit.web (UserName=admin, KeepAlive); Test checkouts = pidfile +
+# nohup. Real helper bodies are executed against stubs; the 2026-10 LaunchAgent
+# tests (user/<uid> domain, kickstart, /api/health) were retired with it.
+# ---------------------------------------------------------------------------
+
+LABEL = "com.koven.vsplit.web"
+
+
+def _run_bash(script: str) -> subprocess.CompletedProcess[str]:
+    prelude = f"""
+set -uo pipefail
+LAUNCHD_LABEL={LABEL}
+log_step() {{ echo "STEP $*"; }}; log_ok() {{ echo "OK $*"; }}
+log_info() {{ echo "INFO $*"; }}; log_warn() {{ echo "WARN $*"; }}
+log_error() {{ echo "ERR $*"; }}
 sleep() {{ :; }}
-launchctl() {{
-    case "$1" in
-        bootout) booted_out=1; booted_target="$2" ;;
-        print)
-            [[ $booted_out == 0 ]] && return 0
-            (( lingering > 0 )) && {{ lingering=$((lingering - 1)); return 0; }}
-            return 113 ;;
-    esac
-}}
-{_helper_body("_agent_target")}
-{_func_body("run_stop")}
-run_stop
-echo "left=$lingering"
-echo "booted=$booted_target"
+get_frontend_port() {{ echo 5180; }}
+get_app_port() {{ echo 8080; }}
 """
-    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
-
-
-def test_run_stop_waits_until_agent_unloaded() -> None:
-    """Regression: restart = stop + start. If stop returns while launchctl
-    still lists the agent, start kickstarts a dying agent (exit 37) and
-    set -e aborts silently, leaving production down after rebuild."""
-    result = _run_stop_with_fake_launchctl(lingering_prints=3)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "OK Stopped." in result.stdout
-    assert "left=0" in result.stdout
-
-
-def test_run_stop_boots_out_background_domain_instance() -> None:
-    """The loaded agent lives in user/<uid> (background domain) since the
-    2026-10-31 outage fix; stop must boot out exactly that instance."""
-    result = _run_stop_with_fake_launchctl(lingering_prints=0)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "booted=user/501/com.koven.vsplit.web.test" in result.stdout
-
-
-def test_run_stop_fails_loudly_if_agent_never_unloads() -> None:
-    result = _run_stop_with_fake_launchctl(lingering_prints=999)
-    assert result.returncode != 0
-    assert "ERR" in result.stdout
-
-
-def test_run_start_kickstart_failure_is_reported() -> None:
-    body = _func_body("run_start")
-    assert 'launchctl kickstart -k "$target" \\\n            || { log_error "kickstart failed' in body
-
-
-def test_run_start_bootstraps_into_background_domain() -> None:
-    """2026-10-31 outage: with another user holding the console there is no
-    gui/<uid> session, and `bootstrap gui/<uid>` from SSH/LaunchDaemon fails
-    with error 125 — start must target the user background domain."""
-    body = _func_body("run_start")
-    assert 'launchctl bootstrap "$AGENT_BOOT_DOMAIN"' in body
-    assert 'bootstrap "gui/' not in body
-
-
-def test_run_start_gates_start_on_both_listeners() -> None:
-    """T54 acceptance: restart must prove BOTH listeners (:5180 SPA+API and
-    :8080 API compat) answer /api/health. The old gate probed only the web
-    port, so a start with a dead compat listener still reported OK."""
-    body = _func_body("run_start")
-    assert "_ports_healthy && break" in body
-    assert "if _ports_healthy; then" in body
-    helper = _helper_body("_ports_healthy")
-    assert '"$(get_frontend_port)" "$(get_app_port)"' in helper
-    assert "/api/health" in helper
+    return subprocess.run(
+        ["bash", "-c", prelude + script], capture_output=True, text=True, check=False
+    )
 
 
 def _ports_healthy_with_fake_curl(fail_url: str) -> subprocess.CompletedProcess[str]:
     """Run the real _ports_healthy against a curl stub that fails for one URL."""
-    script = f"""
-set -euo pipefail
-get_frontend_port() {{ echo 5180; }}
-get_app_port() {{ echo 8080; }}
+    return _run_bash(f"""
 probed=""
 curl() {{
     probed="$probed ${{@: -1}}"
@@ -149,37 +93,119 @@ curl() {{
 {_helper_body("_ports_healthy")}
 _ports_healthy && echo healthy=yes || echo healthy=no
 echo "probed:$probed"
-"""
-    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
+""")
 
 
 def test_ports_healthy_passes_when_both_listeners_answer() -> None:
     result = _ports_healthy_with_fake_curl(fail_url="")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "healthy=yes" in result.stdout
-    assert "http://localhost:5180/api/health" in result.stdout
-    assert "http://localhost:8080/api/health" in result.stdout
+    assert "healthy=yes" in result.stdout, result.stdout + result.stderr
+    assert "http://localhost:5180/health" in result.stdout
+    assert "http://localhost:8080/health" in result.stdout
 
 
 def test_ports_healthy_fails_when_compat_listener_is_dead() -> None:
-    result = _ports_healthy_with_fake_curl(fail_url="http://localhost:8080/api/health")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "healthy=no" in result.stdout
+    """T54: one port up without the other is a broken start, not a healthy one."""
+    result = _ports_healthy_with_fake_curl(fail_url="http://localhost:8080/health")
+    assert "healthy=no" in result.stdout, result.stdout + result.stderr
 
 
-def test_agent_target_looks_in_background_domain_first() -> None:
-    """Lookups prefer user/<uid> and only fall back to gui/<uid> for a
-    leftover instance from an older install, so stop/restart never misses
-    an already-loaded agent."""
-    body = _helper_body("_agent_target")
-    assert 'for d in "$AGENT_BOOT_DOMAIN" "gui/$(id -u)"' in body
+def test_start_and_restart_gate_on_wait_health() -> None:
+    """Reporting success without both listeners answering is how a dead
+    service got reported as "restarted"; wait_health must give up (rc 1)."""
+    result = _run_bash(f"""
+_ports_healthy() {{ return 1; }}
+HEALTH_WAIT=3
+{_helper_body("wait_health")}
+wait_health && echo rc=0 || echo rc=1
+""")
+    assert "rc=1" in result.stdout, result.stdout + result.stderr
+    assert "wait_health" in _func_body("run_start")
+    assert "wait_health" in _func_body("run_restart")
 
 
-def test_agent_plist_loads_into_background_session() -> None:
-    """LimitLoadToSessionType=Background is what makes the plist loadable
-    into user/<uid>; a plain Aqua agent is rejected there (error 125)."""
-    plist = (
-        Path(__file__).resolve().parents[2] / "scripts" / "com.koven.vsplit.web.plist"
-    ).read_text(encoding="utf-8")
-    assert "<key>LimitLoadToSessionType</key>" in plist
-    assert "<string>Background</string>" in plist
+def test_daemon_managed_here_is_directory_scoped() -> None:
+    """Same machine, same label: a Test checkout must not mistake the
+    ~/Services production instance for its own managed daemon."""
+    result = _run_bash(f"""
+system_managed() {{ return 0; }}
+confirmed_server_pids() {{ :; }}
+{_helper_body("daemon_managed_here")}
+daemon_managed_here && echo managed=yes || echo managed=no
+""")
+    assert "managed=no" in result.stdout, result.stdout + result.stderr
+
+
+def _guard(svc_ctl_rc: int, managed: bool = True) -> subprocess.CompletedProcess[str]:
+    return _run_bash(f"""
+calls=""
+daemon_managed_here() {{ return {0 if managed else 1}; }}
+svc_ctl() {{ calls="$calls svc_ctl:$*"; return {svc_ctl_rc}; }}
+confirmed_server_pids() {{ echo 4242; }}
+stop_pid() {{ calls="$calls stop_pid:$1"; return 0; }}
+{_helper_body("guard_prod_daemon_stop")}
+guard_prod_daemon_stop; echo "rc=$?"
+echo "calls:$calls"
+""")
+
+
+def test_guard_ignores_unmanaged_instances() -> None:
+    result = _guard(svc_ctl_rc=0, managed=False)
+    assert "rc=1" in result.stdout
+    assert "svc_ctl" not in result.stdout
+
+
+def test_guard_really_stops_managed_daemon_via_svc_ctl() -> None:
+    """A soft kill is pointless under KeepAlive; stop = svc-ctl disable."""
+    result = _guard(svc_ctl_rc=0)
+    assert "rc=0" in result.stdout, result.stdout + result.stderr
+    assert f"svc_ctl:disable system/{LABEL}" in result.stdout
+
+
+def test_guard_reports_missing_helper_with_sudo_hint() -> None:
+    result = _guard(svc_ctl_rc=1)
+    assert "rc=2" in result.stdout, result.stdout + result.stderr
+    assert "sudo" in result.stdout
+    assert "stop_pid" not in result.stdout
+
+
+def test_run_stop_refuses_fake_success_when_helper_missing() -> None:
+    """Managed + no svc-ctl: stop must fail, never soft-kill and claim OK."""
+    result = _run_bash(f"""
+guard_prod_daemon_stop() {{ return 2; }}
+# Stubs that would let the unmanaged soft-stop path "succeed" if reached.
+PIDFILE=/nonexistent/multi_listen.pid; SERVICE=vedio-split-view
+port_held_elsewhere() {{ return 1; }}
+confirmed_server_pids() {{ echo 4242; }}
+service_pid() {{ :; }}
+stop_pid() {{ echo "SOFT-KILL $1"; }}
+{_func_body("run_stop")}
+( run_stop ); echo "rc=$?"
+""")
+    assert "rc=0" not in result.stdout, result.stdout + result.stderr
+    assert "SOFT-KILL" not in result.stdout
+    assert "OK" not in result.stdout
+
+
+def test_run_start_is_noop_when_managed_here() -> None:
+    result = _run_bash(f"""
+daemon_managed_here() {{ return 0; }}
+nohup() {{ echo "NOHUP $*"; }}
+{_func_body("run_start")}
+run_start; echo "rc=$?"
+""")
+    assert "rc=0" in result.stdout, result.stdout + result.stderr
+    assert "NOHUP" not in result.stdout
+
+
+def test_daemon_plist_template_matches_hosting_contract() -> None:
+    plist = (Path(__file__).resolve().parents[2] / "deploy" / f"{LABEL}.plist").read_text(
+        encoding="utf-8"
+    )
+    assert f"<string>{LABEL}</string>" in plist
+    assert "<key>UserName</key>\n    <string>admin</string>" in plist
+    assert "<key>KeepAlive</key>\n    <true/>" in plist
+    assert "scripts/multi_listen.py</string>" in plist
+    # ffmpeg/ffprobe/deno live in Homebrew; launchd's default PATH lacks it.
+    assert "/opt/homebrew/bin" in plist
+    # LaunchAgent-only key; a system daemon must not carry it.
+    assert "LimitLoadToSessionType" not in plist
