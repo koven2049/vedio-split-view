@@ -67,3 +67,10 @@ transcription:
 #   result_base_url: ""          # e.g. "https://video.example.com"
 #   allowed_open_ids: []         # Feishu open_id whitelist; empty = deny all
 #   secrets_file: feishu.yaml    # credentials file under config/ (0600, not git)
+#
+# pricing:                       # CNY unit prices for the usage cost estimate
+#   glm-5.3-flash:               # LLM: none by default (subscription endpoints)
+#     input_per_m: 0.8           # per million prompt tokens
+#     output_per_m: 2.8          # per million completion tokens
+#   fun-asr:
+#     per_second: 0.00022        # ASR defaults for 百炼 models are built in

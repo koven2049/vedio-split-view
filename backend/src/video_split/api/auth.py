@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from video_split.database import get_db
 from video_split.dependencies import get_current_user
 from video_split.models import User
+from video_split.service import usage as usage_ledger
 from video_split.schemas import AuthLogin, LangUpdate, TokenResponse, UserInfo, UserPreferences
 from video_split.service.auth_service import (
     PendingApprovalError,
@@ -89,10 +90,24 @@ async def update_preferences(
 
 
 @router.get("/usage-stats")
-async def get_usage_stats(user: User = Depends(get_current_user)):
-    """Return cumulative per-model usage stats for this user."""
-    try:
-        stats = json.loads(user.usage_stats_json or "{}")
-    except (json.JSONDecodeError, TypeError):
-        stats = {}
-    return stats
+async def get_usage_stats(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return cumulative per-model usage stats for this user (usage ledger)."""
+    summary = await usage_ledger.summarize(db, user)
+    return {
+        "asr": {
+            a["model"]: {"total_seconds": a["total_seconds"], "requests": a["requests"]}
+            for a in summary["asr"]
+        },
+        "llm": {
+            m["model"]: {
+                "prompt_tokens": m["prompt_tokens"],
+                "completion_tokens": m["completion_tokens"],
+                "total_tokens": m["total_tokens"],
+                "requests": m["requests"],
+            }
+            for m in summary["llm"]
+        },
+    }

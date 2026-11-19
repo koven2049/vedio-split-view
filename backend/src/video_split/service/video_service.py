@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from video_split.models import BilibiliCredential, Segment, Tag, Task, User, Video, video_tags
 from video_split.schemas import ProgressEvent
+from video_split.service import usage as usage_ledger
 from video_split.service.error_text import describe_error
 from video_split.service.analyzer import analyze_transcript
 from video_split.service.dialogue import format_dialogue
@@ -122,38 +123,6 @@ def get_user_limits(user) -> dict[str, int]:
     }
 
 
-async def accumulate_usage(db: AsyncSession, user_id: int, usage_data: dict) -> None:
-    """Add analysis usage to the user's cumulative stats (persisted in DB)."""
-    from sqlalchemy import select as sa_select
-    result = await db.execute(sa_select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        return
-    try:
-        stats = json.loads(user.usage_stats_json or "{}")
-    except (json.JSONDecodeError, TypeError):
-        stats = {}
-
-    asr_model = usage_data.get("asr_model", "")
-    if asr_model:
-        asr = stats.setdefault("asr", {}).setdefault(asr_model, {"total_seconds": 0, "requests": 0})
-        asr["total_seconds"] += usage_data.get("asr_duration_seconds", 0)
-        asr["requests"] += 1
-
-    llm_model = usage_data.get("llm_model", "")
-    if llm_model:
-        llm = stats.setdefault("llm", {}).setdefault(llm_model, {
-            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "requests": 0,
-        })
-        llm["prompt_tokens"] += usage_data.get("llm_prompt_tokens", 0)
-        llm["completion_tokens"] += usage_data.get("llm_completion_tokens", 0)
-        llm["total_tokens"] += usage_data.get("llm_total_tokens", 0)
-        llm["requests"] += 1
-
-    user.usage_stats_json = json.dumps(stats, ensure_ascii=False)
-    await db.commit()
-
-
 def merge_llm_usage(video: Video, usage: dict) -> None:
     """Fold an extra LLM call's tokens (e.g. dialogue formatting) into video.usage_json.
 
@@ -251,7 +220,6 @@ async def _save_analysis_results(
     await update_task_status(db, task, "completed")
     await cleanup_task_files(task)
     await db.commit()
-    await accumulate_usage(db, task.user_id, usage_data)
     return video, usage_data
 
 
@@ -273,7 +241,6 @@ async def _persist_dialogue_for_video(
         video.dialogue_json = json.dumps(dialogue, ensure_ascii=False)
         if int(usage.get("llm_total_tokens") or 0):
             merge_llm_usage(video, usage)
-            await accumulate_usage(db, video.user_id, usage)
         await db.commit()
         logger.info(
             "[dialogue] Task saved video_id=%d (%s layout, %d blocks)",
@@ -319,6 +286,7 @@ async def run_analysis(
     user_limits: dict[str, int] | None = None,
 ) -> AsyncGenerator[ProgressEvent, None]:
     """Run the full analysis pipeline, yielding progress events."""
+    usage_ledger.set_owner(task.user_id, task.id)
     settings = get_settings()
     cred_kw = _cred_kwargs(bilibili_cred)
 
@@ -1001,6 +969,7 @@ async def resume_analysis(
     bilibili_cred: BilibiliCredential | None = None,
 ) -> AsyncGenerator[ProgressEvent, None]:
     """Resume a failed task from the point of failure."""
+    usage_ledger.set_owner(task.user_id, task.id)
     cred_kw = _cred_kwargs(bilibili_cred)
     task_dir = get_task_temp_dir(task)
     logger.info("[analysis] Resuming task #%d (status=%s)", task.id, task.status)

@@ -127,6 +127,14 @@ class FeishuConfig(BaseModel):
     secrets_file: str = "feishu.yaml"
 
 
+class ModelPrice(BaseModel):
+    """CNY unit prices for one model; unset parts cost nothing."""
+
+    per_second: float = 0.0
+    input_per_m: float = 0.0
+    output_per_m: float = 0.0
+
+
 class Settings(BaseModel):
     app: AppConfig = AppConfig()
     admin: AdminConfig = AdminConfig()
@@ -140,6 +148,9 @@ class Settings(BaseModel):
     llm_backup: LLMBackupConfig = LLMBackupConfig()
     logging: LoggingConfig = LoggingConfig()
     feishu: FeishuConfig = FeishuConfig()
+    # Per-model price overrides (model id → ModelPrice), merged over
+    # usage.DEFAULT_PRICES. A model with no price shows usage without cost.
+    pricing: dict[str, ModelPrice] = {}
 
     @field_validator("admin")
     @classmethod

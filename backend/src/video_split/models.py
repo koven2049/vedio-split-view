@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -180,4 +181,28 @@ class LLMLog(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class UsageRecord(Base):
+    """One billed external call: an ASR task or an LLM chat completion.
+
+    The ledger behind every usage figure in the UI — written at the call
+    site, so retries, failures after billing, dialogue / mind-map / translation
+    calls and later-deleted videos all count.
+    """
+
+    __tablename__ = "usage_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String(8))  # "asr" | "llm"
+    model: Mapped[str] = mapped_column(String(128), default="")
+    seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # "live" = recorded at the call; "backfill" = reconstructed from history
+    source: Mapped[str] = mapped_column(String(16), default="live")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

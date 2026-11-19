@@ -112,14 +112,14 @@ const zh = {
   'library.public_label': '公开',
   'library.private': '私有',
   'library.by': '作者',
-  'library.totalUsage': '累计消耗：',
+  'library.totalUsage': '累计消耗',
   'library.makePublic': '点击公开到广场',
   'library.makePrivate': '点击设为私有',
   'library.deleteNamed': '删除 {title}？',
   'library.deleteFailed': '删除失败：{message}',
-  'library.usageAsrPrefix': 'ASR ({model})：',
-  'library.usageLlmPrefix': 'LLM ({model})：',
-  'library.tokensUnit': 'Token',
+  'library.usageHours': '{n} 小时',
+  'library.usageMinutes': '{n} 分钟',
+  'library.usageTokens': '{n} Token',
 
   // Video Detail Page
   'detail.back': '返回',

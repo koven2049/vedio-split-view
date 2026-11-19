@@ -174,3 +174,25 @@ async def test_no_speech_failure_still_tolerated(monkeypatch, _settings, _fast_p
     assert entries == []
     assert dur == 0.0
     assert len(_FakeAsyncClient.instances) == 1
+
+
+@pytest.mark.asyncio
+async def test_every_succeeded_task_is_recorded_in_usage_ledger(
+    monkeypatch, _settings, _fast_poll
+):
+    """Both tasks of an empty-then-retried chunk are billed, so both count."""
+    recorded: list[tuple[str, str, float]] = []
+
+    async def _fake_record(kind, model, *, seconds=0.0, **kw):
+        recorded.append((kind, model, seconds))
+
+    monkeypatch.setattr(transcriber, "record_usage", _fake_record)
+    _script_clients(
+        monkeypatch,
+        [
+            [_poll_payload(0.0), _TRANSCRIPT_WITH_TEXT],
+            [_poll_payload(120.0), _TRANSCRIPT_WITH_TEXT],
+        ],
+    )
+    await transcriber._funasr_call("https://oss/audio.mp3")
+    assert recorded == [("asr", "fun-asr", 0.0), ("asr", "fun-asr", 120.0)]

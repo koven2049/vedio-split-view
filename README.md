@@ -17,7 +17,7 @@
 - **多用户**：管理员账号负责建用户、配额、清理存储；普通用户独立空间。
 - **API Token**：可在设置里签发长期 Token（请求头 `X-API-Key`），用脚本或外部工具调用接口：`GET /api/videos/ids` 拿全部 id → `/api/videos/{id}/meta` 拿轻量元数据 → `/api/videos/{id}` 拿完整详情，也能提交分析。接口文档在 `/api-docs`，免登录可看。
 - **飞书丢链接**：把 YouTube / B 站 / 小宇宙 / Apple Podcasts 链接发给飞书应用机器人，后台直接开分析，结果卡可点「查看全文」（免登录）。接入步骤见 [docs/feishu-bot.md](docs/feishu-bot.md)。
-- **用量追踪**：记录每次分析的 LLM / ASR Token 消耗，视频删除后统计仍保留。
+- **用量追踪**：每次 ASR 任务和 LLM 调用（分析、对话稿、思维导图、翻译、失败重试）都记一笔流水，资源库按模型汇总时长 / Token 并按单价估算费用；视频删除后流水仍保留。流水上线前的历史用 `backend/.venv/bin/python scripts/backfill_usage.py` 补一次（`--help` 看口径）。
 - **双语界面**：中文 / English 自由切换。
 
 ## 支持的平台
@@ -95,6 +95,7 @@ bash manage.sh deploy       # 同步代码（不含 data/、配置、密钥）
 | `network` | 下载 / 字幕需要代理，或 YouTube 需要登录态时 |
 | `feishu` | 飞书机器人收链即分析（凭证在 `config/feishu.yaml`，不要写进本文件） |
 | `app` (`port`, `frontend_port`) | 想改默认端口 8080 / 5180 时 |
+| `pricing` | 估算费用的单价（元）。百炼 ASR 模型已内置官方价；LLM 默认不估价（订阅制接口不按量计费），按量计费时再填 |
 
 完整字段和默认值见 `config/app.yaml.example`。
 

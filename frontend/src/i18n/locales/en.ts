@@ -119,14 +119,14 @@ const en: Record<TranslationKey, string> = {
   'library.public_label': 'Public',
   'library.private': 'Private',
   'library.by': 'by',
-  'library.totalUsage': 'Total usage:',
+  'library.totalUsage': 'Total usage',
   'library.makePublic': 'Click to share to public',
   'library.makePrivate': 'Click to make private',
   'library.deleteNamed': 'Delete {title}?',
   'library.deleteFailed': 'Delete failed: {message}',
-  'library.usageAsrPrefix': 'ASR ({model}):',
-  'library.usageLlmPrefix': 'LLM ({model}):',
-  'library.tokensUnit': 'tokens',
+  'library.usageHours': '{n} h',
+  'library.usageMinutes': '{n} min',
+  'library.usageTokens': '{n} tokens',
 
   // Video Detail Page
   'detail.back': 'Back',

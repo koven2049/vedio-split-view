@@ -26,7 +26,8 @@ from video_split.schemas import (
 from video_split.service.data_sync import EXPORTS_DIR, _export_filename
 from video_split.service.dialogue import derive_dialogue_view, format_dialogue
 from video_split.service.downloader import SubtitleEntry
-from video_split.service.video_service import accumulate_usage, merge_llm_usage
+from video_split.service import usage as usage_ledger
+from video_split.service.video_service import merge_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -148,33 +149,9 @@ async def usage_summary(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Aggregate ASR seconds and LLM tokens across all user videos, grouped by model."""
-    result = await db.execute(
-        select(Video.usage_json).where(Video.user_id == user.id, Video.usage_json != "")
-    )
-    asr_totals: dict[str, float] = {}
-    llm_totals: dict[str, dict[str, int]] = {}
-
-    for (raw,) in result.all():
-        try:
-            d = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        asr_model = d.get("asr_model", "")
-        if asr_model and d.get("asr_duration_seconds", 0) > 0:
-            asr_totals[asr_model] = asr_totals.get(asr_model, 0) + d["asr_duration_seconds"]
-        llm_model = d.get("llm_model", "")
-        if llm_model and d.get("llm_total_tokens", 0) > 0:
-            acc = llm_totals.setdefault(llm_model, {"prompt": 0, "completion": 0, "total": 0})
-            acc["prompt"] += d.get("llm_prompt_tokens", 0)
-            acc["completion"] += d.get("llm_completion_tokens", 0)
-            acc["total"] += d.get("llm_total_tokens", 0)
-
-    return {
-        "asr": [{"model": m, "total_seconds": round(s, 1)} for m, s in sorted(asr_totals.items())],
-        "llm": [{"model": m, "prompt_tokens": v["prompt"], "completion_tokens": v["completion"],
-                 "total_tokens": v["total"]} for m, v in sorted(llm_totals.items())],
-    }
+    """Cumulative ASR seconds / LLM tokens per model from the usage ledger,
+    with estimated CNY cost where the model has a configured price."""
+    return await usage_ledger.summarize(db, user)
 
 
 @router.get("/llm-logs", response_model=list[LLMLogOut])
@@ -492,7 +469,6 @@ async def generate_dialogue(
     video.dialogue_json = json.dumps(stored, ensure_ascii=False)
     if int(usage.get("llm_total_tokens") or 0):
         merge_llm_usage(video, usage)
-        await accumulate_usage(db, video.user_id, usage)
     await db.commit()
     view = derive_dialogue_view(stored, subtitles)
     return DialogueOut(video_id=video.id, **view)

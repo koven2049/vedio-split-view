@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -21,21 +21,106 @@ import { api } from '../lib/api';
 import { formatDuration, platformLabel, timeAgo, cn } from '../lib/utils';
 import { useAnalysisStore } from '../stores/analysisStore';
 import { useAuthStore } from '../stores/authStore';
-import { useT, type TranslationKey, type TFunction } from '../i18n';
+import { useLocale, useT, type TranslationKey, type TFunction } from '../i18n';
 
 interface AsrUsageSummary {
   model: string;
   total_seconds: number;
+  requests: number;
+  cost: number | null;
 }
 interface LlmUsageSummary {
   model: string;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  requests: number;
+  cost: number | null;
 }
 interface UsageSummary {
   asr: AsrUsageSummary[];
   llm: LlmUsageSummary[];
+  total_cost: number | null;
+}
+
+function formatCost(cost: number): string {
+  return cost < 0.01 ? '<¥0.01' : `¥${cost.toFixed(2)}`;
+}
+
+export function UsagePanel({ data }: { data: UsageSummary }) {
+  const t = useT();
+  const { locale } = useLocale();
+  const compact = new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  });
+  const hours = (seconds: number) =>
+    seconds < 3600
+      ? t('library.usageMinutes', { n: Math.max(1, Math.round(seconds / 60)) })
+      : t('library.usageHours', { n: (seconds / 3600).toFixed(1) });
+  const groups: {
+    label: string;
+    rows: { model: string; amount: string; cost: number | null }[];
+  }[] = [
+    {
+      label: 'ASR',
+      rows: data.asr.map((a) => ({ model: a.model, amount: hours(a.total_seconds), cost: a.cost })),
+    },
+    {
+      label: 'LLM',
+      rows: data.llm.map((l) => ({
+        model: l.model,
+        amount: t('library.usageTokens', { n: compact.format(l.total_tokens) }),
+        cost: l.cost,
+      })),
+    },
+  ].filter((g) => g.rows.length > 0);
+
+  return (
+    <div
+      className="px-4 py-3 rounded-xl text-xs space-y-2"
+      style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span
+          className="inline-flex items-center gap-2 font-medium"
+          style={{ color: 'var(--color-text)' }}
+        >
+          <BarChart3 size={14} className="opacity-50" aria-hidden />
+          {t('library.totalUsage')}
+        </span>
+        {data.total_cost !== null && (
+          <span className="font-medium tabular-nums" style={{ color: 'var(--color-text)' }}>
+            ≈ {formatCost(data.total_cost)}
+          </span>
+        )}
+      </div>
+      <div
+        className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] gap-x-4 gap-y-1 items-baseline"
+        style={{ color: 'var(--color-text-secondary)' }}
+      >
+        {groups.map((g) =>
+          g.rows.map((r, i) => (
+            <Fragment key={`${g.label}-${r.model}`}>
+              <span className="opacity-60">{i === 0 ? g.label : ''}</span>
+              <span className="truncate" title={r.model}>
+                {r.model}
+              </span>
+              <span
+                className="text-right tabular-nums font-medium"
+                style={{ color: 'var(--color-text)' }}
+              >
+                {r.amount}
+              </span>
+              <span className="text-right tabular-nums min-w-14">
+                {r.cost === null ? '' : formatCost(r.cost)}
+              </span>
+            </Fragment>
+          )),
+        )}
+      </div>
+    </div>
+  );
 }
 
 interface TagInfo {
@@ -280,43 +365,7 @@ export default function LibraryPage() {
       {activeTab === 'mine' &&
         usageQuery.data &&
         (usageQuery.data.asr.length > 0 || usageQuery.data.llm.length > 0) && (
-          <div
-            className="flex items-start gap-3 px-4 py-3 rounded-xl text-xs"
-            style={{
-              background: 'var(--color-bg-secondary)',
-              border: '1px solid var(--color-border)',
-            }}
-          >
-            <BarChart3 size={14} className="mt-0.5 shrink-0 opacity-50" />
-            <div
-              className="flex flex-wrap gap-x-5 gap-y-1"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              <span className="font-medium" style={{ color: 'var(--color-text)' }}>
-                {t('library.totalUsage')}
-              </span>
-              {usageQuery.data.asr.map((a) => (
-                <span key={`asr-${a.model}`} className="inline-flex items-center gap-1">
-                  <span className="opacity-60">
-                    {t('library.usageAsrPrefix', { model: a.model })}
-                  </span>
-                  <span className="font-medium tabular-nums">
-                    {Math.round(a.total_seconds).toLocaleString()}s
-                  </span>
-                </span>
-              ))}
-              {usageQuery.data.llm.map((l) => (
-                <span key={`llm-${l.model}`} className="inline-flex items-center gap-1">
-                  <span className="opacity-60">
-                    {t('library.usageLlmPrefix', { model: l.model })}
-                  </span>
-                  <span className="font-medium tabular-nums">
-                    {l.total_tokens.toLocaleString()} {t('library.tokensUnit')}
-                  </span>
-                </span>
-              ))}
-            </div>
-          </div>
+          <UsagePanel data={usageQuery.data} />
         )}
 
       {/* Tags filter bar */}

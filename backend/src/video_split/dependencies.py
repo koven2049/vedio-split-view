@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from video_split.database import get_db
 from video_split.models import ApiKey, User
+from video_split.service import usage as usage_ledger
 from video_split.service.auth_service import decode_token
 
 _bearer = HTTPBearer(auto_error=False)
@@ -41,6 +42,7 @@ async def get_current_user(
         user = await _resolve_api_key(x_api_key, db)
         if user is None:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API key")
+        usage_ledger.set_owner(user.id)
         return user
 
     if creds is None:
@@ -53,6 +55,9 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found or disabled")
+    # Bill LLM/ASR calls made while serving this request (and tasks it
+    # spawns) to this user.
+    usage_ledger.set_owner(user.id)
     return user
 
 

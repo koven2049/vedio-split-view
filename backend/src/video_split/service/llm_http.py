@@ -73,7 +73,11 @@ async def post_chat(
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(url, json=payload, headers=headers)
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+            from video_split.service.usage import record_llm_response
+
+            await record_llm_response(str(payload.get("model") or ""), data)
+            return data
         except httpx.HTTPStatusError as e:
             code = e.response.status_code
             err_code = _parse_error_code(e.response)

@@ -19,7 +19,7 @@ from sqlalchemy.orm import selectinload
 from video_split.config import get_settings
 from video_split.models import Video
 from video_split.service.llm_http import post_chat
-from video_split.service.video_service import accumulate_usage
+from video_split.service import usage as usage_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +245,7 @@ async def generate_mindmap(
         return
 
     bill_user_id = usage_user_id if usage_user_id is not None else video.user_id
+    usage_ledger.set_owner(bill_user_id)
 
     segs = sorted(video.segments, key=lambda s: s.segment_index)
     if not segs:
@@ -319,7 +320,5 @@ async def generate_mindmap(
 
     video.mindmap_json = json.dumps(mindmap_data, ensure_ascii=False)
     await db.commit()
-
-    await accumulate_usage(db, bill_user_id, usage_acc)
 
     yield {"stage": "complete", "progress": 100, "data": mindmap_data}

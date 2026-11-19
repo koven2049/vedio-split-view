@@ -16,6 +16,7 @@ import httpx
 
 from video_split.config import get_settings
 from video_split.service.downloader import SubtitleEntry
+from video_split.service.usage import record as record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -549,6 +550,7 @@ async def _whisper_transcribe_single(
         raise
 
     api_duration = float(result.get("duration", 0))
+    await record_usage("asr", settings.transcription.model, seconds=api_duration)
     entries: list[SubtitleEntry] = []
     for seg in result.get("segments", []):
         entries.append(
@@ -767,6 +769,13 @@ async def _funasr_task_once(
                 # check below handles it).
                 api_duration = float(usage.get("duration") or usage.get("seconds") or 0)
                 logger.info("[funasr] Task %s succeeded (%.1fs), billed_duration=%.1fs", task_id, elapsed, api_duration)
+                # Billed even when the result turns out empty and gets retried.
+                await record_usage(
+                    "asr", model, seconds=api_duration,
+                    prompt_tokens=int(usage.get("input_tokens") or 0),
+                    completion_tokens=int(usage.get("output_tokens") or 0),
+                    total_tokens=int(usage.get("total_tokens") or 0),
+                )
                 entries = await _parse_funasr_results(client, output)
                 # SUCCEEDED with nothing billable and nothing parsed is a sick
                 # result (truncated upload, decoder hiccup), not a transcript.
