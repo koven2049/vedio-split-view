@@ -27,7 +27,39 @@ def test_model_supports_diarization_prefixes():
     assert transcriber._model_supports_diarization("paraformer-v2")
     assert transcriber._model_supports_diarization("qwen-audio-3.0-asr-flash-filetrans")
     assert not transcriber._model_supports_diarization("qwen-audio-3.1-asr-flash-filetrans")
+    # qwen3 filetrans has no diarization parameter at all — transcripts carry
+    # no speaker_id, dialogue formatting falls back to LLM speaker guessing.
+    assert not transcriber._model_supports_diarization("qwen3-asr-flash-filetrans")
     assert not transcriber._model_supports_diarization("whisper-1")
+
+
+# ─── submit body: qwen3 dialect vs classic dialect ───
+
+
+def test_build_submit_body_qwen3_dialect():
+    body = transcriber._build_funasr_submit_body(
+        "qwen3-asr-flash-filetrans", "https://oss/chunk.mp3", ""
+    )
+    # singular file_url, no diarization param, no parameters key when no lang
+    assert body == {
+        "model": "qwen3-asr-flash-filetrans",
+        "input": {"file_url": "https://oss/chunk.mp3"},
+    }
+    body = transcriber._build_funasr_submit_body(
+        "qwen3-asr-flash-filetrans", "https://oss/chunk.mp3", "zh"
+    )
+    assert body["parameters"] == {"language": "zh"}
+    assert "diarization_enabled" not in body.get("parameters", {})
+
+
+def test_build_submit_body_classic_dialect():
+    body = transcriber._build_funasr_submit_body(
+        "qwen-audio-3.0-asr-flash-filetrans", "https://oss/chunk.mp3", "zh"
+    )
+    assert body["input"] == {"file_urls": ["https://oss/chunk.mp3"]}
+    assert body["parameters"] == {"language_hints": ["zh"], "diarization_enabled": True}
+    body = transcriber._build_funasr_submit_body("fun-asr", "https://oss/c.mp3", "")
+    assert body["parameters"] == {"diarization_enabled": True}
 
 
 def test_dashscope_routing_covers_qwen_filetrans(monkeypatch):
@@ -90,6 +122,41 @@ async def test_parse_funasr_results_captures_speaker_id():
     }
     entries = await transcriber._parse_funasr_results(_FakeClient(tr_payload), output)
     assert [(e.text, e.speaker) for e in entries] == [("你好", "0"), ("你好呀", "1")]
+
+
+@pytest.mark.asyncio
+async def test_parse_funasr_results_qwen3_single_result_shape():
+    """qwen3 filetrans: one output.result (singular), sentences without speaker_id."""
+    output = {
+        "result": {"transcription_url": "https://example.com/tr.json"},
+    }
+    tr_payload = {
+        "transcripts": [
+            {
+                "sentences": [
+                    {"begin_time": 0, "end_time": 2000, "text": "你好"},
+                    {"begin_time": 2100, "end_time": 4000, "text": "第二句"},
+                ]
+            }
+        ]
+    }
+    entries = await transcriber._parse_funasr_results(_FakeClient(tr_payload), output)
+    assert [(e.text, e.speaker) for e in entries] == [("你好", ""), ("第二句", "")]
+
+
+@pytest.mark.asyncio
+async def test_parse_funasr_results_skips_failed_subtask():
+    output = {
+        "results": [
+            {"subtask_status": "FAILED", "transcription_url": "https://example.com/x.json"},
+            {"subtask_status": "SUCCEEDED", "transcription_url": "https://example.com/tr.json"},
+        ]
+    }
+    tr_payload = {
+        "transcripts": [{"sentences": [{"begin_time": 0, "end_time": 1000, "text": "ok"}]}]
+    }
+    entries = await transcriber._parse_funasr_results(_FakeClient(tr_payload), output)
+    assert [(e.text, e.speaker) for e in entries] == [("ok", "")]
 
 
 # ─── dialogue: ASR labels take priority over the LLM ───

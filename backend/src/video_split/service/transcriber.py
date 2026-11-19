@@ -67,15 +67,30 @@ def _is_dashscope_funasr() -> bool:
 
 
 # Models whose async file-transcription API accepts diarization_enabled
-# (per DashScope docs: Fun-ASR / Paraformer / Qwen-Audio-3.x-ASR-Flash-Filetrans).
+# (per DashScope docs: Fun-ASR / Paraformer / Qwen-Audio-3.0-ASR-Flash-Filetrans).
 # Matched by prefix; note qwen-audio-3.1 renamed the param to
 # speaker_diarization_enabled — add a branch here before switching to it.
+# qwen3-asr-flash-filetrans has NO diarization parameter at all (its
+# transcripts carry no speaker_id), so the dialogue formatter falls back to
+# LLM speaker guessing for it.
 _DIARIZATION_MODELS = ("fun-asr", "paraformer", "qwen-audio-3.0-asr-flash-filetrans")
 
 
 def _model_supports_diarization(model: str) -> bool:
     model = model.lower()
     return any(model.startswith(m) for m in _DIARIZATION_MODELS)
+
+
+# qwen3-asr filetrans models speak a different request dialect on the same
+# async endpoint (per DashScope docs): input.file_url (singular string) and
+# parameters.language (singular string) — and usage reports audio length as
+# `seconds` instead of `duration`.
+_QWEN3_FILETRANS_PREFIXES = ("qwen3-asr-flash-filetrans",)
+
+
+def _is_qwen3_filetrans(model: str) -> bool:
+    model = model.lower()
+    return any(model.startswith(p) for p in _QWEN3_FILETRANS_PREFIXES)
 
 
 def _stderr_tail(stderr: str, *, max_lines: int = 6) -> str:
@@ -586,6 +601,34 @@ class _EmptyASRResult(RuntimeError):
     """
 
 
+def _build_funasr_submit_body(model: str, audio_url: str, lang: str) -> dict:
+    """Build the DashScope async file-transcription submit body for one URL.
+
+    Two request dialects share the endpoint: the classic one
+    (input.file_urls list, language_hints, diarization_enabled) and the
+    qwen3-asr one (input.file_url singular, parameters.language singular,
+    no diarization parameter).
+    """
+    params: dict = {}
+    if _is_qwen3_filetrans(model):
+        if lang:
+            params["language"] = lang
+        body = {"model": model, "input": {"file_url": audio_url}}
+    else:
+        if lang:
+            params["language_hints"] = [lang]
+        if _model_supports_diarization(model):
+            # Native speaker labels land in each sentence's speaker_id — the
+            # dialogue formatter uses them instead of guessing speakers via LLM.
+            # Recommended audio length ≤2h when enabled; longer tasks may still
+            # succeed but with lower label quality.
+            params["diarization_enabled"] = True
+        body = {"model": model, "input": {"file_urls": [audio_url]}}
+    if params:
+        body["parameters"] = params
+    return body
+
+
 async def _funasr_call(
     audio_url: str,
     *,
@@ -627,23 +670,7 @@ async def _funasr_task_once(
         "Content-Type": "application/json",
         "X-DashScope-Async": "enable",
     }
-    lang = settings.transcription.language
-    params: dict = {}
-    if lang:
-        params["language_hints"] = [lang]
-    if _model_supports_diarization(model):
-        # Native speaker labels land in each sentence's speaker_id — the
-        # dialogue formatter uses them instead of guessing speakers via LLM.
-        # Recommended audio length ≤2h when enabled; longer tasks may still
-        # succeed but with lower label quality.
-        params["diarization_enabled"] = True
-
-    body: dict = {
-        "model": model,
-        "input": {"file_urls": [audio_url]},
-    }
-    if params:
-        body["parameters"] = params
+    body = _build_funasr_submit_body(model, audio_url, settings.transcription.language)
 
     logger.info("[funasr] Submitting task: model=%s", model)
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
@@ -685,7 +712,10 @@ async def _funasr_task_once(
 
             if status == "SUCCEEDED":
                 usage = full_resp.get("usage", {})
-                api_duration = float(usage.get("duration", 0))
+                # Classic models report `duration`; qwen3-asr filetrans
+                # reports `seconds`. Treat missing-both as 0 (empty-result
+                # check below handles it).
+                api_duration = float(usage.get("duration") or usage.get("seconds") or 0)
                 logger.info("[funasr] Task %s succeeded (%.1fs), billed_duration=%.1fs", task_id, elapsed, api_duration)
                 entries = await _parse_funasr_results(client, output)
                 # SUCCEEDED with nothing billable and nothing parsed is a sick
@@ -717,9 +747,17 @@ async def _parse_funasr_results(
     client: httpx.AsyncClient, output: dict
 ) -> list[SubtitleEntry]:
     entries: list[SubtitleEntry] = []
-    for result in output.get("results", []):
+    # Classic models return output.results[] (one per file, each with its own
+    # subtask_status); qwen3-asr filetrans returns a single output.result
+    # (task-level status already checked by the caller, no subtask field).
+    result_docs: list[dict] = list(output.get("results") or [])
+    single = output.get("result") or {}
+    if single.get("transcription_url"):
+        result_docs.append(single)
+    for result in result_docs:
         tr_url = result.get("transcription_url")
-        if not tr_url or result.get("subtask_status") != "SUCCEEDED":
+        status = result.get("subtask_status", "SUCCEEDED")
+        if not tr_url or status != "SUCCEEDED":
             continue
         tr_resp = await client.get(tr_url)
         tr_resp.raise_for_status()
