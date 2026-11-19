@@ -23,7 +23,7 @@ from video_split.service.feishu import (
     handle_card_action,
     handle_message_event,
     load_feishu_credentials,
-    notify_complete_ok,
+    notify_complete,
     pick_supported_url,
     remember_origin,
     reset_feishu_runtime_state,
@@ -542,16 +542,41 @@ async def test_follow_task_confirm_then_complete(enable_feishu, monkeypatch):
     assert replies == ["需要确认", "分析完成"]
 
 
-async def test_notify_ok_web_dms_whitelist(enable_feishu, monkeypatch):
-    sent: list[tuple[str, str]] = []
+def _capture_cards(monkeypatch) -> list[tuple[str, str, dict]]:
+    sent: list[tuple[str, str, dict]] = []
 
-    async def fake_send(_creds, receive_id, text, *, receive_id_type="open_id"):
-        sent.append((receive_id, text))
+    async def fake_send_card(_creds, receive_id, card, *, receive_id_type="chat_id"):
+        sent.append((receive_id, receive_id_type, card))
 
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.send_text", fake_send)
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.send_card", fake_send_card)
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.send_text", AsyncMock())
     monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_text", AsyncMock())
-    await notify_complete_ok(201)
-    assert sent == [(ALLOWED_OPEN_ID, "ok")]
+    return sent
+
+
+async def test_notify_web_dms_result_card(enable_feishu, monkeypatch):
+    """Web-started analyses get the same result card as Feishu-started ones
+    (title + summary + 查看全文 share link), not a bare 'ok'."""
+    sent = _capture_cards(monkeypatch)
+
+    async def fake_blurb(video_id):
+        assert video_id == 7
+        return "标题七", "摘要七"
+
+    monkeypatch.setattr("video_split.service.feishu._load_video_blurb", fake_blurb)
+    await notify_complete(201, 7)
+
+    assert len(sent) == 1
+    receive_id, id_type, card = sent[0]
+    assert (receive_id, id_type) == (ALLOWED_OPEN_ID, "open_id")
+    assert card == card_result("标题七", "摘要七", result_note_url(7))
+    assert card["header"]["title"]["content"] == "分析完成"
+
+
+async def test_notify_web_without_video_id_still_sends_card(enable_feishu, monkeypatch):
+    sent = _capture_cards(monkeypatch)
+    await notify_complete(204)
+    assert [c[2] for c in sent] == [card_result("", "", "")]
 
 
 async def test_notify_ok_feishu_replies_thread(enable_feishu, monkeypatch):
@@ -564,21 +589,22 @@ async def test_notify_ok_feishu_replies_thread(enable_feishu, monkeypatch):
     monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_text", fake_reply)
     monkeypatch.setattr("video_split.service.feishu.feishu_client.send_text", send)
     remember_origin(202, "om_src", "oc_src", ALLOWED_OPEN_ID)
-    await notify_complete_ok(202)
+    await notify_complete(202, 5)
     assert replies == [("om_src", "ok")]
     send.assert_not_awaited()
 
 
-async def test_runner_complete_notifies_ok(enable_feishu, monkeypatch):
+async def test_runner_complete_notifies_result_card(enable_feishu, monkeypatch):
     from video_split.schemas import ProgressEvent
 
-    sent: list[tuple[str, str]] = []
+    sent = _capture_cards(monkeypatch)
+    seen_ids: list[int] = []
 
-    async def fake_send(_creds, receive_id, text, *, receive_id_type="open_id"):
-        sent.append((receive_id, text))
+    async def fake_blurb(video_id):
+        seen_ids.append(video_id)
+        return "t", "s"
 
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.send_text", fake_send)
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_text", AsyncMock())
+    monkeypatch.setattr("video_split.service.feishu._load_video_blurb", fake_blurb)
 
     async def gen(_cancel, _confirm):
         yield ProgressEvent(stage="complete", progress=100, message="done", detail={"video_id": 1})
@@ -591,7 +617,8 @@ async def test_runner_complete_notifies_ok(enable_feishu, monkeypatch):
             await asyncio.sleep(0.02)
     finally:
         runner.remove(203)
-    assert sent == [(ALLOWED_OPEN_ID, "ok")]
+    assert seen_ids == [1], "video_id must flow from the complete event to the card"
+    assert [c[0] for c in sent] == [ALLOWED_OPEN_ID]
 
 
 def test_result_card_has_note_button(enable_feishu):

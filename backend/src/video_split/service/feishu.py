@@ -525,15 +525,22 @@ class FeishuClient:
             if resp.status_code >= 400:
                 logger.error("[feishu] reply failed status=%s", resp.status_code)
 
-    async def send_card(self, creds: FeishuCredentials, chat_id: str, card: dict) -> None:
+    async def send_card(
+        self,
+        creds: FeishuCredentials,
+        receive_id: str,
+        card: dict,
+        *,
+        receive_id_type: str = "chat_id",
+    ) -> None:
         token = await self._tenant_token(creds)
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 _FEISHU_SEND_URL,
                 headers={"Authorization": f"Bearer {token}"},
-                params={"receive_id_type": "chat_id"},
+                params={"receive_id_type": receive_id_type},
                 json={
-                    "receive_id": chat_id,
+                    "receive_id": receive_id,
                     "msg_type": "interactive",
                     "content": json.dumps(card, ensure_ascii=False),
                 },
@@ -583,8 +590,21 @@ class FeishuClient:
 feishu_client = FeishuClient()
 
 
-async def notify_complete_ok(task_id: int) -> None:
-    """Reply/send plain 'ok' after any analysis completes (web or Feishu)."""
+async def _result_card_for(video_id: int | None) -> dict:
+    if not video_id:
+        return card_result("", "", "")
+    title, summary = await _load_video_blurb(video_id)
+    return card_result(title, summary, result_note_url(video_id))
+
+
+async def notify_complete(task_id: int, video_id: int | None = None) -> None:
+    """Tell Feishu an analysis finished.
+
+    Feishu-started tasks already get the result card from ``follow_task``;
+    here they only get the extra 'ok' in the same thread. Web-started tasks
+    have no thread, so every whitelisted user gets the same result card by
+    DM (title, summary, 查看全文 → login-free share page).
+    """
     settings = get_settings()
     if not settings.feishu.enabled:
         return
@@ -596,11 +616,21 @@ async def notify_complete_ok(task_id: int) -> None:
         if origin and origin[0]:
             await feishu_client.reply_text(creds, origin[0], "ok")
             return
+        card = await _result_card_for(video_id)
         for open_id in settings.feishu.allowed_open_ids:
             if open_id:
-                await feishu_client.send_text(creds, open_id, "ok")
+                await feishu_client.send_card(creds, open_id, card, receive_id_type="open_id")
     except Exception:
-        logger.exception("[feishu] failed to send ok")
+        logger.exception("[feishu] failed to send completion notice")
+
+
+def _entry_video_id(entry: dict[str, Any]) -> int | None:
+    try:
+        data = json.loads(entry.get("data") or "{}")
+        detail = data.get("detail") if isinstance(data, dict) else None
+        return int(detail["video_id"]) if isinstance(detail, dict) and detail.get("video_id") else None
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
 
 
 def _on_runner_event(rt: Any, entry: dict[str, Any]) -> None:
@@ -610,7 +640,7 @@ def _on_runner_event(rt: Any, entry: dict[str, Any]) -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(notify_complete_ok(rt.task_id))
+    loop.create_task(notify_complete(rt.task_id, _entry_video_id(entry)))
 
 
 runner.add_event_listener(_on_runner_event)
