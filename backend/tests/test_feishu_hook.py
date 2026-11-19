@@ -13,6 +13,7 @@ from httpx import AsyncClient
 from video_split.config import get_settings, set_config_path
 from video_split.secure import is_encrypted
 from video_split.service.feishu import (
+    card_error,
     card_result,
     result_note_url,
     compute_signature,
@@ -23,7 +24,7 @@ from video_split.service.feishu import (
     handle_card_action,
     handle_message_event,
     load_feishu_credentials,
-    notify_complete,
+    notify_finished,
     pick_supported_url,
     remember_origin,
     reset_feishu_runtime_state,
@@ -511,8 +512,6 @@ async def test_follow_task_confirm_then_complete(enable_feishu, monkeypatch):
         replies.append(card["header"]["title"]["content"])
 
     monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_text", AsyncMock())
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.send_text", AsyncMock())
     monkeypatch.setattr(
         "video_split.service.feishu._load_video_blurb",
         AsyncMock(return_value=("视频标题", "一句摘要")),
@@ -549,9 +548,14 @@ def _capture_cards(monkeypatch) -> list[tuple[str, str, dict]]:
         sent.append((receive_id, receive_id_type, card))
 
     monkeypatch.setattr("video_split.service.feishu.feishu_client.send_card", fake_send_card)
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.send_text", AsyncMock())
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_text", AsyncMock())
     return sent
+
+
+def _entry(stage: str, **kw) -> dict:
+    from video_split.schemas import ProgressEvent
+
+    ev = ProgressEvent(stage=stage, progress=100 if stage == "complete" else 0, **kw)
+    return {"event": stage, "data": ev.model_dump_json()}
 
 
 async def test_notify_web_dms_result_card(enable_feishu, monkeypatch):
@@ -564,7 +568,7 @@ async def test_notify_web_dms_result_card(enable_feishu, monkeypatch):
         return "标题七", "摘要七"
 
     monkeypatch.setattr("video_split.service.feishu._load_video_blurb", fake_blurb)
-    await notify_complete(201, 7)
+    await notify_finished(201, _entry("complete", message="done", detail={"video_id": 7}))
 
     assert len(sent) == 1
     receive_id, id_type, card = sent[0]
@@ -575,23 +579,28 @@ async def test_notify_web_dms_result_card(enable_feishu, monkeypatch):
 
 async def test_notify_web_without_video_id_still_sends_card(enable_feishu, monkeypatch):
     sent = _capture_cards(monkeypatch)
-    await notify_complete(204)
+    await notify_finished(204, _entry("complete", message="done"))
     assert [c[2] for c in sent] == [card_result("", "", "")]
 
 
-async def test_notify_ok_feishu_replies_thread(enable_feishu, monkeypatch):
-    replies: list[tuple[str, str]] = []
+async def test_notify_web_error_dms_error_card_with_link(enable_feishu, monkeypatch):
+    sent = _capture_cards(monkeypatch)
+    url = "https://www.xiaoyuzhoufm.com/episode/abc"
+    await notify_finished(205, _entry("error", message="下载失败"), url)
+    assert [(c[0], c[1]) for c in sent] == [(ALLOWED_OPEN_ID, "open_id")]
+    card = sent[0][2]
+    assert card == card_error("下载失败", url)
+    assert url in card["elements"][0]["text"]["content"]
 
-    async def fake_reply(_creds, message_id, text):
-        replies.append((message_id, text))
 
-    send = AsyncMock()
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_text", fake_reply)
-    monkeypatch.setattr("video_split.service.feishu.feishu_client.send_text", send)
+async def test_notify_feishu_origin_sends_nothing_extra(enable_feishu, monkeypatch):
+    """follow_task already replies in the thread — no DM and no trailing 'ok'."""
+    sent = _capture_cards(monkeypatch)
     remember_origin(202, "om_src", "oc_src", ALLOWED_OPEN_ID)
-    await notify_complete(202, 5)
-    assert replies == [("om_src", "ok")]
-    send.assert_not_awaited()
+    await notify_finished(202, _entry("complete", message="done", detail={"video_id": 5}))
+    remember_origin(206, "om_src2", "oc_src", ALLOWED_OPEN_ID)
+    await notify_finished(206, _entry("error", message="boom"))
+    assert sent == []
 
 
 async def test_runner_complete_notifies_result_card(enable_feishu, monkeypatch):
@@ -619,6 +628,28 @@ async def test_runner_complete_notifies_result_card(enable_feishu, monkeypatch):
         runner.remove(203)
     assert seen_ids == [1], "video_id must flow from the complete event to the card"
     assert [c[0] for c in sent] == [ALLOWED_OPEN_ID]
+
+
+async def test_runner_failure_dms_error_card(enable_feishu, monkeypatch):
+    sent = _capture_cards(monkeypatch)
+
+    async def gen(_cancel, _confirm):
+        raise RuntimeError("音频下载失败")
+        yield  # pragma: no cover
+
+    url = "https://youtu.be/abcdefghijk"
+    runner.start(207, 1, "youtube", url, lambda c, k: gen(c, k))
+    try:
+        for _ in range(20):
+            if sent:
+                break
+            await asyncio.sleep(0.02)
+    finally:
+        runner.remove(207)
+    assert len(sent) == 1
+    card = sent[0][2]
+    assert card["header"]["title"]["content"] == "分析失败"
+    assert url in card["elements"][0]["text"]["content"]
 
 
 def test_result_card_has_note_button(enable_feishu):

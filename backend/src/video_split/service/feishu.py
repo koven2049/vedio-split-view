@@ -398,8 +398,11 @@ def card_unauthorized() -> dict:
     return _md_card("未授权", "你不在白名单里，无法触发分析。", color="red")
 
 
-def card_error(message: str) -> dict:
-    return _md_card("分析失败", message or "未知错误", color="red")
+def card_error(message: str, url: str = "") -> dict:
+    body = message or "未知错误"
+    if url:
+        body += f"\n{url}"
+    return _md_card("分析失败", body, color="red")
 
 
 def card_result(title: str, summary: str, note_url: str) -> dict:
@@ -548,44 +551,6 @@ class FeishuClient:
             if resp.status_code >= 400:
                 logger.error("[feishu] send failed status=%s", resp.status_code)
 
-    async def reply_text(self, creds: FeishuCredentials, message_id: str, text: str) -> None:
-        token = await self._tenant_token(creds)
-        url = _FEISHU_REPLY_URL.format(message_id=message_id)
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {token}"},
-                json={
-                    "content": json.dumps({"text": text}, ensure_ascii=False),
-                    "msg_type": "text",
-                },
-            )
-            if resp.status_code >= 400:
-                logger.error("[feishu] reply text failed status=%s", resp.status_code)
-
-    async def send_text(
-        self,
-        creds: FeishuCredentials,
-        receive_id: str,
-        text: str,
-        *,
-        receive_id_type: str = "open_id",
-    ) -> None:
-        token = await self._tenant_token(creds)
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                _FEISHU_SEND_URL,
-                headers={"Authorization": f"Bearer {token}"},
-                params={"receive_id_type": receive_id_type},
-                json={
-                    "receive_id": receive_id,
-                    "msg_type": "text",
-                    "content": json.dumps({"text": text}, ensure_ascii=False),
-                },
-            )
-            if resp.status_code >= 400:
-                logger.error("[feishu] send text failed status=%s", resp.status_code)
-
 
 feishu_client = FeishuClient()
 
@@ -597,50 +562,49 @@ async def _result_card_for(video_id: int | None) -> dict:
     return card_result(title, summary, result_note_url(video_id))
 
 
-async def notify_complete(task_id: int, video_id: int | None = None) -> None:
-    """Tell Feishu an analysis finished.
+async def notify_finished(task_id: int, entry: dict[str, Any], url: str = "") -> None:
+    """DM the whitelist when a web-started analysis ends.
 
-    Feishu-started tasks already get the result card from ``follow_task``;
-    here they only get the extra 'ok' in the same thread. Web-started tasks
-    have no thread, so every whitelisted user gets the same result card by
-    DM (title, summary, 查看全文 → login-free share page).
+    Feishu-started tasks are skipped: ``follow_task`` already replies in their
+    thread with the result / error card. Web-started tasks have no thread, so
+    every whitelisted user gets the same card by DM — the result card on
+    success (title, summary, 查看全文 → login-free share page), the error card
+    with the link on failure.
     """
     settings = get_settings()
     if not settings.feishu.enabled:
         return
+    if _origins.pop(task_id, None) is not None:
+        return
     creds = load_feishu_credentials()
     if creds is None:
         return
-    origin = _origins.pop(task_id, None)
     try:
-        if origin and origin[0]:
-            await feishu_client.reply_text(creds, origin[0], "ok")
-            return
-        card = await _result_card_for(video_id)
+        data = json.loads(entry.get("data") or "{}")
+    except json.JSONDecodeError:
+        data = {}
+    detail = data.get("detail") if isinstance(data.get("detail"), dict) else {}
+    try:
+        if entry.get("event") == "complete":
+            video_id = detail.get("video_id")
+            card = await _result_card_for(int(video_id) if video_id else None)
+        else:
+            card = card_error(str(data.get("message") or "分析失败"), url)
         for open_id in settings.feishu.allowed_open_ids:
             if open_id:
                 await feishu_client.send_card(creds, open_id, card, receive_id_type="open_id")
     except Exception:
-        logger.exception("[feishu] failed to send completion notice")
-
-
-def _entry_video_id(entry: dict[str, Any]) -> int | None:
-    try:
-        data = json.loads(entry.get("data") or "{}")
-        detail = data.get("detail") if isinstance(data, dict) else None
-        return int(detail["video_id"]) if isinstance(detail, dict) and detail.get("video_id") else None
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return None
+        logger.exception("[feishu] failed to send finish notice")
 
 
 def _on_runner_event(rt: Any, entry: dict[str, Any]) -> None:
-    if entry.get("event") != "complete":
+    if entry.get("event") not in {"complete", "error"}:
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(notify_complete(rt.task_id, _entry_video_id(entry)))
+    loop.create_task(notify_finished(rt.task_id, entry, rt.url))
 
 
 runner.add_event_listener(_on_runner_event)
@@ -872,9 +836,11 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
         await _reply(creds, message_id, chat_id, card_error(str(e.detail)))
         return
 
-    await _reply(creds, message_id, chat_id, card_started(url, started.get("platform") or platform))
     task_id = int(started["task_id"])
+    # Register before the first await: the task is already running, and a
+    # fast failure must not be mistaken for a web-started task (double card).
     remember_origin(task_id, message_id, chat_id, open_id)
+    await _reply(creds, message_id, chat_id, card_started(url, started.get("platform") or platform))
     asyncio.create_task(follow_task(task_id, creds, message_id, chat_id))
 
 
