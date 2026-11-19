@@ -34,7 +34,13 @@ test_transcribe.py
 .mirror_state
 
 # ── sensitive config (never overwrite remote secrets) ────────────────────────
-# exclude all config except examples
+# Deny by default: only the examples and build.cfg (remote rebuild reads it)
+# are synced. Anything else in the remote config/ — secrets, KEK, the deploy
+# stamp, operator backups like app.yaml.bak-* — is neither overwritten nor
+# deleted by --delete. First matching rule wins, so keep these three first.
++ config/*.example
++ config/build.cfg
+- config/*
 config/app.yaml
 config/deploy.cfg
 config/certs/
