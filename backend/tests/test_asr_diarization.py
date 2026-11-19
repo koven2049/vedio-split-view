@@ -26,7 +26,7 @@ def test_model_supports_diarization_prefixes():
     assert transcriber._model_supports_diarization("fun-asr-flash-2026-06-15")
     assert transcriber._model_supports_diarization("paraformer-v2")
     assert transcriber._model_supports_diarization("qwen-audio-3.0-asr-flash-filetrans")
-    assert not transcriber._model_supports_diarization("qwen-audio-3.1-asr-flash-filetrans")
+    assert transcriber._model_supports_diarization("qwen-audio-3.1-asr-flash-filetrans")
     # qwen3 filetrans has no diarization parameter at all — transcripts carry
     # no speaker_id, dialogue formatting falls back to LLM speaker guessing.
     assert not transcriber._model_supports_diarization("qwen3-asr-flash-filetrans")
@@ -60,6 +60,16 @@ def test_build_submit_body_classic_dialect():
     assert body["parameters"] == {"language_hints": ["zh"], "diarization_enabled": True}
     body = transcriber._build_funasr_submit_body("fun-asr", "https://oss/c.mp3", "")
     assert body["parameters"] == {"diarization_enabled": True}
+    # qwen-audio-3.1 filetrans keeps the classic spelling (verified live);
+    # speaker_diarization_enabled belongs to the synchronous 3.1 model only.
+    body = transcriber._build_funasr_submit_body(
+        "qwen-audio-3.1-asr-flash-filetrans", "https://oss/c.mp3", ""
+    )
+    assert body == {
+        "model": "qwen-audio-3.1-asr-flash-filetrans",
+        "input": {"file_urls": ["https://oss/c.mp3"]},
+        "parameters": {"diarization_enabled": True},
+    }
 
 
 def test_dashscope_routing_covers_qwen_filetrans(monkeypatch):
@@ -239,6 +249,121 @@ def test_split_reencodes_mono_mp3_for_diarization(monkeypatch, tmp_path):
     assert cmd[cmd.index("-ac") + 1] == "1", "diarization chunks must be mono"
     assert "libmp3lame" in cmd, "stream copy yields no speaker_id — must re-encode"
     assert all(c.suffix == ".mp3" for c in chunks)
+
+
+def _fake_settings(monkeypatch, model: str, chunk: int = 300):
+    class _Transcription:
+        chunk_duration_seconds = chunk
+
+    _Transcription.model = model
+
+    class _Settings:
+        transcription = _Transcription()
+
+    monkeypatch.setattr(transcriber, "get_settings", lambda: _Settings())
+
+
+def test_chunk_seconds_diarization_uses_whole_episode(monkeypatch):
+    _fake_settings(monkeypatch, "qwen-audio-3.1-asr-flash-filetrans")
+    assert transcriber._chunk_seconds() == transcriber.DIARIZATION_CHUNK_SECONDS
+    _fake_settings(monkeypatch, "qwen3-asr-flash-filetrans")
+    assert transcriber._chunk_seconds() == 300
+
+
+def test_split_short_audio_still_reencodes_mono_for_diarization(monkeypatch, tmp_path):
+    """Audio shorter than one chunk must not be sent as-is (stereo AAC →
+    no speaker_id): diarization models always get one mono mp3 chunk."""
+    audio = tmp_path / "audio.m4a"
+    audio.write_bytes(b"x" * 2048)
+    _fake_settings(monkeypatch, "qwen-audio-3.1-asr-flash-filetrans")
+    monkeypatch.setattr(transcriber, "get_audio_duration", lambda p: 4415.0)
+    monkeypatch.setattr(transcriber, "probe_audio_codec", lambda p: "aac")
+    captured: dict = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        (audio.parent / "chunks" / "chunk_000.mp3").write_bytes(b"y" * 2048)
+        return transcriber.subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(transcriber.subprocess, "run", _fake_run)
+    chunks = transcriber.split_audio(audio)
+
+    assert chunks != [audio]
+    assert [c.name for c in chunks] == ["chunk_000.mp3"]
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-ac") + 1] == "1"
+    assert cmd[cmd.index("-segment_time") + 1] == str(transcriber.DIARIZATION_CHUNK_SECONDS)
+
+
+def test_split_short_audio_unchanged_without_diarization(monkeypatch, tmp_path):
+    audio = tmp_path / "audio.m4a"
+    audio.write_bytes(b"x" * 2048)
+    _fake_settings(monkeypatch, "qwen3-asr-flash-filetrans")
+    monkeypatch.setattr(transcriber, "get_audio_duration", lambda p: 200.0)
+    assert transcriber.split_audio(audio) == [audio]
+
+
+@pytest.mark.asyncio
+async def test_speakers_namespaced_per_chunk(monkeypatch, tmp_path):
+    """speaker_id restarts at 0 in every ASR task — chunk 1's "0" is not
+    chunk 0's "0", so labels must stay distinct after merging."""
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"x")
+    chunks = [tmp_path / "chunk_000.mp3", tmp_path / "chunk_001.mp3"]
+    for c in chunks:
+        c.write_bytes(b"y")
+    _fake_settings(monkeypatch, "qwen-audio-3.1-asr-flash-filetrans")
+    monkeypatch.setattr(transcriber, "split_audio", lambda p, **kw: chunks)
+
+    async def _fake_chunk(path, **kwargs):
+        return [
+            SubtitleEntry(start=1.0, duration=1.0, text="a", speaker="0"),
+            SubtitleEntry(start=2.0, duration=1.0, text="b", speaker="1"),
+        ], 10.0
+
+    monkeypatch.setattr(transcriber, "transcribe_single_chunk", _fake_chunk)
+    entries, _ = await transcriber.transcribe_audio(audio)
+
+    assert [e.speaker for e in entries] == ["0:0", "0:1", "1:0", "1:1"]
+    # offsets follow the diarization chunk length, not config's 300s
+    assert entries[2].start == pytest.approx(transcriber.DIARIZATION_CHUNK_SECONDS + 1.0)
+
+
+@pytest.mark.asyncio
+async def test_single_chunk_keeps_raw_speaker_ids(monkeypatch, tmp_path):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"x")
+    chunk = tmp_path / "chunk_000.mp3"
+    chunk.write_bytes(b"y")
+    _fake_settings(monkeypatch, "qwen-audio-3.1-asr-flash-filetrans")
+    monkeypatch.setattr(transcriber, "split_audio", lambda p, **kw: [chunk])
+
+    async def _fake_chunk(path, **kwargs):
+        return [SubtitleEntry(start=1.0, duration=1.0, text="a", speaker="2")], 10.0
+
+    monkeypatch.setattr(transcriber, "transcribe_single_chunk", _fake_chunk)
+    entries, _ = await transcriber.transcribe_audio(audio)
+    assert [e.speaker for e in entries] == ["2"]
+    assert entries[0].start == pytest.approx(1.0)
+
+
+def test_transcript_cache_keeps_speaker_and_checks_chunk_size(tmp_path):
+    chunk = tmp_path / "chunk_000.mp3"
+    chunk.write_bytes(b"y" * 100)
+    entries = [SubtitleEntry(start=1.0, duration=2.0, text="hi", speaker="1")]
+    transcriber._save_transcript_cache(chunk, entries)
+
+    assert transcriber._load_cached_transcript(chunk) == entries
+    # a re-split with another chunk length produces a different file
+    chunk.write_bytes(b"y" * 5000)
+    assert transcriber._load_cached_transcript(chunk) is None
+
+
+def test_legacy_list_cache_is_ignored(tmp_path):
+    chunk = tmp_path / "chunk_000.mp3"
+    chunk.write_bytes(b"y")
+    transcriber._transcript_cache_path(chunk).write_text('[{"start": 0, "duration": 1, "text": "x"}]')
+    assert transcriber._load_cached_transcript(chunk) is None
 
 
 @pytest.mark.asyncio

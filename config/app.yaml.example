@@ -24,7 +24,9 @@ transcription:
 # Optional: uncomment when using Aliyun Fun-ASR instead of Whisper.
 # transcription:
 #   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-#   model: "qwen-audio-3.0-asr-flash-filetrans"
+#   # Native speaker diarization, verbatim transcript; episodes ≤2h go to ASR
+#   # as one mono task (chunk_duration_seconds is ignored for this model).
+#   model: "qwen-audio-3.1-asr-flash-filetrans"
 #   api_key: ""
 #
 # oss:

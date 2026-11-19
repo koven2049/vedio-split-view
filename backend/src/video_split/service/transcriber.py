@@ -67,18 +67,38 @@ def _is_dashscope_funasr() -> bool:
 
 
 # Models whose async file-transcription API accepts diarization_enabled
-# (per DashScope docs: Fun-ASR / Paraformer / Qwen-Audio-3.0-ASR-Flash-Filetrans).
-# Matched by prefix; note qwen-audio-3.1 renamed the param to
-# speaker_diarization_enabled — add a branch here before switching to it.
+# (per DashScope docs: Fun-ASR / Paraformer / Qwen-Audio-3.x-ASR-Flash-Filetrans).
+# Matched by prefix. Only the synchronous qwen-audio-3.1-asr-flash spells it
+# speaker_diarization_enabled; the -filetrans variants keep diarization_enabled
+# (verified live on qwen-audio-3.1-asr-flash-filetrans, 2026-11-19).
 # qwen3-asr-flash-filetrans has NO diarization parameter at all (its
 # transcripts carry no speaker_id), so the dialogue formatter falls back to
 # LLM speaker guessing for it.
-_DIARIZATION_MODELS = ("fun-asr", "paraformer", "qwen-audio-3.0-asr-flash-filetrans")
+_DIARIZATION_MODELS = (
+    "fun-asr",
+    "paraformer",
+    "qwen-audio-3.0-asr-flash-filetrans",
+    "qwen-audio-3.1-asr-flash-filetrans",
+)
+
+# speaker_id is numbered per ASR task, so labels from two chunks never refer
+# to the same people. Diarization models therefore transcribe each episode in
+# as few tasks as possible: one chunk up to the documented 2h diarization
+# limit instead of the parallel-friendly config.chunk_duration_seconds.
+DIARIZATION_CHUNK_SECONDS = 7200
 
 
 def _model_supports_diarization(model: str) -> bool:
     model = model.lower()
     return any(model.startswith(m) for m in _DIARIZATION_MODELS)
+
+
+def _chunk_seconds() -> int:
+    """Chunk length used for both splitting and timeline offsets."""
+    settings = get_settings()
+    if _model_supports_diarization(settings.transcription.model):
+        return DIARIZATION_CHUNK_SECONDS
+    return settings.transcription.chunk_duration_seconds
 
 
 # qwen3-asr filetrans models speak a different request dialect on the same
@@ -184,8 +204,12 @@ MIN_TAIL_SECONDS = 30.0
 def split_audio(audio_path: Path, *, chunk_seconds: int | None = None) -> list[Path]:
     """Split audio into time-based chunks.
 
-    If chunk_seconds is None, reads from config.transcription.chunk_duration_seconds.
-    If the audio is shorter than one chunk, returns [audio_path] unchanged.
+    If chunk_seconds is None, uses ``_chunk_seconds()`` (config value, or
+    ``DIARIZATION_CHUNK_SECONDS`` for diarization models).
+    If the audio is shorter than one chunk, returns [audio_path] unchanged —
+    except for diarization models, whose input is always re-encoded to a
+    single mono mp3 chunk (diarization needs mono; stream copies and stereo
+    AAC sources come back without speaker_id).
 
     A trailing remainder shorter than ``MIN_TAIL_SECONDS`` is merged into the
     previous chunk instead of becoming its own. A 5701s audio at 300s chunks
@@ -196,10 +220,11 @@ def split_audio(audio_path: Path, *, chunk_seconds: int | None = None) -> list[P
     Uses ``-f segment`` with stream copy for 67× speed over decode-encode loops.
     """
     settings = get_settings()
-    chunk_dur = chunk_seconds or settings.transcription.chunk_duration_seconds
+    diarize = _model_supports_diarization(settings.transcription.model)
+    chunk_dur = chunk_seconds or _chunk_seconds()
 
     total_duration = get_audio_duration(audio_path)
-    if total_duration <= chunk_dur:
+    if total_duration <= chunk_dur and not diarize:
         return [audio_path]
 
     num_chunks = math.ceil(total_duration / chunk_dur)
@@ -226,7 +251,7 @@ def split_audio(audio_path: Path, *, chunk_seconds: int | None = None) -> list[P
     # models always re-encode chunks to mono MP3, which also matches the
     # documented single-channel preference.
     codec = probe_audio_codec(audio_path)
-    if _model_supports_diarization(settings.transcription.model):
+    if diarize:
         codec_args, chunk_ext = ["-codec:a", "libmp3lame", "-b:a", "128k", "-ac", "1"], "mp3"
         logger.info("[split] diarization model → re-encoding chunks to mono mp3")
     elif codec in ("mp1", "mp2", "mp3"):
@@ -317,14 +342,25 @@ def _load_cached_transcript(audio_path: Path) -> list[SubtitleEntry] | None:
         return None
     try:
         data = json.loads(cache.read_text(encoding="utf-8"))
-        return [SubtitleEntry(**e) for e in data]
+        # Keyed by the chunk's byte size: chunk_000 from a different chunk
+        # length (e.g. a retry after switching to a diarization model) must
+        # not reuse a transcript that covers only part of the new chunk.
+        if data.get("source_size") != audio_path.stat().st_size:
+            return None
+        return [SubtitleEntry(**e) for e in data["entries"]]
     except Exception:
         return None
 
 
 def _save_transcript_cache(audio_path: Path, entries: list[SubtitleEntry]) -> None:
     cache = _transcript_cache_path(audio_path)
-    data = [{"start": e.start, "duration": e.duration, "text": e.text} for e in entries]
+    data = {
+        "source_size": audio_path.stat().st_size,
+        "entries": [
+            {"start": e.start, "duration": e.duration, "text": e.text, "speaker": e.speaker}
+            for e in entries
+        ],
+    }
     cache.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -364,7 +400,7 @@ async def transcribe_audio(
     # chunk's last sentence happened to end. Deriving the offset from content
     # drifts backwards on every chunk with trailing silence, and stalls
     # completely on a chunk that yields no speech at all.
-    chunk_dur_seconds = float(settings.transcription.chunk_duration_seconds)
+    chunk_dur_seconds = float(_chunk_seconds())
 
     # Chunks are independent (each uploads itself, submits its own ASR task,
     # and hits its own cache) — run a few at a time instead of one-by-one.
@@ -401,12 +437,15 @@ async def transcribe_audio(
         total_asr_duration += chunk_dur
         time_offset = 0.0 if is_single else i * chunk_dur_seconds
         for entry in entries:
+            # speaker_id restarts at 0 in every ASR task: namespace it per
+            # chunk so speakers from different chunks are never merged.
+            speaker = f"{i}:{entry.speaker}" if entry.speaker and total > 1 else entry.speaker
             all_entries.append(
                 SubtitleEntry(
                     start=entry.start + time_offset,
                     duration=entry.duration,
                     text=entry.text,
-                    speaker=entry.speaker,
+                    speaker=speaker,
                 )
             )
         if not is_single:
