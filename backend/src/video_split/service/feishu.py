@@ -597,8 +597,18 @@ async def notify_finished(task_id: int, entry: dict[str, Any], url: str = "") ->
         logger.exception("[feishu] failed to send finish notice")
 
 
+_TERMINAL_EVENTS = frozenset({"complete", "error"})
+
+
+def _is_first_terminal(rt: Any, entry: dict[str, Any]) -> bool:
+    """run_analysis yields an error event and then re-raises, so the runner
+    broadcasts a second error for the same task; only the first counts."""
+    earlier = [e for e in rt.events if e is not entry]
+    return not any(e.get("event") in _TERMINAL_EVENTS for e in earlier)
+
+
 def _on_runner_event(rt: Any, entry: dict[str, Any]) -> None:
-    if entry.get("event") not in {"complete", "error"}:
+    if entry.get("event") not in _TERMINAL_EVENTS or not _is_first_terminal(rt, entry):
         return
     try:
         loop = asyncio.get_running_loop()
@@ -692,10 +702,11 @@ async def follow_task(
         return
     replay, queue = sub
     sent_confirm = False
+    sent_terminal = False
 
     async def _handle(entry: dict[str, Any] | None) -> None:
-        nonlocal sent_confirm
-        if entry is None:
+        nonlocal sent_confirm, sent_terminal
+        if entry is None or sent_terminal:
             return
         try:
             data = json.loads(entry.get("data") or "{}")
@@ -716,6 +727,7 @@ async def follow_task(
                 ),
             )
         elif stage == "complete":
+            sent_terminal = True
             video_id = detail.get("video_id")
             title, summary = "", ""
             if video_id:
@@ -725,6 +737,7 @@ async def follow_task(
                 note = ""
             await _reply(creds, message_id, chat_id, card_result(title, summary, note))
         elif stage in {"error", "cancelled"}:
+            sent_terminal = True
             msg = str(data.get("message") or ("已取消" if stage == "cancelled" else "分析失败"))
             await _reply(creds, message_id, chat_id, card_error(msg))
 

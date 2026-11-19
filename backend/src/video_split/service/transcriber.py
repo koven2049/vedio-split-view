@@ -569,6 +569,16 @@ async def _whisper_transcribe_single(
 _FUNASR_SUBMIT_URL = "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription"
 _FUNASR_TASK_URL = "https://dashscope.aliyuncs.com/api/v1/tasks"
 _FUNASR_MAX_POLL = 300
+
+
+def _poll_limit_seconds() -> int:
+    """Poll budget per ASR task: at least the audio length it may carry.
+
+    A diarization task holds up to DIARIZATION_CHUNK_SECONDS of audio (live:
+    73 min → 145s, plus queue time), far beyond the 300s that fits one
+    5-minute chunk.
+    """
+    return max(_FUNASR_MAX_POLL, _chunk_seconds())
 _FUNASR_POLL_INTERVAL = 2
 
 # DashScope reports "this audio has no recognizable speech" as a task FAILURE.
@@ -724,12 +734,13 @@ async def _funasr_task_once(
 
         poll_headers = {"Authorization": f"Bearer {api_key}"}
         start_time = time.monotonic()
+        max_poll = _poll_limit_seconds()
 
         while True:
             elapsed = time.monotonic() - start_time
-            if elapsed > _FUNASR_MAX_POLL:
-                logger.error("[funasr] Task %s timed out after %ds", task_id, _FUNASR_MAX_POLL)
-                raise TimeoutError(f"Fun-ASR task {task_id} timed out after {_FUNASR_MAX_POLL}s")
+            if elapsed > max_poll:
+                logger.error("[funasr] Task %s timed out after %ds", task_id, max_poll)
+                raise TimeoutError(f"Fun-ASR task {task_id} timed out after {max_poll}s")
 
             await asyncio.sleep(_FUNASR_POLL_INTERVAL)
 
@@ -812,6 +823,8 @@ async def _parse_funasr_results(
                         start=begin_s,
                         duration=end_s - begin_s,
                         text=text,
-                        speaker=str(sent.get("speaker_id", "") or ""),
+                        # speaker_id is an int from 0 — `0 or ""` would
+                        # silently drop the first speaker's labels.
+                        speaker="" if sent.get("speaker_id") is None else str(sent["speaker_id"]),
                     ))
     return entries

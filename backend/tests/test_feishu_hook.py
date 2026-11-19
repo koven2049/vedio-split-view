@@ -652,6 +652,72 @@ async def test_runner_failure_dms_error_card(enable_feishu, monkeypatch):
     assert url in card["elements"][0]["text"]["content"]
 
 
+async def test_run_analysis_style_failure_notifies_once(enable_feishu, monkeypatch):
+    """run_analysis yields an error event and then re-raises, so the runner
+    broadcasts a second error for the same task — one DM card, not two."""
+    from video_split.schemas import ProgressEvent
+
+    sent = _capture_cards(monkeypatch)
+
+    async def gen(_cancel, _confirm):
+        yield ProgressEvent(stage="error", progress=0, message="下载失败")
+        raise RuntimeError("下载失败")
+
+    runner.start(208, 1, "youtube", "https://youtu.be/abcdefghijk", lambda c, k: gen(c, k))
+    try:
+        for _ in range(10):
+            await asyncio.sleep(0.02)
+    finally:
+        runner.remove(208)
+    assert len(sent) == 1
+
+
+async def test_feishu_origin_double_error_not_dmed(enable_feishu, monkeypatch):
+    """The second error must not look web-started after the first one consumed
+    the Feishu origin."""
+    from video_split.schemas import ProgressEvent
+
+    sent = _capture_cards(monkeypatch)
+
+    async def gen(_cancel, _confirm):
+        yield ProgressEvent(stage="error", progress=0, message="boom")
+        raise RuntimeError("boom")
+
+    runner.start(209, 1, "youtube", "https://youtu.be/abcdefghijk", lambda c, k: gen(c, k))
+    remember_origin(209, "om_x", "oc_x", ALLOWED_OPEN_ID)
+    try:
+        for _ in range(10):
+            await asyncio.sleep(0.02)
+    finally:
+        runner.remove(209)
+    assert sent == []
+
+
+async def test_follow_task_replies_one_error_card(enable_feishu, monkeypatch):
+    from video_split.schemas import ProgressEvent
+
+    replies: list[str] = []
+
+    async def fake_reply(_creds, _mid, card):
+        replies.append(card["header"]["title"]["content"])
+
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    monkeypatch.setattr("video_split.service.feishu.feishu_client.send_card", AsyncMock())
+
+    async def gen(_cancel, _confirm):
+        yield ProgressEvent(stage="error", progress=0, message="boom")
+        raise RuntimeError("boom")
+
+    creds = load_feishu_credentials()
+    assert creds is not None
+    runner.start(210, 1, "youtube", "https://youtu.be/abcdefghijk", lambda c, k: gen(c, k))
+    try:
+        await follow_task(210, creds, "om_f", "oc_f")
+    finally:
+        runner.remove(210)
+    assert replies == ["分析失败"]
+
+
 def test_result_card_has_note_button(enable_feishu):
     card = card_result("标题", "摘要", "https://notes.example/share/9?sig=abc")
     actions = card["elements"][1]["actions"]

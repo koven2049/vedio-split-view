@@ -135,6 +135,27 @@ async def test_parse_funasr_results_captures_speaker_id():
 
 
 @pytest.mark.asyncio
+async def test_parse_funasr_results_keeps_integer_speaker_zero():
+    """DashScope returns speaker_id as an int starting at 0 (live qwen-audio-3.1
+    result). `0 or ""` used to drop speaker 0 to unlabeled, pushing a 3-host
+    episode under the 80% label threshold and back to LLM guessing."""
+    output = {"results": [{"subtask_status": "SUCCEEDED", "transcription_url": "u"}]}
+    tr_payload = {
+        "transcripts": [
+            {
+                "sentences": [
+                    {"begin_time": 0, "end_time": 1000, "text": "甲", "speaker_id": 0},
+                    {"begin_time": 1000, "end_time": 2000, "text": "乙", "speaker_id": 1},
+                    {"begin_time": 2000, "end_time": 3000, "text": "丙"},
+                ]
+            }
+        ]
+    }
+    entries = await transcriber._parse_funasr_results(_FakeClient(tr_payload), output)
+    assert [e.speaker for e in entries] == ["0", "1", ""]
+
+
+@pytest.mark.asyncio
 async def test_parse_funasr_results_qwen3_single_result_shape():
     """qwen3 filetrans: one output.result (singular), sentences without speaker_id."""
     output = {
@@ -261,6 +282,15 @@ def _fake_settings(monkeypatch, model: str, chunk: int = 300):
         transcription = _Transcription()
 
     monkeypatch.setattr(transcriber, "get_settings", lambda: _Settings())
+
+
+def test_poll_limit_covers_whole_episode_task(monkeypatch):
+    """One diarization task holds up to 2h of audio (73 min took 145s live);
+    a fixed 300s poll budget would time it out under load."""
+    _fake_settings(monkeypatch, "qwen-audio-3.1-asr-flash-filetrans")
+    assert transcriber._poll_limit_seconds() >= transcriber.DIARIZATION_CHUNK_SECONDS
+    _fake_settings(monkeypatch, "qwen3-asr-flash-filetrans")
+    assert transcriber._poll_limit_seconds() == transcriber._FUNASR_MAX_POLL
 
 
 def test_chunk_seconds_diarization_uses_whole_episode(monkeypatch):
