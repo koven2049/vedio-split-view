@@ -790,7 +790,7 @@ export default function AnalyzePage() {
         className="flex gap-1 p-1 rounded-lg w-fit"
         style={{ background: 'var(--color-bg-tertiary)' }}
       >
-        {(['youtube', 'bilibili', 'xiaoyuzhou'] as const).map((tab) => {
+        {(['youtube', 'bilibili', 'xiaoyuzhou', 'apple_podcasts'] as const).map((tab) => {
           const tabAnalyzing = allActiveSlots.some((s) => s.platform === tab && s.analyzing);
           return (
             <button
@@ -944,7 +944,9 @@ export default function AnalyzePage() {
                     ? t('analyze.placeholderYoutube')
                     : activeTab === 'bilibili'
                       ? t('analyze.placeholderBilibili')
-                      : t('analyze.placeholderXiaoyuzhou')
+                      : activeTab === 'apple_podcasts'
+                        ? t('analyze.placeholderApplePodcasts')
+                        : t('analyze.placeholderXiaoyuzhou')
                 }
                 className="w-full pl-10 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
                 style={{

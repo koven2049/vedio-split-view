@@ -52,6 +52,7 @@ const zh = {
   'analyze.placeholderYoutube': 'https://www.youtube.com/watch?v=...',
   'analyze.placeholderBilibili': 'https://www.bilibili.com/video/BV...',
   'analyze.placeholderXiaoyuzhou': 'https://www.xiaoyuzhoufm.com/episode/...',
+  'analyze.placeholderApplePodcasts': 'https://podcasts.apple.com/cn/podcast/...?i=...',
   'analyze.cookieCount': '· {count} 条 cookies',
   'analyze.invalidYoutube': '请输入有效的 YouTube 链接 (youtube.com / youtu.be)',
   'analyze.invalidBilibili': '请输入有效的 Bilibili 链接 (bilibili.com / b23.tv)',

@@ -55,6 +55,7 @@ const en: Record<TranslationKey, string> = {
   'analyze.placeholderYoutube': 'https://www.youtube.com/watch?v=...',
   'analyze.placeholderBilibili': 'https://www.bilibili.com/video/BV...',
   'analyze.placeholderXiaoyuzhou': 'https://www.xiaoyuzhoufm.com/episode/...',
+  'analyze.placeholderApplePodcasts': 'https://podcasts.apple.com/cn/podcast/...?i=...',
   'analyze.cookieCount': '· {count} cookies',
   'analyze.invalidYoutube': 'Please enter a valid YouTube link (youtube.com / youtu.be)',
   'analyze.invalidBilibili': 'Please enter a valid Bilibili link (bilibili.com / b23.tv)',
