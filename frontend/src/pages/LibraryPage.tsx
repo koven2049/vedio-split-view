@@ -78,7 +78,7 @@ export function UsagePanel({ data }: { data: UsageSummary }) {
 
   return (
     <div
-      className="px-4 py-3 rounded-xl text-xs space-y-2"
+      className="w-fit max-w-full px-4 py-3 rounded-xl text-xs space-y-2"
       style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
     >
       <div className="flex items-center justify-between gap-3">
@@ -96,7 +96,7 @@ export function UsagePanel({ data }: { data: UsageSummary }) {
         )}
       </div>
       <div
-        className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] gap-x-4 gap-y-1 items-baseline"
+        className="grid grid-cols-[auto_minmax(0,auto)_auto_auto] gap-x-4 gap-y-1 items-baseline"
         style={{ color: 'var(--color-text-secondary)' }}
       >
         {groups.map((g) =>
