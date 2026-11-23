@@ -149,6 +149,23 @@ describe('AnalysisSlotCard — typed Xiaoyuzhou error message (spec 3.4)', () =>
   });
 });
 
+describe('AnalysisSlotCard — typed X error message', () => {
+  it('replaces the generic error text with the x_unavailable message', () => {
+    renderCard({
+      platform: 'x',
+      analyzing: false,
+      error: 'backend raw message',
+      errorCode: 'x_unavailable',
+      progress: { stage: 'error', progress: 0, message: 'backend raw message' },
+      stepLog: [],
+    });
+    expect(
+      screen.getByText('This tweet is unavailable (deleted, protected, or restricted)'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('backend raw message')).not.toBeInTheDocument();
+  });
+});
+
 describe('AnalysisSlotCard — retry button visibility on deterministic failures', () => {
   it('hides retry when duration_exceeded (retry can never succeed)', () => {
     renderCard(

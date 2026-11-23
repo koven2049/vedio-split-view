@@ -56,11 +56,13 @@ const en: Record<TranslationKey, string> = {
   'analyze.placeholderBilibili': 'https://www.bilibili.com/video/BV...',
   'analyze.placeholderXiaoyuzhou': 'https://www.xiaoyuzhoufm.com/episode/...',
   'analyze.placeholderApplePodcasts': 'https://podcasts.apple.com/cn/podcast/...?i=...',
+  'analyze.placeholderX': 'https://x.com/user/status/...',
   'analyze.cookieCount': '· {count} cookies',
   'analyze.invalidYoutube': 'Please enter a valid YouTube link (youtube.com / youtu.be)',
   'analyze.invalidBilibili': 'Please enter a valid Bilibili link (bilibili.com / b23.tv)',
   'analyze.invalidXiaoyuzhou': 'Please enter a valid Xiaoyuzhou link (xiaoyuzhoufm.com)',
   'analyze.invalidApplePodcasts': 'Enter a valid Apple Podcasts episode link',
+  'analyze.invalidX': 'Please enter a valid X tweet link (must contain /status/)',
   'analyze.applePodcastsNotEpisode':
     'Apple Podcasts link must point to a single episode (with the ?i= id); show pages are not supported',
   'analyze.xiaoyuzhouNotEpisode':
@@ -75,6 +77,8 @@ const en: Record<TranslationKey, string> = {
   'analyze.xiaoyuzhouErrorAudioUndecodable': "This episode's audio cannot be decoded",
   'analyze.xiaoyuzhouErrorAudioTruncated':
     'Audio download was incomplete (auto-retried once); please retry',
+  'analyze.xErrorNoVideo': 'No video found in this tweet',
+  'analyze.xErrorUnavailable': 'This tweet is unavailable (deleted, protected, or restricted)',
   'analyze.downloadProgressBytes': '{downloaded} / {total} MB',
   'analyze.downloadProgressDownloaded': '{downloaded} MB',
   'analyze.wrongPlatform':

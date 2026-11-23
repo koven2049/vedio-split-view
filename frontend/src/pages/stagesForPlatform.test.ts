@@ -17,6 +17,15 @@ describe('stagesForPlatform', () => {
     expect(stages).toContain('transcription');
   });
 
+  it('hides subtitle_check for x (no platform subtitles)', () => {
+    const stages = stagesForPlatform('x');
+    expect(stages).not.toContain('subtitle_check');
+    // Other stages are preserved.
+    expect(stages).toContain('metadata');
+    expect(stages).toContain('audio_download');
+    expect(stages).toContain('transcription');
+  });
+
   it('keeps subtitle_check for youtube', () => {
     const stages = stagesForPlatform('youtube');
     expect(stages).toContain('subtitle_check');

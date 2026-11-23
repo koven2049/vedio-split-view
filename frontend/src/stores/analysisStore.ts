@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { api } from '../lib/api';
 import { useAuthStore } from './authStore';
 
-export type AnalysisPlatform = 'youtube' | 'bilibili' | 'xiaoyuzhou' | 'apple_podcasts';
+export type AnalysisPlatform = 'youtube' | 'bilibili' | 'xiaoyuzhou' | 'apple_podcasts' | 'x';
 
 /**
  * Strongly-typed view of ProgressData.detail for the audio download stage.

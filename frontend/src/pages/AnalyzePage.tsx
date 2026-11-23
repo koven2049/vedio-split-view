@@ -12,12 +12,15 @@ import {
   X,
   RefreshCw,
   Headphones,
+  Twitter,
+  type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import {
   formatDuration,
   formatTimeRange,
   generatePlaybackUrl,
+  isXStatusUrl,
   platformLabel,
   cn,
 } from '../lib/utils';
@@ -33,8 +36,11 @@ import { useLangPreference } from '../hooks/useLangPreference';
 import { useT, type TranslationKey } from '../i18n';
 import {
   XIAOYUZHOU_ERROR_KEYS,
+  X_ERROR_KEYS,
   buildDownloadMbText,
+  isXErrorCode,
   isXiaoyuzhouErrorCode,
+  platformTagStyle,
   stagesForPlatform,
   validateApplePodcastsUrl,
   validateXiaoyuzhouUrl,
@@ -76,7 +82,13 @@ const STAGE_LABELS_KEYS: Record<string, TranslationKey> = {
   complete: 'analyze.done',
 };
 
+const PLATFORM_TAB_ICONS: Partial<Record<AnalysisPlatform, LucideIcon>> = {
+  xiaoyuzhou: Headphones,
+  x: Twitter,
+};
+
 function detectPlatform(url: string): AnalysisPlatform | null {
+  if (isXStatusUrl(url)) return 'x';
   if (/youtube\.com|youtu\.be/.test(url)) return 'youtube';
   if (/bilibili\.com|b23\.tv/.test(url)) return 'bilibili';
   if (/xiaoyuzhoufm\.com/.test(url)) return 'xiaoyuzhou';
@@ -119,9 +131,9 @@ export function AnalysisSlotCard({
     return key ? t(key) : stage;
   };
 
-  // Stages to render as dots. Xiaoyuzhou never has subtitles, so we hide
-  // the subtitle_check dot to avoid showing a permanently "skipped" step
-  // (spec 3.8). Backend still emits the event; this is display-only.
+  // Stages to render as dots. Podcasts and X never have platform subtitles,
+  // so we hide the subtitle_check dot to avoid showing a permanently "skipped"
+  // step (spec 3.8). Backend still emits the event; this is display-only.
   const visibleStages = stagesForPlatform(slot.platform);
   const visibleStageIndex = progress ? visibleStages.indexOf(progress.stage) : -1;
 
@@ -135,7 +147,7 @@ export function AnalysisSlotCard({
   // For podcast-platform failures, surface the typed error code as a
   // friendly, actionable message instead of the generic backend text
   // (spec 3.4). audio_* codes are platform-agnostic (Apple emits them too);
-  // the xiaoyuzhou-specific codes stay gated on the platform.
+  // the other codes stay gated on their platform.
   const errorDisplay = (() => {
     if (!error) return '';
     if (errorCode && isXiaoyuzhouErrorCode(errorCode)) {
@@ -143,6 +155,9 @@ export function AnalysisSlotCard({
       if (platformAgnostic || slot.platform === 'xiaoyuzhou') {
         return t(XIAOYUZHOU_ERROR_KEYS[errorCode]);
       }
+    }
+    if (errorCode && isXErrorCode(errorCode) && slot.platform === 'x') {
+      return t(X_ERROR_KEYS[errorCode]);
     }
     return error;
   })();
@@ -197,7 +212,7 @@ export function AnalysisSlotCard({
             <div className="flex items-center gap-2 mb-1">
               <span
                 className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                style={{ background: 'rgba(59,130,246,0.1)', color: 'var(--color-primary)' }}
+                style={platformTagStyle(slot.platform)}
               >
                 {platformLabel(slot.platform)}
               </span>
@@ -733,6 +748,10 @@ export default function AnalyzePage() {
         return false;
       }
     }
+    if (activeTab === 'x' && !isXStatusUrl(trimmed)) {
+      setValidationError(t('analyze.invalidX'));
+      return false;
+    }
     const detected = detectPlatform(trimmed);
     if (!detected) {
       const msg =
@@ -790,8 +809,9 @@ export default function AnalyzePage() {
         className="flex gap-1 p-1 rounded-lg w-fit"
         style={{ background: 'var(--color-bg-tertiary)' }}
       >
-        {(['youtube', 'bilibili', 'xiaoyuzhou', 'apple_podcasts'] as const).map((tab) => {
+        {(['youtube', 'bilibili', 'xiaoyuzhou', 'apple_podcasts', 'x'] as const).map((tab) => {
           const tabAnalyzing = allActiveSlots.some((s) => s.platform === tab && s.analyzing);
+          const TabIcon = PLATFORM_TAB_ICONS[tab];
           return (
             <button
               key={tab}
@@ -806,9 +826,7 @@ export default function AnalyzePage() {
                   : {}
               }
             >
-              {tab === 'xiaoyuzhou' && (
-                <Headphones size={16} className="shrink-0 opacity-90" aria-hidden />
-              )}
+              {TabIcon && <TabIcon size={16} className="shrink-0 opacity-90" aria-hidden />}
               {platformLabel(tab)}
               {tabAnalyzing && activeTab !== tab && (
                 <Loader2
@@ -946,7 +964,9 @@ export default function AnalyzePage() {
                       ? t('analyze.placeholderBilibili')
                       : activeTab === 'apple_podcasts'
                         ? t('analyze.placeholderApplePodcasts')
-                        : t('analyze.placeholderXiaoyuzhou')
+                        : activeTab === 'x'
+                          ? t('analyze.placeholderX')
+                          : t('analyze.placeholderXiaoyuzhou')
                 }
                 className="w-full pl-10 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
                 style={{

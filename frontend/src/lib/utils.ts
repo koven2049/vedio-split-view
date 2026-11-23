@@ -36,7 +36,22 @@ export function generatePlaybackUrl(
     const [showId = '', epId = ''] = videoId.split(':');
     return `https://podcasts.apple.com/us/podcast/id${showId}?i=${epId}`;
   }
+  if (platform === 'x') {
+    // X's web player has no timestamp parameter.
+    return `https://x.com/i/status/${videoId}`;
+  }
   return '';
+}
+
+/** True for X/Twitter status links (x.com, twitter.com and the
+ *  fxtwitter/vxtwitter/fixupx/fixvx mirrors), including mobile./m./www. hosts,
+ *  query strings and links pasted without a scheme. The status path accepts
+ *  the /<user>/status/, /i/status/ and /i/web/status/ forms the backend
+ *  recognizes; profile and search links are not analyzable. */
+export function isXStatusUrl(url: string): boolean {
+  return /^(?:https?:\/\/)?(?:www\.|mobile\.|m\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx|fixvx)\.com\/(?:[^/?#]+\/)?[^/?#]+\/status\/\d+(?:[/?#]\S*)?$/i.test(
+    url.trim(),
+  );
 }
 
 export function platformLabel(platform: string): string {
@@ -45,6 +60,7 @@ export function platformLabel(platform: string): string {
     bilibili: 'Bilibili',
     xiaoyuzhou: '小宇宙',
     apple_podcasts: 'Apple Podcasts',
+    x: 'X',
   };
   return labels[platform] || platform;
 }
