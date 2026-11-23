@@ -43,7 +43,7 @@ class LLMConfig(BaseModel):
 class TranscriptionConfig(BaseModel):
     base_url: str = ""
     api_key: str = ""
-    model: str = "whisper-1"
+    model: str = ""
     language: str = ""
     chunk_duration_seconds: int = 300
 

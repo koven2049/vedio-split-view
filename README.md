@@ -90,7 +90,7 @@ bash manage.sh deploy       # 同步代码（不含 data/、配置、密钥）
 
 | 节 | 何时需要 |
 |----|---------|
-| `transcription` | 视频无可用字幕、需要音频转录时（Whisper 或 Fun-ASR） |
+| `transcription` | 视频无可用字幕、需要音频转录时（Whisper 或 Fun-ASR），其中 `model` 必须在配置中明确指定 |
 | `oss` | 使用阿里云 Fun-ASR 时（Whisper 不需要） |
 | `network` | 下载 / 字幕需要代理，或 YouTube 需要登录态时 |
 | `feishu` | 飞书机器人收链即分析（凭证在 `config/feishu.yaml`，不要写进本文件） |
