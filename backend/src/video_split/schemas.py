@@ -89,7 +89,10 @@ class AnalyzeRequest(BaseModel):
     url: str = Field(
         min_length=5,
         max_length=1024,
-        description="Video/episode URL. Supported platforms: YouTube, Bilibili, 小宇宙 (xiaoyuzhou).",
+        description=(
+            "Video/episode URL. Supported platforms: YouTube, Bilibili, "
+            "小宇宙 (xiaoyuzhou), Apple Podcasts, X (Twitter)."
+        ),
     )
 
 

@@ -63,9 +63,51 @@ class XPlatformError(RuntimeError):
         self.code = code
 
 
+# x.com and its mirrors (twitter.com, mobile./m. hosts, and the fx/vx
+# embed proxies). yt-dlp only understands x.com, so mirrors are rewritten
+# before extraction.
+_X_HOST_RE = re.compile(
+    r"(?:www\.|mobile\.|m\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx|fixvx)\.com"
+)
+_X_STATUS_PATH_RE = re.compile(r"^/([^/]+)/status/(\d+)/?$")
+_X_I_WEB_STATUS_PATH_RE = re.compile(r"^/i/web/status/(\d+)/?$")
+
+
+def _parse_x_url(url: str):
+    """Parse an X/Twitter URL, or return None when the host is not X."""
+    raw = url.strip()
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    if not _X_HOST_RE.fullmatch(parsed.hostname or ""):
+        return None
+    return parsed
+
+
+def _x_status_id(url: str) -> str:
+    """Return the tweet status id from an X URL path, or ""."""
+    parsed = _parse_x_url(url)
+    if parsed is None:
+        return ""
+    m = _X_I_WEB_STATUS_PATH_RE.fullmatch(parsed.path)
+    if m:
+        return m.group(1)
+    m = _X_STATUS_PATH_RE.fullmatch(parsed.path)
+    if m:
+        return m.group(2)
+    return ""
+
+
 def normalize_url(url: str) -> str:
     """Normalize video URL to the canonical form expected by yt-dlp."""
     url = url.strip()
+    parsed = _parse_x_url(url)
+    if parsed is not None:
+        path = parsed.path
+        m = _X_I_WEB_STATUS_PATH_RE.fullmatch(path)
+        if m:
+            return f"https://x.com/i/status/{m.group(1)}"
+        m = _X_STATUS_PATH_RE.fullmatch(path)
+        if m:
+            return f"https://x.com/{m.group(1)}/status/{m.group(2)}"
     url = re.sub(r"https?://bilibili\.com/", "https://www.bilibili.com/", url)
     url = re.sub(r"https?://xiaoyuzhoufm\.com/", "https://www.xiaoyuzhoufm.com/", url)
     return url
@@ -109,6 +151,10 @@ def detect_platform(url: str) -> tuple[str, str]:
         m = re.search(pat, url)
         if m:
             return "apple_podcasts", f"{m.group(1)}:{m.group(2)}"
+
+    x_status_id = _x_status_id(url)
+    if x_status_id:
+        return "x", x_status_id
 
     return "unknown", ""
 
@@ -405,6 +451,42 @@ async def _fetch_bilibili_subtitles_via_api(
     return []
 
 
+_X_TCO_RE = re.compile(r"https?://t\.co/\S+")
+_X_TITLE_MAX_CHARS = 80
+
+
+def _x_title_from_description(description: str) -> str:
+    """Turn tweet text into a usable title: no trailing t.co links, one line."""
+    text = _X_TCO_RE.sub("", description or "")
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return " ".join(first_line.split())[:_X_TITLE_MAX_CHARS]
+
+
+def _x_first_playlist_entry(info: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the first non-empty entry of a multi-video tweet, or None.
+
+    yt-dlp reports a tweet with several videos as a playlist whose top level
+    has no duration/thumbnail, so those fields must come from an entry.
+    """
+    if info.get("_type") != "playlist" and "entries" not in info:
+        return None
+    for entry in info.get("entries") or []:
+        if entry:
+            return entry
+    return {}
+
+
+def _x_platform_error(exc: Exception) -> XPlatformError | None:
+    """Map a yt-dlp X failure to a typed error, leaving other errors alone."""
+    message = str(exc)
+    lower = message.lower()
+    if "no video could be found" in lower:
+        return XPlatformError(message, "x_no_video")
+    if any(token in lower for token in ("nsfw", "protected", "unavailable", "cookies")):
+        return XPlatformError(message, "x_unavailable")
+    return None
+
+
 async def extract_metadata(
     url: str,
     *,
@@ -416,6 +498,7 @@ async def extract_metadata(
     import yt_dlp
 
     platform, vid = detect_platform(url)
+    canonical_url = normalize_url(url)
 
     if platform == "bilibili":
         await _ensure_bilibili_fingerprint(bili_jct)
@@ -437,33 +520,63 @@ async def extract_metadata(
     if platform == "youtube":
         _apply_youtube_opts(ydl_opts)
 
-    logger.info("[metadata] Extracting metadata: platform=%s vid=%s url=%s", platform, vid, url)
+    logger.info(
+        "[metadata] Extracting metadata: platform=%s vid=%s url=%s",
+        platform, vid, canonical_url,
+    )
+
     def _extract() -> dict | None:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=False)
+            return ydl.extract_info(canonical_url, download=False)
 
     try:
         # yt-dlp is blocking; keep the event loop free (Feishu callbacks, SSE).
         info = await asyncio.to_thread(_extract)
-    except Exception:
-        logger.exception("[metadata] yt-dlp extract_info failed for %s", url)
+    except Exception as exc:
+        if platform == "x":
+            mapped = _x_platform_error(exc)
+            if mapped is not None:
+                logger.error(
+                    "[metadata] X tweet failed (%s) for %s: %s", mapped.code, canonical_url, exc,
+                )
+                raise mapped from exc
+        logger.exception("[metadata] yt-dlp extract_info failed for %s", canonical_url)
         raise
 
     if info is None:
         raise RuntimeError("Failed to extract video metadata")
 
-    raw_date = info.get("upload_date", "") or ""
+    if platform == "x":
+        source = _x_first_playlist_entry(info) or {}
+        raw_date = source.get("upload_date") or info.get("upload_date") or ""
+        title = _x_title_from_description(
+            info.get("description") or source.get("description") or ""
+        )
+        if not title:
+            title = info.get("title") or source.get("title") or ""
+        duration = int(source.get("duration") or info.get("duration") or 0)
+        thumbnail_url = source.get("thumbnail") or info.get("thumbnail") or ""
+        uploader = (
+            info.get("uploader") or info.get("channel") or source.get("uploader") or ""
+        )
+    else:
+        raw_date = info.get("upload_date", "") or ""
+        title = info.get("title", "")
+        duration = int(info.get("duration", 0))
+        thumbnail_url = info.get("thumbnail", "")
+        uploader = info.get("uploader", "") or info.get("channel", "") or ""
+
     upload_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}" if len(raw_date) == 8 else raw_date
 
     meta = VideoMeta(
-        url=url,
+        url=canonical_url,
         platform=platform,
         video_id=vid or info.get("id", ""),
-        title=info.get("title", ""),
-        duration_seconds=int(info.get("duration", 0)),
-        thumbnail_url=info.get("thumbnail", ""),
+        title=title,
+        duration_seconds=duration,
+        thumbnail_url=thumbnail_url,
         upload_date=upload_date,
-        uploader=info.get("uploader", "") or info.get("channel", "") or "",
+        uploader=uploader,
     )
     logger.info(
         "[metadata] OK: title=%r duration=%ds platform=%s",
@@ -804,7 +917,11 @@ async def download_audio(
     output_template = str(output_dir / "audio.%(ext)s")
 
     platform, vid = detect_platform(url)
-    logger.info("[download] Starting audio download: platform=%s vid=%s dir=%s", platform, vid, output_dir)
+    canonical_url = normalize_url(url)
+    logger.info(
+        "[download] Starting audio download: platform=%s vid=%s dir=%s",
+        platform, vid, output_dir,
+    )
 
     def _progress_hook(d: dict[str, Any]) -> None:
         if progress_callback and d.get("status") == "downloading":
@@ -835,7 +952,7 @@ async def download_audio(
 
     if platform == "bilibili":
         return await _download_bilibili_audio_via_api(
-            url,
+            canonical_url,
             output_dir,
             progress_callback,
             sessdata=sessdata,
@@ -844,12 +961,15 @@ async def download_audio(
         )
     if platform == "youtube":
         _apply_youtube_opts(ydl_opts)
+    elif platform == "x":
+        # A tweet can carry several videos; take the first one only.
+        ydl_opts["playlist_items"] = "1"
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            ydl.download([canonical_url])
     except Exception:
-        logger.exception("[download] yt-dlp download failed for %s", url)
+        logger.exception("[download] yt-dlp download failed for %s", canonical_url)
         raise
 
     audio_files = list(output_dir.glob("audio.*"))
@@ -872,4 +992,7 @@ def generate_playback_url(platform: str, video_id: str, start_seconds: int) -> s
         # Apple's redirect.
         show_id, _, ep_id = video_id.partition(":")
         return f"https://podcasts.apple.com/us/podcast/id{show_id}?i={ep_id}"
+    elif platform == "x":
+        # X's web player cannot seek via URL, so the tweet link is all we have.
+        return f"https://x.com/i/status/{video_id}"
     return ""

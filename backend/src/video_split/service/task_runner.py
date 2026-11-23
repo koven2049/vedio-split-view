@@ -16,6 +16,7 @@ from video_split.schemas import ProgressEvent
 from video_split.service.error_text import describe_error
 from video_split.service.video_service import DurationLimitExceeded
 from video_split.service.apple_podcasts import ApplePodcastsError
+from video_split.service.downloader import XPlatformError
 from video_split.service.xiaoyuzhou import XiaoyuzhouError
 
 logger = logging.getLogger(__name__)
@@ -96,8 +97,8 @@ class TaskRunner:
                 async for event in gen:
                     entry = {"event": event.stage, "data": event.model_dump_json()}
                     self._broadcast(rt, entry)
-            except (ApplePodcastsError, XiaoyuzhouError) as e:
-                # Typed podcast-platform failure — surface ``error_code`` so the
+            except (ApplePodcastsError, XiaoyuzhouError, XPlatformError) as e:
+                # Typed platform failure — surface ``error_code`` so the
                 # frontend can map a per-code friendly message + retry hint.
                 logger.error("[runner] Task #%d %s failure (%s): %s",
                              task_id, type(e).__name__, e.code, e)
