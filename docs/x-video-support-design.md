@@ -1,17 +1,11 @@
-# X（Twitter）视频解析支持 — 设计方案、评审标准与 Handoff
+# X（Twitter）视频解析支持 — 设计说明与验收标准
 
-## 1. 会话状态与交接说明（Handoff Summary）
+## 1. 范围与决策
 
-- **当前状态**：**零代码改动**。本机 `main` 分支干净（HEAD `84bc88d`），此前派出的两个 Sonnet 5.5 子 agent 因配额耗尽（429 RESOURCE_EXHAUSTED）未产生提交，临时 worktree 与空分支已清理完毕。
-- **已完成工作**：
-  1. **可行性实测完成**（本机 + 生产机 Mac mini）：确认 `yt-dlp` 内置 X 提取器走游客 token 即可**免登录（匿名）**提取元数据与 HLS 纯音频流（`hls-audio-128000-Audio`，AAC 128kbps）。详见：[`docs/x_feasibility.md`](file:///Users/mingjian/Documents/workspace/ai/ai-projects/vedio-split-view/docs/x_feasibility.md)。
-  2. **产品决策已由用户拍板**：
-     - **飞书 X 链接行为**：**两者都做**——继续转发给 `vedio-favorate`（保持既有收藏卡片），同时若推文包含视频则自动发起视频解析；纯图文推文只转发不解析。
-     - **功能对齐要求**：脑图、断点续传/重试、按平台并发配额、去重、SSE 进度等全部与 YouTube / B 站一致。
-     - **开发与部署策略**：前后端拆子 agent 并行开发 → 独立 code review → 主会话合并 + 用测试推文全链路验证 → `git push` + `./manage.sh deploy` 部署至生产机并做线上探活。
-- **测试推文（验收必测）**：
-  - URL：`https://x.com/rchen1386/status/2124465845284008268?a=F25JJuNRRsuJxjooklI&s=20`
-  - 实测基准：`tweet_id=2124465845284008268`（媒体 ID `2124465754183725056`），作者 `Royce Chen`，时长 `336.9s`（约 5.2 MB AAC）。
+- **范围**：X（Twitter）视频接入与 YouTube 共用的通用 yt-dlp 管道，脑图、断点续传/重试、按平台并发配额、去重、SSE 进度等能力与其他平台一致。
+- **匿名可解析**：yt-dlp 内置 X 提取器走游客 token，无需登录即可取元数据与 HLS 纯音频流（`hls-audio-128000`，AAC 128kbps）。实测记录见 [`x_feasibility.md`](x_feasibility.md)。
+- **飞书 X 链接双路**：配置了视频收藏时继续转发收藏卡；推文含视频则同时发起解析，纯图文推文只收藏不解析。
+- **验收测试推文**：`https://x.com/rchen1386/status/2124465845284008268`，`tweet_id=2124465845284008268`（媒体 ID `2124465754183725056`），作者 `Royce Chen`，时长约 337 秒。`video_id` 必须用推文 status ID，不能用媒体 ID，否则去重与断点恢复会失效。
 
 ---
 
@@ -43,15 +37,15 @@
    - **回放链接 `generate_playback_url(platform, video_id, start_seconds)`**：
      - `platform == "x"` 时返回 `f"https://x.com/i/status/{video_id}"`（X 网页播放器不支持时间戳跳转参数）。
    - **类型化错误码映射（Typed Error Codes）**：
-     - 定义 `XPlatformError(Exception)`（携带 `.code` 属性，与 `XiaoyuzhouError` / `ApplePodcastsError` 同构，并在 `task_runner.py` 中同样捕获并写入 `error_code`）：
+     - 定义 `XPlatformError(RuntimeError)`（携带 `.code` 属性，与 `XiaoyuzhouError` / `ApplePodcastsError` 同构，并在 `task_runner.py` 中同样捕获并写入 `error_code`）：
        - `x_no_video`：捕获 `yt-dlp` 报错含 `"No video could be found in this tweet"` 或图文推文无音视频流。
        - `x_unavailable`：推文已删除、账号受保护（protected）、NSFW/年龄限制需登录（`"NSFW tweet"` / `"Use --cookies"` / `"status is unavailable"`）。
 
-2. **`backend/src/video_split/service/video_service.py` & `database.py` & `task_runner.py`**
+2. **`service/video_service.py` & `database.py` & `task_runner.py`**
    - `_PLATFORM_TAG_MAP` 与 `database.py::_ensure_platform_tags` 新增 `"x": ("X", "#000000")`。
-   - **主流程（~L380-435）与断点重试流程（~L975-1070）**：
-     - 字幕阶段：`meta.platform == "x"` 不拉平台字幕，SSE 发送 `detail={"method": "whisper", "reason": "X video (no platform subtitles)"}`，`no_sub_reason = "X video (no platform subtitles)."`。
-     - 下载阶段：走默认 `download_audio` 分支（与 YouTube/B 站同分支，不要误入播客确认阈值）。
+   - **主流程 `run_analysis`**：`meta.platform == "x"` 时不拉平台字幕，SSE 发送 `detail={"method": "whisper", "reason": "X video (no platform subtitles)"}`，并把 `no_sub_reason` 设为 `X video (no platform subtitles).`；不要再重复发第二条无字幕事件。
+   - **断点重试 `resume_analysis`**：复用通用元数据/下载分支，捕获 `XPlatformError` 并把 `e.code` 写进 `error_code`；该函数没有字幕阶段，不需要额外分支。
+   - 下载与时长/确认阈值走视频档（与 YouTube / B 站同分支），不得误入播客阈值。
    - `task_runner.py`：在捕获 `(XiaoyuzhouError, ApplePodcastsError)` 处并入 `XPlatformError`，将 `e.code` 透传给前端。
 
 3. **飞书双路协同（`backend/src/video_split/service/feishu.py`）**
@@ -96,24 +90,25 @@
 无论是派 Review 子 agent 还是主会话自检，必须逐条核对以下 Checklist：
 
 ### 3.1 功能与边界条件（Blocking Criteria）
-- [ ] **ID 一致性**：`detect_platform("https://x.com/rchen1386/status/2124465845284008268?a=1&s=20")` 必须返回 `("x", "2124465845284008268")`，且 `extract_metadata` 产出的 `VideoMeta.video_id` 也是 `"2124465845284008268"`（绝不能变成底层 media ID `2124465754183725056`，否则 `check_duplicate` 去重与断点恢复会失效）。
-- [ ] **镜像域名归一化**：`fxtwitter.com`、`vxtwitter.com`、`twitter.com`、`mobile.x.com` 传入 `normalize_url` 后均转为干净的 `https://x.com/.../status/<id>`，再交给 `yt-dlp`。
-- [ ] **代理正确性**：`_DIRECT_PLATFORMS` 绝对不能包含 `"x"`；`proxy_enabled=True` 时 X 必须走代理。
-- [ ] **多视频推文不崩**：`yt-dlp` 返回 `_type: "playlist"` + `entries: [...]` 时，`extract_metadata` 正确取 `entries[0]`，下载带 `playlist_items: "1"`。
-- [ ] **断点续传/重试路径覆盖**：`video_service.py` 中不仅主函数 `analyze_video_stream` 处理了 `"x"`，后半段的重试函数（~L970+）也同样覆盖了 `"x"`。
-- [ ] **飞书双路不回归**：
+- **ID 一致性**：`detect_platform("https://x.com/rchen1386/status/2124465845284008268?a=1&s=20")` 必须返回 `("x", "2124465845284008268")`，且 `extract_metadata` 产出的 `VideoMeta.video_id` 也是 `"2124465845284008268"`（绝不能变成底层 media ID `2124465754183725056`，否则 `check_duplicate` 去重与断点恢复会失效）。
+- **镜像域名归一化**：`fxtwitter.com`、`vxtwitter.com`、`twitter.com`、`mobile.x.com` 传入 `normalize_url` 后均转为干净的 `https://x.com/.../status/<id>`，再交给 `yt-dlp`。
+- **代理正确性**：`_DIRECT_PLATFORMS` 绝对不能包含 `"x"`；`proxy_enabled=True` 时 X 必须走代理。
+- **多视频推文不崩**：`yt-dlp` 返回 `_type: "playlist"` + `entries: [...]` 时，`extract_metadata` 正确取 `entries[0]`，下载带 `playlist_items: "1"`。
+- **断点续传/重试路径覆盖**：`run_analysis` 与 `resume_analysis` 都要正确处理 `"x"`（后者没有字幕阶段，但要透传 `XPlatformError` 的 `error_code`）。
+- **飞书双路不回归**：
   - 配置了 `vfav` + 带视频 X 推文 → 既调用 `forward_to_vfav` 回复收藏卡，又启动 `start_analysis_for_user`。
   - 配置了 `vfav` + 纯图文 X 推文 → 只调用 `forward_to_vfav` 回复收藏卡，**不**创建失败的解析任务。
   - 未配置 `vfav` + 带视频 X 推文 → 直接启动解析。
   - 原有 YouTube / B 站 / 小宇宙 / Apple Podcasts 飞书解析测试 100% 通过。
-- [ ] **OpenAPI 文档契约**：`cd backend && .venv/bin/python -m pytest tests/test_apidocs.py -q` 必须通过（遵循 `AGENTS.md` API 文档自动派生约束）。
-- [ ] **文档合规**：遵循 `AGENTS.md`「文档即现状」与「配置值只在配置源维护」，文档中不得出现“本次新增/v2 修改”字样，不得抄录配置当前值或密钥。
+- **OpenAPI 文档契约**：`cd backend && .venv/bin/python -m pytest tests/test_apidocs.py -q` 必须通过（遵循 `AGENTS.md` API 文档自动派生约束）。
+- **文档合规**：遵循 `AGENTS.md`「文档即现状」与「配置值只在配置源维护」，文档中不得出现“本次新增/v2 修改”字样，不得抄录配置当前值或密钥。
 
 ### 3.2 验证闭环命令（Verification Gate）
 1. **后端单测与 Lint**：
    ```bash
    cd backend && .venv/bin/python -m pytest -q
-   ./manage.sh check
+   cd backend && .venv/bin/python -m ruff check src tests
+   # venv 未装 ruff 时用 uvx/pipx 取出与 uv.lock 一致的版本
    ```
 2. **前端类型检查与构建**：
    ```bash
@@ -130,10 +125,10 @@
 
 ---
 
-## 4. 下个会话推荐调用的技能（Suggested Skills）
+## 4. 参考技能
 
-接手本任务的 Agent 在开工或收尾时应按需调用以下 Skill：
-- **`code-review`**（`/Users/mingjian/.agents/skills/code-review/SKILL.md`）：前后端代码完成后，使用该技能做独立 pass 评审与假阳性过滤，对照本文第 3 节标准逐项核查。
+实现或收尾时可按需调用以下 Skill：
+- **`code-review`**（`/Users/mingjian/.agents/skills/code-review/SKILL.md`）：做独立 pass 评审与假阳性过滤，对照本文第 3 节标准逐项核查。
 - **`code-simplifier`**（`/Users/mingjian/.agents/skills/code-simplifier/SKILL.md`）：合并前精简新增分支判断，确保改动最小化。
 - **`ui-simplify`**（`/Users/mingjian/.agents/skills/ui-simplify/SKILL.md`）：前端改动交付前自查，确保没有多余注脚或啰嗦导航。
 - **`my-proxy`**（`/Users/mingjian/.agents/skills/my-proxy/SKILL.md`）：本机若在无代理环境变量的 shell 中跑真实 X 推文冒烟测试且直连超时，按该规约临时使用 `http://127.0.0.1:7897`。

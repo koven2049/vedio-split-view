@@ -24,9 +24,9 @@ X 能复用现有的**通用 yt-dlp 路径**，和 YouTube 走的是同一套 `e
 - 前端：平台类型、URL 校验、标签和图标、中英文文案、分析页入口
 - 文档：README 平台表、`schemas` 描述、API 文档
 
-## ⚠️ 冲突：飞书里的 X 链接
+## 飞书里的 X 链接
 
-现在飞书收到 X 链接会**转发给 vedio-favorate**（`73df05c`）。X 成为可解析平台后，`detect_platform` 会先命中，原来的转发就失效了。这个行为要你来定。
+飞书收到 X 链接会**转发给 vedio-favorate**；推文含视频时同时发起解析，纯图文推文只收藏不解析。实现见 [`x-video-support-design.md`](x-video-support-design.md) 与 [`feishu-bot.md`](feishu-bot.md)。
 
 ## 风险
 
