@@ -454,6 +454,7 @@ async def _fetch_bilibili_subtitles_via_api(
 
 
 _X_TCO_RE = re.compile(r"https?://t\.co/\S+")
+_X_TCO_URL_RE = re.compile(r"https?://t\.co/[A-Za-z0-9]+")
 _X_TITLE_MAX_CHARS = 80
 
 
@@ -482,7 +483,10 @@ def _x_platform_error(exc: Exception) -> XPlatformError | None:
     """Map a yt-dlp X failure to a typed error, leaving other errors alone."""
     message = str(exc)
     lower = message.lower()
-    if "no video could be found" in lower:
+    # yt-dlp uses two messages for "nothing playable here": the X extractor's
+    # own "No video could be found in this tweet" and the generic post-process
+    # "No video formats found!" (text/image-only tweets reach the latter).
+    if "no video could be found" in lower or "no video formats" in lower:
         return XPlatformError(message, "x_no_video")
     if any(
         token in lower
@@ -490,6 +494,47 @@ def _x_platform_error(exc: Exception) -> XPlatformError | None:
     ):
         return XPlatformError(message, "x_unavailable")
     return None
+
+
+async def x_tweet_links(url: str) -> list[str]:
+    """Return the links a tweet's text points at, with t.co redirects resolved.
+
+    Some tweets carry no native video but link to one (a YouTube URL in the
+    text). yt-dlp rejects those with "No video formats found!", so the text is
+    read through an unprocessed extraction and its t.co short links followed.
+    Failures return [] and the caller falls back to the plain "no video" path.
+    """
+    import yt_dlp
+
+    canonical_url = normalize_url(url)
+
+    def _read_text() -> str:
+        opts: dict[str, Any] = {"quiet": True, "no_warnings": True, "skip_download": True}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(canonical_url, download=False, process=False) or {}
+        return str(info.get("description") or "")
+
+    try:
+        text = await asyncio.wait_for(asyncio.to_thread(_read_text), timeout=20)
+    except Exception:
+        logger.warning("[x] cannot read tweet text for %s", canonical_url)
+        return []
+
+    shorts = _X_TCO_URL_RE.findall(text)
+    if not shorts:
+        return []
+
+    resolved: list[str] = []
+    async with httpx.AsyncClient(
+        proxy=_proxy_for_platform("x") or None, timeout=10, follow_redirects=True
+    ) as client:
+        for link in shorts[:5]:
+            try:
+                resp = await client.head(link)
+                resolved.append(str(resp.url))
+            except Exception:
+                logger.warning("[x] t.co link did not resolve: %s", link)
+    return resolved
 
 
 async def extract_metadata(

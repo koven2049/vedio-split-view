@@ -154,6 +154,13 @@ def _patch_start(monkeypatch) -> list[str]:
     return started
 
 
+def _patch_tweet_links(monkeypatch, links: list[str]) -> None:
+    async def fake_links(_url):
+        return links
+
+    monkeypatch.setattr("video_split.service.feishu.x_tweet_links", fake_links)
+
+
 def _titles(replies: list[dict]) -> list[str]:
     return [card["header"]["title"]["content"] for card in replies]
 
@@ -233,6 +240,7 @@ async def test_text_only_tweet_with_keyword_replies_no_video(db_session, feishu_
     _patch_platform(monkeypatch)
     exc = XPlatformError("No video could be found in this tweet", "x_no_video")
     _patch_probe(monkeypatch, exc)
+    _patch_tweet_links(monkeypatch, [])
     started = _patch_start(monkeypatch)
 
     await handle_message_event(_payload(f"{X_LINK} 分析"), db_session)
@@ -364,6 +372,55 @@ async def test_mixed_with_keyword_skips_collection(db_session, feishu_env, monke
     assert probed == []
     assert started == [YOUTUBE_LINK]
     assert _titles(replies) == ["已开始分析"]
+
+
+async def test_text_only_tweet_with_linked_video_analyzes_the_link(
+    db_session, feishu_env, monkeypatch
+):
+    reset_feishu_runtime_state()
+    _enable_vfav(feishu_env)
+    from video_split.service.auth_service import ensure_admin_user
+
+    await ensure_admin_user(db_session)
+    replies = _patch_replies(monkeypatch)
+    forwarded = _patch_forward(monkeypatch)
+    _patch_platform(monkeypatch)
+    exc = XPlatformError("No video formats found!", "x_no_video")
+    _patch_probe(monkeypatch, exc)
+    _patch_tweet_links(monkeypatch, [YOUTUBE_LINK])
+    started = _patch_start(monkeypatch)
+
+    await handle_message_event(_payload(f"{X_LINK} 分析"), db_session)
+    await asyncio.sleep(0)
+
+    assert forwarded == []
+    assert started == [YOUTUBE_LINK]
+    assert _titles(replies) == ["改为解析推文里的链接", "已开始分析"]
+    assert YOUTUBE_LINK in _body(replies[0])
+
+
+async def test_text_only_tweet_with_ambiguous_links_replies_no_video(
+    db_session, feishu_env, monkeypatch
+):
+    reset_feishu_runtime_state()
+    _enable_vfav(feishu_env)
+    replies = _patch_replies(monkeypatch)
+    forwarded = _patch_forward(monkeypatch)
+    _patch_platform(monkeypatch)
+    exc = XPlatformError("No video formats found!", "x_no_video")
+    _patch_probe(monkeypatch, exc)
+    _patch_tweet_links(
+        monkeypatch, [YOUTUBE_LINK, "https://www.youtube.com/watch?v=abcdefghijk"]
+    )
+    started = _patch_start(monkeypatch)
+
+    await handle_message_event(_payload(f"{X_LINK} 分析"), db_session)
+    await asyncio.sleep(0)
+
+    assert forwarded == []
+    assert started == []
+    assert _titles(replies) == ["分析失败"]
+    assert "该推文不包含视频" in _body(replies[0])
 
 
 async def test_plain_youtube_link_unchanged(db_session, feishu_env, monkeypatch):

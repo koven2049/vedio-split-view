@@ -25,6 +25,7 @@ from video_split.service.downloader import (
     extract_metadata,
     generate_playback_url,
     normalize_url,
+    x_tweet_links,
 )
 from video_split.service.video_service import _PLATFORM_TAG_MAP
 
@@ -188,7 +189,7 @@ class _FakeYDL:
     def __exit__(self, *args):
         return False
 
-    def extract_info(self, url, download=False):
+    def extract_info(self, url, download=False, **kwargs):
         type(self).seen_urls.append(url)
         return type(self).info
 
@@ -279,6 +280,7 @@ class TestExtractMetadata:
         ("message", "code"),
         [
             ("ERROR: No video could be found in this tweet", "x_no_video"),
+            ("ERROR: [twitter] 123: No video formats found!", "x_no_video"),
             ("ERROR: [twitter] 123: NSFW tweet", "x_unavailable"),
             ("ERROR: [twitter] 123: This tweet is unavailable", "x_unavailable"),
             ("ERROR: [twitter] 123: Protected tweet", "x_unavailable"),
@@ -335,6 +337,56 @@ class TestDownloadAudio:
             await download_audio("https://www.youtube.com/watch?v=dQw4w9WgXcQ", tmp_path)
 
         assert "playlist_items" not in fake_ydl.seen_opts[0]
+
+
+# ─── Tweet links (no native video) ───
+
+
+class _FakeResponse:
+    def __init__(self, url: str):
+        self.url = url
+
+
+class _FakeAsyncClient:
+    resolved: dict[str, str] = {}
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def head(self, url: str):
+        if url not in type(self).resolved:
+            raise RuntimeError("unresolvable")
+        return _FakeResponse(type(self).resolved[url])
+
+
+class TestTweetLinks:
+    async def test_expands_tco_links(self, fake_ydl):
+        fake_ydl.info = {
+            "description": "my talk is up! https://t.co/Fel7tlxqSL",
+        }
+        _FakeAsyncClient.resolved = {
+            "https://t.co/Fel7tlxqSL": "https://www.youtube.com/watch?v=O_zcc6Xl12g",
+        }
+        with patch("video_split.service.downloader.httpx.AsyncClient", _FakeAsyncClient):
+            links = await x_tweet_links("https://x.com/poteto/status/2121673563489140863")
+        assert links == ["https://www.youtube.com/watch?v=O_zcc6Xl12g"]
+
+    async def test_unresolvable_short_link_is_skipped(self, fake_ydl):
+        fake_ydl.info = {"description": "x https://t.co/abc https://t.co/def"}
+        _FakeAsyncClient.resolved = {"https://t.co/def": "https://example.com/page"}
+        with patch("video_split.service.downloader.httpx.AsyncClient", _FakeAsyncClient):
+            links = await x_tweet_links("https://x.com/a/status/1")
+        assert links == ["https://example.com/page"]
+
+    async def test_no_links_returns_empty(self, fake_ydl):
+        fake_ydl.info = {"description": "just text"}
+        assert await x_tweet_links("https://x.com/a/status/1") == []
 
 
 # ─── Platform tag ───

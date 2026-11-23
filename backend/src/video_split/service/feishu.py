@@ -29,6 +29,7 @@ from video_split.service.downloader import (
     detect_platform,
     extract_metadata,
     normalize_url,
+    x_tweet_links,
 )
 from video_split.service.task_runner import runner
 
@@ -433,6 +434,11 @@ def card_help() -> dict:
     else:
         body += "\n未配置视频收藏：X 链接需要带上「分析」才会解析。"
     return _md_card("发一个视频链接", body, color="grey")
+
+
+def card_x_linked(url: str) -> dict:
+    body = f"该推文没有原生视频，已改为解析正文里的链接：\n{url}"
+    return _md_card("改为解析推文里的链接", body)
 
 
 def card_x_needs_keyword() -> dict:
@@ -892,12 +898,21 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
         try:
             await _probe_x_video(url)
         except XPlatformError as e:
-            if e.code == "x_no_video":
+            if e.code != "x_no_video":
+                logger.info("[feishu] X probe unavailable (%s): %s", e.code, e)
+                await _reply(creds, message_id, chat_id, card_error(_X_UNAVAILABLE_MESSAGE, url))
+                return
+            linked = [
+                candidate
+                for candidate in await x_tweet_links(url)
+                if detect_platform(candidate)[0] != "unknown"
+            ]
+            if len(linked) != 1:
                 await _reply(creds, message_id, chat_id, card_error(_X_NO_VIDEO_MESSAGE, url))
                 return
-            logger.info("[feishu] X probe unavailable (%s): %s", e.code, e)
-            await _reply(creds, message_id, chat_id, card_error(_X_UNAVAILABLE_MESSAGE, url))
-            return
+            # The tweet only links the video; analyze what it points at.
+            await _reply(creds, message_id, chat_id, card_x_linked(linked[0]))
+            url = linked[0]
         except TimeoutError:
             logger.warning("[feishu] X probe timed out after %.0fs: %s", _X_PROBE_TIMEOUT, url)
             await _reply(creds, message_id, chat_id, card_error(_X_PROBE_TIMEOUT_MESSAGE, url))
