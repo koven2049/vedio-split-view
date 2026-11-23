@@ -50,6 +50,19 @@ class DownloadResult:
     subtitle_source: str = ""
 
 
+class XPlatformError(RuntimeError):
+    """yt-dlp failure on an X (Twitter) tweet with a machine-readable ``code``.
+
+    Codes:
+        x_no_video    — the tweet carries no video (text-only / image-only).
+        x_unavailable — deleted, protected, or login-gated (NSFW) tweet.
+    """
+
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def normalize_url(url: str) -> str:
     """Normalize video URL to the canonical form expected by yt-dlp."""
     url = url.strip()
