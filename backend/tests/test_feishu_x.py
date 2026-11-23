@@ -1,4 +1,4 @@
-"""Feishu X links: collect in vedio-favorate, analyze only tweets with video."""
+"""Feishu X links: collect by default, analyze only when the message says 分析."""
 
 from __future__ import annotations
 
@@ -162,7 +162,7 @@ def _body(card: dict) -> str:
     return card["elements"][0]["text"]["content"]
 
 
-async def test_video_tweet_forwarded_and_analyzed(db_session, feishu_env, monkeypatch):
+async def test_video_tweet_collected_by_default(db_session, feishu_env, monkeypatch):
     reset_feishu_runtime_state()
     _enable_vfav(feishu_env)
     from video_split.service.auth_service import ensure_admin_user
@@ -178,12 +178,35 @@ async def test_video_tweet_forwarded_and_analyzed(db_session, feishu_env, monkey
     await asyncio.sleep(0)
 
     assert forwarded == [X_LINK]
+    assert probed == []
+    assert started == []
+    assert _titles(replies) == ["已存入视频收藏"]
+
+
+async def test_video_tweet_with_keyword_analyzed_without_collection(
+    db_session, feishu_env, monkeypatch
+):
+    reset_feishu_runtime_state()
+    _enable_vfav(feishu_env)
+    from video_split.service.auth_service import ensure_admin_user
+
+    await ensure_admin_user(db_session)
+    replies = _patch_replies(monkeypatch)
+    forwarded = _patch_forward(monkeypatch)
+    _patch_platform(monkeypatch)
+    probed = _patch_probe(monkeypatch)
+    started = _patch_start(monkeypatch)
+
+    await handle_message_event(_payload(f"{X_LINK} 帮我分析一下"), db_session)
+    await asyncio.sleep(0)
+
+    assert forwarded == []
     assert probed == [X_LINK]
     assert started == [X_LINK]
-    assert _titles(replies) == ["已存入视频收藏", "已开始分析"]
+    assert _titles(replies) == ["已开始分析"]
 
 
-async def test_text_only_tweet_forwarded_without_analysis(db_session, feishu_env, monkeypatch):
+async def test_text_only_tweet_collected_without_probe(db_session, feishu_env, monkeypatch):
     reset_feishu_runtime_state()
     _enable_vfav(feishu_env)
     replies = _patch_replies(monkeypatch)
@@ -197,13 +220,14 @@ async def test_text_only_tweet_forwarded_without_analysis(db_session, feishu_env
     await asyncio.sleep(0)
 
     assert forwarded == [X_LINK]
-    assert probed == [X_LINK]
+    assert probed == []
     assert started == []
     assert _titles(replies) == ["已存入视频收藏"]
 
 
-async def test_text_only_tweet_without_vfav_replies_no_video(db_session, feishu_env, monkeypatch):
+async def test_text_only_tweet_with_keyword_replies_no_video(db_session, feishu_env, monkeypatch):
     reset_feishu_runtime_state()
+    _enable_vfav(feishu_env)
     replies = _patch_replies(monkeypatch)
     forwarded = _patch_forward(monkeypatch)
     _patch_platform(monkeypatch)
@@ -211,7 +235,7 @@ async def test_text_only_tweet_without_vfav_replies_no_video(db_session, feishu_
     _patch_probe(monkeypatch, exc)
     started = _patch_start(monkeypatch)
 
-    await handle_message_event(_payload(X_LINK), db_session)
+    await handle_message_event(_payload(f"{X_LINK} 分析"), db_session)
     await asyncio.sleep(0)
 
     assert forwarded == []
@@ -220,7 +244,68 @@ async def test_text_only_tweet_without_vfav_replies_no_video(db_session, feishu_
     assert "该推文不包含视频" in _body(replies[0])
 
 
-async def test_unavailable_tweet_replies_error_after_forward(db_session, feishu_env, monkeypatch):
+async def test_x_link_without_vfav_and_no_keyword_replies_hint(
+    db_session, feishu_env, monkeypatch
+):
+    reset_feishu_runtime_state()
+    replies = _patch_replies(monkeypatch)
+    forwarded = _patch_forward(monkeypatch)
+    _patch_platform(monkeypatch)
+    probed = _patch_probe(monkeypatch)
+    started = _patch_start(monkeypatch)
+
+    await handle_message_event(_payload(X_LINK), db_session)
+    await asyncio.sleep(0)
+
+    assert forwarded == []
+    assert probed == []
+    assert started == []
+    assert _titles(replies) == ["X 链接怎么处理"]
+    assert "分析" in _body(replies[0])
+
+
+async def test_video_tweet_without_vfav_analyzed_with_keyword(
+    db_session, feishu_env, monkeypatch
+):
+    reset_feishu_runtime_state()
+    from video_split.service.auth_service import ensure_admin_user
+
+    await ensure_admin_user(db_session)
+    replies = _patch_replies(monkeypatch)
+    forwarded = _patch_forward(monkeypatch)
+    _patch_platform(monkeypatch)
+    probed = _patch_probe(monkeypatch)
+    started = _patch_start(monkeypatch)
+
+    await handle_message_event(_payload(f"{X_LINK} 分析"), db_session)
+    await asyncio.sleep(0)
+
+    assert forwarded == []
+    assert probed == [X_LINK]
+    assert started == [X_LINK]
+    assert _titles(replies) == ["已开始分析"]
+
+
+async def test_unavailable_tweet_with_keyword_replies_error(db_session, feishu_env, monkeypatch):
+    reset_feishu_runtime_state()
+    _enable_vfav(feishu_env)
+    replies = _patch_replies(monkeypatch)
+    forwarded = _patch_forward(monkeypatch)
+    _patch_platform(monkeypatch)
+    exc = XPlatformError("tweet is unavailable", "x_unavailable")
+    _patch_probe(monkeypatch, exc)
+    started = _patch_start(monkeypatch)
+
+    await handle_message_event(_payload(f"{X_LINK} 分析"), db_session)
+    await asyncio.sleep(0)
+
+    assert forwarded == []
+    assert started == []
+    assert _titles(replies) == ["分析失败"]
+    assert "该推文不可访问" in _body(replies[0])
+
+
+async def test_unavailable_tweet_collected_by_default(db_session, feishu_env, monkeypatch):
     reset_feishu_runtime_state()
     _enable_vfav(feishu_env)
     replies = _patch_replies(monkeypatch)
@@ -235,8 +320,7 @@ async def test_unavailable_tweet_replies_error_after_forward(db_session, feishu_
 
     assert forwarded == [X_LINK]
     assert started == []
-    assert _titles(replies) == ["已存入视频收藏", "分析失败"]
-    assert "该推文不可访问" in _body(replies[1])
+    assert _titles(replies) == ["已存入视频收藏"]
 
 
 async def test_x_link_mixed_with_youtube_analyzes_youtube(db_session, feishu_env, monkeypatch):
@@ -261,6 +345,27 @@ async def test_x_link_mixed_with_youtube_analyzes_youtube(db_session, feishu_env
     assert YOUTUBE_LINK in _body(replies[1])
 
 
+async def test_mixed_with_keyword_skips_collection(db_session, feishu_env, monkeypatch):
+    reset_feishu_runtime_state()
+    _enable_vfav(feishu_env)
+    from video_split.service.auth_service import ensure_admin_user
+
+    await ensure_admin_user(db_session)
+    replies = _patch_replies(monkeypatch)
+    forwarded = _patch_forward(monkeypatch)
+    _patch_platform(monkeypatch)
+    probed = _patch_probe(monkeypatch)
+    started = _patch_start(monkeypatch)
+
+    await handle_message_event(_payload(f"{YOUTUBE_LINK} 还有 {X_LINK} 分析"), db_session)
+    await asyncio.sleep(0)
+
+    assert forwarded == []
+    assert probed == []
+    assert started == [YOUTUBE_LINK]
+    assert _titles(replies) == ["已开始分析"]
+
+
 async def test_plain_youtube_link_unchanged(db_session, feishu_env, monkeypatch):
     reset_feishu_runtime_state()
     _enable_vfav(feishu_env)
@@ -282,26 +387,6 @@ async def test_plain_youtube_link_unchanged(db_session, feishu_env, monkeypatch)
     assert _titles(replies) == ["已开始分析"]
 
 
-async def test_video_tweet_without_vfav_is_analyzed(db_session, feishu_env, monkeypatch):
-    reset_feishu_runtime_state()
-    from video_split.service.auth_service import ensure_admin_user
-
-    await ensure_admin_user(db_session)
-    replies = _patch_replies(monkeypatch)
-    forwarded = _patch_forward(monkeypatch)
-    _patch_platform(monkeypatch)
-    probed = _patch_probe(monkeypatch)
-    started = _patch_start(monkeypatch)
-
-    await handle_message_event(_payload(X_LINK), db_session)
-    await asyncio.sleep(0)
-
-    assert forwarded == []
-    assert probed == [X_LINK]
-    assert started == [X_LINK]
-    assert _titles(replies) == ["已开始分析"]
-
-
 async def test_probe_timeout_replies_error(db_session, feishu_env, monkeypatch):
     reset_feishu_runtime_state()
     monkeypatch.setattr("video_split.service.feishu._X_PROBE_TIMEOUT", 0.01)
@@ -315,7 +400,7 @@ async def test_probe_timeout_replies_error(db_session, feishu_env, monkeypatch):
     monkeypatch.setattr("video_split.service.feishu.extract_metadata", slow_extract)
     started = _patch_start(monkeypatch)
 
-    await handle_message_event(_payload(X_LINK), db_session)
+    await handle_message_event(_payload(f"{X_LINK} 分析"), db_session)
     await asyncio.sleep(0)
 
     assert started == []

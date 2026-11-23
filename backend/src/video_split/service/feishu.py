@@ -40,6 +40,9 @@ _TOKEN_SKEW = 60.0
 # A tweet probe is a single yt-dlp extract_info call; cap a stalled X response
 # so the Feishu reply is not held indefinitely.
 _X_PROBE_TIMEOUT = 20.0
+# X links are collected by default; this word in the same message asks
+# for analysis instead of collection.
+_X_ANALYZE_KEYWORD = "分析"
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
 _X_URL_RE = re.compile(
     r"https?://(?:(?:www|mobile|m)\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx|fixvx)\.com/\S+",
@@ -425,10 +428,17 @@ def card_started(url: str, platform: str) -> dict:
 
 def card_help() -> dict:
     body = "支持 YouTube / B站 / 小宇宙 / Apple Podcasts / X（推特）。私聊直接粘贴；群里先 @ 我再贴链接。"
-    body += "\nX 推文含视频时会自动分析。"
     if load_vfav_forward() is not None:
-        body += "\nX 链接还会存入视频收藏；纯图文推文只收藏不分析。"
+        body += "\nX 链接默认存入视频收藏；要直接解析，请在消息里带上「分析」。"
+    else:
+        body += "\n未配置视频收藏：X 链接需要带上「分析」才会解析。"
     return _md_card("发一个视频链接", body, color="grey")
+
+
+def card_x_needs_keyword() -> dict:
+    body = "X 链接默认存入视频收藏，但收藏服务未配置。"
+    body += "\n要直接解析，请在消息里带上「分析」。"
+    return _md_card("X 链接怎么处理", body, color="grey")
 
 
 def card_saved(entries: list[tuple[str, str | None]]) -> dict:
@@ -849,18 +859,27 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
 
     msg_type = str(message.get("message_type") or "text")
     content = str(message.get("content") or "")
+    text = _message_plain_text(msg_type, content)
     urls = extract_urls_from_message(msg_type, content)
     x_urls = pick_x_urls(urls)
-    saved_to_vfav = bool(x_urls) and load_vfav_forward() is not None
-    if saved_to_vfav and not await _forward_x_links(creds, message_id, chat_id, x_urls):
-        return
-
+    # X links default to collection; an explicit 分析 in the same message
+    # switches to analysis and skips collection.
+    wants_analysis = _X_ANALYZE_KEYWORD in text
     picked = pick_supported_url(urls)
-    if picked is None:
-        if saved_to_vfav:
-            # The collection card already answered this message.
+
+    if x_urls and not wants_analysis:
+        vfav = load_vfav_forward()
+        if vfav is not None:
+            if not await _forward_x_links(creds, message_id, chat_id, x_urls):
+                return
+            if picked is None or picked[1] == "x":
+                return  # the collection card already answered this message
+        elif picked is not None and picked[1] == "x":
+            await _reply(creds, message_id, chat_id, card_x_needs_keyword())
             return
-        if _is_confirm_text(_message_plain_text(msg_type, content)):
+
+    if picked is None:
+        if _is_confirm_text(text):
             task_id = pending_confirm_task_id(open_id)
             if task_id is not None and runner.confirm(task_id):
                 await _reply(creds, message_id, chat_id, card_confirmed())
@@ -874,9 +893,7 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
             await _probe_x_video(url)
         except XPlatformError as e:
             if e.code == "x_no_video":
-                # A text/image-only tweet is already saved; do not nag with an error.
-                if not saved_to_vfav:
-                    await _reply(creds, message_id, chat_id, card_error(_X_NO_VIDEO_MESSAGE, url))
+                await _reply(creds, message_id, chat_id, card_error(_X_NO_VIDEO_MESSAGE, url))
                 return
             logger.info("[feishu] X probe unavailable (%s): %s", e.code, e)
             await _reply(creds, message_id, chat_id, card_error(_X_UNAVAILABLE_MESSAGE, url))

@@ -16,7 +16,7 @@
 - **标签管理**：给视频打标签，资源库支持搜索。
 - **多用户**：管理员账号负责建用户、配额、清理存储；普通用户独立空间。
 - **API Token**：可在设置里签发长期 Token（请求头 `X-API-Key`），用脚本或外部工具调用接口：`GET /api/videos/ids` 拿全部 id → `/api/videos/{id}/meta` 拿轻量元数据 → `/api/videos/{id}` 拿完整详情，也能提交分析。接口文档在 `/api-docs`，免登录可看。
-- **飞书丢链接**：把 YouTube / B 站 / 小宇宙 / Apple Podcasts / X 链接发给飞书应用机器人，后台直接开分析，结果卡可点「查看全文」（免登录）。接入步骤见 [docs/feishu-bot.md](docs/feishu-bot.md)。
+- **飞书丢链接**：把 YouTube / B 站 / 小宇宙 / Apple Podcasts / X 链接发给飞书应用机器人，后台直接开分析，结果卡可点「查看全文」（免登录）。X 链接默认存入视频收藏，消息里带「分析」时才解析。接入步骤见 [docs/feishu-bot.md](docs/feishu-bot.md)。
 - **用量追踪**：每次 ASR 任务和 LLM 调用（分析、对话稿、思维导图、翻译、失败重试）都记一笔流水，资源库按模型汇总时长 / Token 并按单价估算费用；视频删除后流水仍保留。流水上线前的历史用 `backend/.venv/bin/python scripts/backfill_usage.py` 补一次（`--help` 看口径）。
 - **双语界面**：中文 / English 自由切换。
 

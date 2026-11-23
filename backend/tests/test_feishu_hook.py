@@ -817,7 +817,7 @@ async def test_x_link_forwarded_to_vfav(db_session, enable_feishu, monkeypatch):
     assert "@momoflilbit" in replies[0]["elements"][0]["text"]["content"]
 
 
-async def test_x_link_without_vfav_config_replies_no_video(db_session, enable_feishu, monkeypatch):
+async def test_x_link_without_vfav_config_replies_hint(db_session, enable_feishu, monkeypatch):
     reset_feishu_runtime_state()
     _patch_x_probe(monkeypatch, video=False)
     replies: list[dict] = []
@@ -832,10 +832,10 @@ async def test_x_link_without_vfav_config_replies_no_video(db_session, enable_fe
         _message_payload("https://x.com/momoflilbit/status/2105276821214532096"), db_session
     )
     assert started.await_count == 0
-    assert replies[0]["header"]["title"]["content"] == "分析失败"
+    assert replies[0]["header"]["title"]["content"] == "X 链接怎么处理"
     body = replies[0]["elements"][0]["text"]["content"]
-    assert "该推文不包含视频" in body
-    assert "视频收藏" not in body
+    assert "分析" in body
+    assert "收藏服务未配置" in body
 
 
 async def test_youtube_link_still_analyzed_with_vfav_on(db_session, enable_feishu, monkeypatch):

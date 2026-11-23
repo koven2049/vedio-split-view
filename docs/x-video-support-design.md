@@ -4,7 +4,7 @@
 
 - **范围**：X（Twitter）视频接入与 YouTube 共用的通用 yt-dlp 管道，脑图、断点续传/重试、按平台并发配额、去重、SSE 进度等能力与其他平台一致。
 - **匿名可解析**：yt-dlp 内置 X 提取器走游客 token，无需登录即可取元数据与 HLS 纯音频流（`hls-audio-128000`，AAC 128kbps）。实测记录见 [`x_feasibility.md`](x_feasibility.md)。
-- **飞书 X 链接双路**：配置了视频收藏时继续转发收藏卡；推文含视频则同时发起解析，纯图文推文只收藏不解析。
+- **飞书 X 链接**：默认只存入视频收藏；同一条消息里带「分析」二字时改为直接解析、不收藏。
 - **验收测试推文**：`https://x.com/rchen1386/status/2124465845284008268`，`tweet_id=2124465845284008268`（媒体 ID `2124465754183725056`），作者 `Royce Chen`，时长约 337 秒。`video_id` 必须用推文 status ID，不能用媒体 ID，否则去重与断点恢复会失效。
 
 ---
@@ -48,16 +48,14 @@
    - 下载与时长/确认阈值走视频档（与 YouTube / B 站同分支），不得误入播客阈值。
    - `task_runner.py`：在捕获 `(XiaoyuzhouError, ApplePodcastsError)` 处并入 `XPlatformError`，将 `e.code` 透传给前端。
 
-3. **飞书双路协同（`backend/src/video_split/service/feishu.py`）**
-   - **现状冲突点**：原先 `pick_supported_url(urls)` 因 `detect_platform` 不认识 X 而返回 `None`，才落入下方的 `pick_x_urls(urls)` 转发 `vedio-favorate` 分支（见 `feishu.py:798-825`）。一旦 `detect_platform` 支持 `"x"`，`pick_supported_url` 会直接命中 X 链接并跳过 `vedio-favorate` 转发。
-   - **重构逻辑**：
-     1. 消息中若含有 X 链接（`pick_x_urls(urls)` 非空）且 `load_vfav_forward() is not None`：**先执行 `vedio-favorate` 转发**并回复收藏结果卡片（保持既有转发能力不退化；若某条是纯图文推文且无其他视频链接，用户体验与之前完全一致）。
-     2. 同时检查是否存在可解析的视频 URL：
-        - 若 picked 是非 X 平台（YouTube / B 站 / 小宇宙 / Apple Podcasts），照常直接启动解析。
-        - 若 picked 是 `"x"`，先通过轻量探测（`asyncio.to_thread` 调 `yt-dlp` `extract_info(url, download=False)`，带超时控制）判断该推文是否包含视频：
-          - **含视频**：继续向下调用 `start_analysis_for_user` 启动解析并回复解析卡片。
-          - **无视频（`x_no_video` / 纯图文推文）**：若刚才已触发 `vedio-favorate` 转发，则静默结束（不再弹报错卡骚扰用户）；若未配置 `vedio-favorate`，则正常回复“该推文不包含视频”错误提示卡片。
-   - 同步更新 `feishu.py` 帮助卡片文案与 `docs/feishu-bot.md`。
+3. **飞书：收藏为默认，分析需显式（`backend/src/video_split/service/feishu.py`）**
+   - **默认动作**：消息含 X 链接且整条消息没有「分析」二字时，若配置了 `vedio-favorate` 就逐条转发并回收藏卡；picked 是 X（或只有 X 链接）时到此为止，**不**探测、**不**创建解析任务。混合消息（X + YouTube 等）保持原行为：X 收藏、另一个平台照常解析。
+   - **显式分析**：同一条消息里出现「分析」二字（`_X_ANALYZE_KEYWORD`）时跳过收藏，按 picked 平台解析；picked 是 X 时先用 `extract_metadata` 做轻量探测（20s 超时；该函数内部已把 yt-dlp 放到线程里）：
+     - 含视频 → `start_analysis_for_user` 并回解析卡。
+     - 无视频（`x_no_video`）→ 回「该推文不包含视频」。
+     - 不可访问（`x_unavailable`）→ 回「该推文不可访问」。
+   - **未配置 `vedio-favorate`**：X 链接无「分析」时回提示卡（说明默认收藏但收藏未配置、加「分析」才会解析），不创建任务；带「分析」则正常解析。
+   - 同步更新帮助卡片文案与 `docs/feishu-bot.md`。
 
 4. **其余后端触点**
    - `schemas.py`：更新 URL 字段 `description` 中的支持平台列表。
@@ -95,10 +93,12 @@
 - **代理正确性**：`_DIRECT_PLATFORMS` 绝对不能包含 `"x"`；`proxy_enabled=True` 时 X 必须走代理。
 - **多视频推文不崩**：`yt-dlp` 返回 `_type: "playlist"` + `entries: [...]` 时，`extract_metadata` 正确取 `entries[0]`，下载带 `playlist_items: "1"`。
 - **断点续传/重试路径覆盖**：`run_analysis` 与 `resume_analysis` 都要正确处理 `"x"`（后者没有字幕阶段，但要透传 `XPlatformError` 的 `error_code`）。
-- **飞书双路不回归**：
-  - 配置了 `vfav` + 带视频 X 推文 → 既调用 `forward_to_vfav` 回复收藏卡，又启动 `start_analysis_for_user`。
-  - 配置了 `vfav` + 纯图文 X 推文 → 只调用 `forward_to_vfav` 回复收藏卡，**不**创建失败的解析任务。
-  - 未配置 `vfav` + 带视频 X 推文 → 直接启动解析。
+- **飞书行为（收藏为默认，分析需显式）**：
+  - 配置了 `vfav` + X 链接、消息无「分析」 → 只转发收藏，不探测、不建任务。
+  - 配置了 `vfav` + 带视频 X 推文 + 「分析」 → 不转发，启动解析。
+  - 配置了 `vfav` + 纯图文 X 推文 + 「分析」 → 回「该推文不包含视频」，不建任务。
+  - 未配置 `vfav` + X 链接、无「分析」 → 回提示卡，不建任务。
+  - 混合消息无「分析」 → X 收藏、其他平台解析；带「分析」 → 不收藏。
   - 原有 YouTube / B 站 / 小宇宙 / Apple Podcasts 飞书解析测试 100% 通过。
 - **OpenAPI 文档契约**：`cd backend && .venv/bin/python -m pytest tests/test_apidocs.py -q` 必须通过（遵循 `AGENTS.md` API 文档自动派生约束）。
 - **文档合规**：遵循 `AGENTS.md`「文档即现状」与「配置值只在配置源维护」，文档中不得出现“本次新增/v2 修改”字样，不得抄录配置当前值或密钥。
