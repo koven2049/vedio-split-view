@@ -758,9 +758,41 @@ def _enable_vfav(fixture, base_url="http://vfav.example", token="vft-secret-toke
     return load_vfav_forward()
 
 
+def _patch_x_probe(monkeypatch, *, video: bool) -> list[str]:
+    """Pin X detection and stub the tweet probe so tests never hit the network.
+
+    ``detect_platform`` gains X support in a parallel branch; patching the
+    feishu namespace keeps these tests on the merged behavior either way.
+    """
+    from video_split.service.downloader import VideoMeta, XPlatformError
+
+    probed: list[str] = []
+
+    async def fake_extract(url):
+        probed.append(url)
+        if not video:
+            raise XPlatformError("No video could be found in this tweet", "x_no_video")
+        return VideoMeta(
+            url=url,
+            platform="x",
+            video_id="2105276821214532096",
+            title="tweet",
+            duration_seconds=42,
+            thumbnail_url="",
+        )
+
+    monkeypatch.setattr(
+        "video_split.service.feishu.detect_platform",
+        lambda _url: ("x", "2105276821214532096"),
+    )
+    monkeypatch.setattr("video_split.service.feishu.extract_metadata", fake_extract)
+    return probed
+
+
 async def test_x_link_forwarded_to_vfav(db_session, enable_feishu, monkeypatch):
     reset_feishu_runtime_state()
     assert _enable_vfav(enable_feishu) is not None
+    _patch_x_probe(monkeypatch, video=False)
     forwarded: list[str] = []
     replies: list[dict] = []
 
@@ -785,19 +817,25 @@ async def test_x_link_forwarded_to_vfav(db_session, enable_feishu, monkeypatch):
     assert "@momoflilbit" in replies[0]["elements"][0]["text"]["content"]
 
 
-async def test_x_link_without_vfav_config_keeps_help(db_session, enable_feishu, monkeypatch):
+async def test_x_link_without_vfav_config_replies_no_video(db_session, enable_feishu, monkeypatch):
     reset_feishu_runtime_state()
+    _patch_x_probe(monkeypatch, video=False)
     replies: list[dict] = []
+    started = AsyncMock()
 
     async def fake_reply(_creds, _mid, card):
         replies.append(card)
 
     monkeypatch.setattr("video_split.service.feishu.feishu_client.reply_card", fake_reply)
+    monkeypatch.setattr("video_split.api.analysis.start_analysis_for_user", started)
     await handle_message_event(
         _message_payload("https://x.com/momoflilbit/status/2105276821214532096"), db_session
     )
-    assert replies[0]["header"]["title"]["content"] == "发一个视频链接"
-    assert "视频收藏" not in replies[0]["elements"][0]["text"]["content"]
+    assert started.await_count == 0
+    assert replies[0]["header"]["title"]["content"] == "分析失败"
+    body = replies[0]["elements"][0]["text"]["content"]
+    assert "该推文不包含视频" in body
+    assert "视频收藏" not in body
 
 
 async def test_youtube_link_still_analyzed_with_vfav_on(db_session, enable_feishu, monkeypatch):
@@ -821,7 +859,8 @@ async def test_youtube_link_still_analyzed_with_vfav_on(db_session, enable_feish
     both = "https://www.youtube.com/watch?v=dQw4w9WgXcQ 和 https://x.com/a/status/1"
     await handle_message_event(_message_payload(both), db_session)
     assert started == ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]
-    assert forward.await_count == 0
+    # The X link is still collected; only the picked non-X link is analyzed.
+    forward.assert_awaited_once_with("https://x.com/a/status/1")
 
 
 async def test_forward_failure_replies_error_card(db_session, enable_feishu, monkeypatch):
@@ -891,6 +930,7 @@ def test_pick_x_urls_variants():
 async def test_multiple_x_links_forwarded_in_order(db_session, enable_feishu, monkeypatch):
     reset_feishu_runtime_state()
     assert _enable_vfav(enable_feishu) is not None
+    _patch_x_probe(monkeypatch, video=False)
     forwarded: list[str] = []
     replies: list[dict] = []
 
@@ -922,6 +962,7 @@ async def test_multiple_x_links_forwarded_in_order(db_session, enable_feishu, mo
 async def test_multiple_x_links_partial_failure_shows_count(db_session, enable_feishu, monkeypatch):
     reset_feishu_runtime_state()
     _enable_vfav(enable_feishu)
+    _patch_x_probe(monkeypatch, video=False)
     replies: list[dict] = []
 
     async def flaky(url):

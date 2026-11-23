@@ -23,7 +23,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from video_split.config import get_settings
 from video_split.secure import decrypt, encrypt, ensure_mode_0600, is_encrypted, load_or_create_kek
-from video_split.service.downloader import detect_platform, normalize_url
+from video_split.service.downloader import (
+    VideoMeta,
+    XPlatformError,
+    detect_platform,
+    extract_metadata,
+    normalize_url,
+)
 from video_split.service.task_runner import runner
 
 logger = logging.getLogger(__name__)
@@ -31,6 +37,9 @@ logger = logging.getLogger(__name__)
 SECRET_FIELDS = frozenset({"app_secret", "verification_token", "encrypt_key"})
 _DEDUP_TTL = 600.0
 _TOKEN_SKEW = 60.0
+# A tweet probe is a single yt-dlp extract_info call; cap a stalled X response
+# so the Feishu reply is not held indefinitely.
+_X_PROBE_TIMEOUT = 20.0
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
 _X_URL_RE = re.compile(
     r"https?://(?:(?:www|mobile|m)\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx|fixvx)\.com/\S+",
@@ -338,6 +347,45 @@ async def forward_to_vfav(url: str) -> str:
     return resp.text.strip()
 
 
+_X_NO_VIDEO_MESSAGE = "该推文不包含视频"
+_X_UNAVAILABLE_MESSAGE = "该推文不可访问（已删除、受保护或受限）"
+_X_PROBE_TIMEOUT_MESSAGE = "读取推文超时，请稍后重试"
+_X_PROBE_FAILED_MESSAGE = "读取推文失败，请稍后重试"
+
+
+async def _probe_x_video(url: str) -> VideoMeta:
+    """Return an X tweet's metadata; raise ``XPlatformError`` when it has no video.
+
+    ``extract_metadata`` pushes yt-dlp's blocking ``extract_info`` into a worker
+    thread, so the event loop stays free. ``wait_for`` bounds a stalled X
+    request: a timed-out probe is cancelled here, while the worker thread it
+    started finishes in the background.
+    """
+    return await asyncio.wait_for(extract_metadata(url), timeout=_X_PROBE_TIMEOUT)
+
+
+async def _forward_x_links(
+    creds: FeishuCredentials, message_id: str, chat_id: str, x_urls: list[str]
+) -> bool:
+    """Forward every X link to vedio-favorate and reply one collection card.
+
+    Returns False when the error card was already sent for a single failed
+    link (the caller must stop); True when a collection card was replied.
+    """
+    entries: list[tuple[str, str | None]] = []
+    for x_url in x_urls:  # 按出现顺序逐条存入，一条失败不影响其余
+        try:
+            entries.append((x_url, await forward_to_vfav(x_url)))
+        except Exception as e:
+            logger.exception("[feishu] vfav forward failed for %s", x_url)
+            entries.append((x_url, None))
+            if len(x_urls) == 1:
+                await _reply(creds, message_id, chat_id, card_error(f"存入视频收藏失败：{e}"))
+                return False
+    await _reply(creds, message_id, chat_id, card_saved(entries))
+    return True
+
+
 def pick_supported_url(urls: list[str]) -> tuple[str, str] | None:
     for raw in urls:
         url = normalize_url(raw)
@@ -376,9 +424,10 @@ def card_started(url: str, platform: str) -> dict:
 
 
 def card_help() -> dict:
-    body = "只支持 YouTube / B站 / 小宇宙 / Apple Podcasts。私聊直接粘贴；群里先 @ 我再贴链接。"
+    body = "支持 YouTube / B站 / 小宇宙 / Apple Podcasts / X（推特）。私聊直接粘贴；群里先 @ 我再贴链接。"
+    body += "\nX 推文含视频时会自动分析。"
     if load_vfav_forward() is not None:
-        body += "\nX（推特）链接会存入视频收藏。"
+        body += "\nX 链接还会存入视频收藏；纯图文推文只收藏不分析。"
     return _md_card("发一个视频链接", body, color="grey")
 
 
@@ -390,7 +439,11 @@ def card_saved(entries: list[tuple[str, str | None]]) -> dict:
         lines.append(f"{message or '❌ 存入失败'}\n{url}")
     if len(entries) == 1 and not failed:
         return _md_card("已存入视频收藏", lines[0], color="green")
-    title = "已存入视频收藏" if not failed else f"存入视频收藏（{len(entries) - len(failed)}/{len(entries)}）"
+    title = (
+        "已存入视频收藏"
+        if not failed
+        else f"存入视频收藏（{len(entries) - len(failed)}/{len(entries)}）"
+    )
     return _md_card(title, "\n\n".join(lines), color="green" if not failed else "orange")
 
 
@@ -797,23 +850,15 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
     msg_type = str(message.get("message_type") or "text")
     content = str(message.get("content") or "")
     urls = extract_urls_from_message(msg_type, content)
+    x_urls = pick_x_urls(urls)
+    saved_to_vfav = bool(x_urls) and load_vfav_forward() is not None
+    if saved_to_vfav and not await _forward_x_links(creds, message_id, chat_id, x_urls):
+        return
+
     picked = pick_supported_url(urls)
     if picked is None:
-        x_urls = pick_x_urls(urls)
-        if x_urls and load_vfav_forward() is not None:
-            entries: list[tuple[str, str | None]] = []
-            for x_url in x_urls:  # 按出现顺序逐条存入，一条失败不影响其余
-                try:
-                    entries.append((x_url, await forward_to_vfav(x_url)))
-                except Exception as e:
-                    logger.exception("[feishu] vfav forward failed for %s", x_url)
-                    entries.append((x_url, None))
-                    if len(entries) <= 1 and len(x_urls) == 1:
-                        await _reply(
-                            creds, message_id, chat_id, card_error(f"存入视频收藏失败：{e}")
-                        )
-                        return
-            await _reply(creds, message_id, chat_id, card_saved(entries))
+        if saved_to_vfav:
+            # The collection card already answered this message.
             return
         if _is_confirm_text(_message_plain_text(msg_type, content)):
             task_id = pending_confirm_task_id(open_id)
@@ -823,6 +868,27 @@ async def handle_message_event(payload: dict[str, Any], db: AsyncSession) -> Non
         await _reply(creds, message_id, chat_id, card_help())
         return
     url, platform = picked
+
+    if platform == "x":
+        try:
+            await _probe_x_video(url)
+        except XPlatformError as e:
+            if e.code == "x_no_video":
+                # A text/image-only tweet is already saved; do not nag with an error.
+                if not saved_to_vfav:
+                    await _reply(creds, message_id, chat_id, card_error(_X_NO_VIDEO_MESSAGE, url))
+                return
+            logger.info("[feishu] X probe unavailable (%s): %s", e.code, e)
+            await _reply(creds, message_id, chat_id, card_error(_X_UNAVAILABLE_MESSAGE, url))
+            return
+        except TimeoutError:
+            logger.warning("[feishu] X probe timed out after %.0fs: %s", _X_PROBE_TIMEOUT, url)
+            await _reply(creds, message_id, chat_id, card_error(_X_PROBE_TIMEOUT_MESSAGE, url))
+            return
+        except Exception:
+            logger.exception("[feishu] X probe failed: %s", url)
+            await _reply(creds, message_id, chat_id, card_error(_X_PROBE_FAILED_MESSAGE, url))
+            return
 
     from video_split.api.analysis import start_analysis_for_user
     from video_split.models import User
