@@ -20,6 +20,7 @@ from video_split.service.dialogue import format_dialogue
 from video_split.service.downloader import (
     MIN_AUDIO_BYTES,
     SubtitleEntry,
+    XPlatformError,
     detect_platform,
     download_audio,
     download_thumbnail,
@@ -47,6 +48,7 @@ _PLATFORM_TAG_MAP = {
     "bilibili": ("Bilibili", "#00a1d6"),
     "xiaoyuzhou": ("小宇宙", "#7c3aed"),
     "apple_podcasts": ("Apple Podcasts", "#fa2c56"),
+    "x": ("X", "#000000"),
 }
 
 
@@ -405,6 +407,12 @@ async def run_analysis(
                 message="Podcast — no subtitles available, will use audio transcription.",
                 detail={"method": "whisper", "reason": "Podcast platform (no subtitles)"},
             )
+        elif meta.platform == "x":
+            yield ProgressEvent(
+                stage="subtitle_check", progress=14,
+                message="X video — no platform subtitles, will use audio transcription.",
+                detail={"method": "whisper", "reason": "X video (no platform subtitles)"},
+            )
 
         _check_cancelled()
 
@@ -423,12 +431,14 @@ async def run_analysis(
                 no_sub_reason = "Bilibili account not connected, cannot fetch subtitles."
             elif meta.platform in ("xiaoyuzhou", "apple_podcasts"):
                 no_sub_reason = "Podcast platform (no subtitles)."
+            elif meta.platform == "x":
+                no_sub_reason = "X video (no platform subtitles)."
             else:
                 no_sub_reason = "No subtitles found."
 
             transcript_method = "whisper"
             logger.info("[analysis] Task #%d — no subtitles, using audio transcription", task.id)
-            if meta.platform not in ("xiaoyuzhou", "apple_podcasts"):
+            if meta.platform not in ("xiaoyuzhou", "apple_podcasts", "x"):
                 yield ProgressEvent(
                     stage="subtitle_check", progress=14,
                     message=f"{no_sub_reason} Will download audio and use Whisper API.",
@@ -1080,6 +1090,14 @@ async def resume_analysis(
             return
         except XiaoyuzhouError as e:
             logger.error("[analysis] Task #%d — xiaoyuzhou retry failed (%s): %s", task.id, e.code, e)
+            await update_task_status(db, task, "failed_download", describe_error(e))
+            yield ProgressEvent(
+                stage="error", progress=0, message=describe_error(e),
+                detail={"error_code": e.code},
+            )
+            return
+        except XPlatformError as e:
+            logger.error("[analysis] Task #%d — x retry failed (%s): %s", task.id, e.code, e)
             await update_task_status(db, task, "failed_download", describe_error(e))
             yield ProgressEvent(
                 stage="error", progress=0, message=describe_error(e),

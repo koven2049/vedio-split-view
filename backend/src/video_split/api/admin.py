@@ -183,7 +183,13 @@ async def admin_cleanup_run(
 
 @router.post("/export")
 async def admin_export_all(
-    platform: str = Query("", description="Filter by platform: youtube, bilibili, or empty for all"),
+    platform: str = Query(
+        "",
+        description=(
+            "Filter by platform: youtube, bilibili, xiaoyuzhou, apple_podcasts, "
+            "x, or empty for all"
+        ),
+    ),
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):

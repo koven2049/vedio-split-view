@@ -126,11 +126,12 @@ async def _migrate_user_role(conn) -> None:  # type: ignore[no-untyped-def]
 
 
 async def _ensure_platform_tags(conn) -> None:  # type: ignore[no-untyped-def]
-    """Ensure every video has a platform tag (YouTube / Bilibili)."""
+    """Ensure every video has a platform tag (YouTube / Bilibili / X)."""
     for platform, name, color in [
         ("youtube", "YouTube", "#ff0000"),
         ("bilibili", "Bilibili", "#00a1d6"),
         ("xiaoyuzhou", "小宇宙", "#7c3aed"),
+        ("x", "X", "#000000"),
     ]:
         await conn.execute(
             text("INSERT OR IGNORE INTO tags (name, color) VALUES (:name, :color)"),
