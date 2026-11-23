@@ -23,10 +23,12 @@ export const STAGES = [
   'complete',
 ];
 
-/** Stages that are meaningless for audio-only podcasts (no subtitles). */
+/** Stages that are meaningless when the source has no platform subtitles:
+ *  audio-only podcasts and X videos (Whisper transcribes them directly). */
 const HIDDEN_STAGES_BY_PLATFORM: Partial<Record<AnalysisPlatform, Set<string>>> = {
   xiaoyuzhou: new Set(['subtitle_check']),
   apple_podcasts: new Set(['subtitle_check']),
+  x: new Set(['subtitle_check']),
 };
 
 /** Map backend XiaoyuzhouError codes to i18n keys (spec 3.4). */
@@ -41,6 +43,42 @@ export const XIAOYUZHOU_ERROR_KEYS: Record<XiaoyuzhouErrorCode, TranslationKey> 
 
 export function isXiaoyuzhouErrorCode(code: string): code is XiaoyuzhouErrorCode {
   return code in XIAOYUZHOU_ERROR_KEYS;
+}
+
+/** Backend XPlatformError codes. */
+export type XErrorCode = 'x_no_video' | 'x_unavailable';
+
+/** Map backend XPlatformError codes to i18n keys. */
+export const X_ERROR_KEYS: Record<XErrorCode, TranslationKey> = {
+  x_no_video: 'analyze.xErrorNoVideo',
+  x_unavailable: 'analyze.xErrorUnavailable',
+};
+
+export function isXErrorCode(code: string): code is XErrorCode {
+  return code in X_ERROR_KEYS;
+}
+
+export interface PlatformTagStyle {
+  background: string;
+  color: string;
+}
+
+const DEFAULT_PLATFORM_TAG_STYLE: PlatformTagStyle = {
+  background: 'rgba(59,130,246,0.1)',
+  color: 'var(--color-primary)',
+};
+
+/**
+ * Chip style for the platform tag. X's backend tag color is #000000, which is
+ * black-on-dark in the dark theme, so its tag uses the theme-adaptive neutral
+ * surface + foreground instead and stays readable in both themes.
+ */
+export const PLATFORM_TAG_STYLES: Partial<Record<AnalysisPlatform, PlatformTagStyle>> = {
+  x: { background: 'var(--color-bg-tertiary)', color: 'var(--color-text)' },
+};
+
+export function platformTagStyle(platform: string): PlatformTagStyle {
+  return PLATFORM_TAG_STYLES[platform as AnalysisPlatform] ?? DEFAULT_PLATFORM_TAG_STYLE;
 }
 
 function formatMb(bytes: number): number {
