@@ -1077,6 +1077,33 @@ run_uninstall_daemon() {
 }
 
 # ── usage ─────────────────────────────────────────────────────────────────────
+run_check() {
+    local fail=0
+    [[ -x "$VENV_PY" ]] || { log_error "backend venv missing — run ./manage.sh init"; return 1; }
+    if ! "$VENV_PY" -c "import ruff" >/dev/null 2>&1; then
+        log_error "ruff not installed in backend venv — run: $VENV_PY -m pip install ruff"
+        return 1
+    fi
+    log_step "Backend lint (ruff) …"
+    if "$VENV_PY" -m ruff check "$SCRIPT_DIR/backend/src" "$SCRIPT_DIR/backend/tests"; then
+        log_ok "backend lint passed"
+    else
+        fail=1
+    fi
+    if [[ -d "$SCRIPT_DIR/frontend/node_modules" ]]; then
+        log_step "Frontend check (prettier + eslint) …"
+        if ( cd "$SCRIPT_DIR/frontend" && npm run check ); then
+            log_ok "frontend check passed"
+        else
+            fail=1
+        fi
+    else
+        log_warn "frontend/node_modules missing — skipped frontend check"
+    fi
+    [[ "$fail" -eq 0 ]] || { log_error "check failed"; return 1; }
+    log_ok "check passed"
+}
+
 usage() {
     cat <<EOF
 Usage: $0 <command> [options]
@@ -1097,6 +1124,9 @@ Lifecycle (dual form; no containers):
   uninstall-daemon           Print root commands to unload and remove the
                              LaunchDaemon
   clean                      Remove pip cache / __pycache__ / node_modules / dist
+
+Quality:
+  check                      Lint only: backend ruff + frontend prettier/eslint
 
 Data:
   export [youtube|bilibili]        Export video data to data/exports/
@@ -1147,6 +1177,7 @@ main() {
         deploy-data)   run_deploy_data "$@" ;;
         clean-exports) run_clean_exports "$@" ;;
         clean)         run_clean ;;
+        check)         run_check ;;
         *)           usage; exit 1 ;;
     esac
 }

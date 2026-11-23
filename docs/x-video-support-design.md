@@ -107,8 +107,7 @@
 1. **后端单测与 Lint**：
    ```bash
    cd backend && .venv/bin/python -m pytest -q
-   cd backend && .venv/bin/python -m ruff check src tests
-   # venv 未装 ruff 时用 uvx/pipx 取出与 uv.lock 一致的版本
+   ./manage.sh check
    ```
 2. **前端类型检查与构建**：
    ```bash
