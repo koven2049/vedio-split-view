@@ -5,13 +5,14 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from video_split.config import get_settings
 from sqlalchemy import select
 
-from video_split.models import BilibiliCredential, Segment, Tag, Task, User, Video, video_tags
+from video_split.models import BilibiliCredential, Segment, Tag, Task, Video, video_tags
 from video_split.schemas import ProgressEvent
 from video_split.service import usage as usage_ledger
 from video_split.service.error_text import describe_error
@@ -40,6 +41,10 @@ from video_split.service.task_manager import (
     update_task_status,
 )
 from video_split.service.transcriber import ASRUsage, TranscriptionProgress, get_audio_duration, probe_decoded_seconds, transcribe_audio
+
+if TYPE_CHECKING:
+    from video_split.service.analyzer import AnalysisResult
+    from video_split.service.downloader import VideoMeta
 
 logger = logging.getLogger(__name__)
 
@@ -546,7 +551,7 @@ async def run_analysis(
 
                         async for ev in _relay_download_progress(
                             "audio_download", 15, 40, _ap_factory,
-                            label=f"下载音频 · Apple Podcasts",
+                            label="下载音频 · Apple Podcasts",
                             cancel_event=cancel_event,
                         ):
                             yield ev

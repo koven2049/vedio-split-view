@@ -19,7 +19,6 @@ from video_split.schemas import (
     ChunkInfo,
     DebugCleanupResponse,
     DebugDownloadRequest,
-    DebugDownloadResponse,
     DebugTaskInfo,
     DebugTestASRRequest,
     DebugTranscribeRequest,

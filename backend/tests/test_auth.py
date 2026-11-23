@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import admin_create_user, get_admin_token
+from tests.conftest import admin_create_user
 
 
 @pytest.mark.asyncio

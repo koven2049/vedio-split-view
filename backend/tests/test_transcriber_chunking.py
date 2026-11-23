@@ -187,11 +187,11 @@ def test_metadata_drift_within_tolerance_still_splits(monkeypatch, tmp_path):
 # fails with exit 234). Skipped automatically when ffmpeg/ffprobe is absent.
 # ---------------------------------------------------------------------------
 
-import math
-import shutil
-import subprocess as _sp
+import math  # noqa: E402
+import shutil  # noqa: E402
+import subprocess as _sp  # noqa: E402
 
-import pytest
+import pytest  # noqa: E402
 
 _ffmpeg_available = shutil.which("ffmpeg") and shutil.which("ffprobe")
 requires_ffmpeg = pytest.mark.skipif(not _ffmpeg_available, reason="ffmpeg/ffprobe not installed")
@@ -297,7 +297,7 @@ def test_get_audio_duration_on_garbage_file_raises_readably(tmp_path):
 # only go red on ffmpeg >=9.
 # ---------------------------------------------------------------------------
 
-import struct as _struct
+import struct as _struct  # noqa: E402
 
 _COVER_ART_FIXTURE_BYTES = 55_000_000
 

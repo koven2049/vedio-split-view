@@ -410,13 +410,6 @@ async def translate_subtitles_to_chinese(
         return subtitles
 
     settings = get_settings()
-    base_url = settings.llm.base_url.rstrip("/")
-    url = f"{base_url}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {settings.llm.api_key}",
-        "Content-Type": "application/json",
-    }
-    timeout = httpx.Timeout(settings.llm.timeout_ms / 1000)
 
     async def _translate_batch(texts: list[str]) -> list[str | None]:
         """Translate one batch; return list of translated-or-None strings."""

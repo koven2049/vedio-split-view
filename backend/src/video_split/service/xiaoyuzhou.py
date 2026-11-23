@@ -263,7 +263,6 @@ async def extract_xiaoyuzhou_metadata(url: str) -> tuple[VideoMeta, str]:
             "not_episode", "URL is not a 小宇宙 single-episode link (/episode/<id>)",
         )
 
-    settings = get_settings()
     # 小宇宙是国内平台，无视全局 proxy 强制直连（见 downloader._proxy_for_platform）
     proxy = None
 

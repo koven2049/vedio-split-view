@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from pathlib import Path
 
 import pytest
 
@@ -133,7 +132,6 @@ async def test_translate_batch_cache_skips_done_work(monkeypatch, test_config_pa
 
     monkeypatch.setattr(analyzer, "post_chat", _fake_post_chat)
 
-    cache = tmp_path / f"tc_{abs(hash('x'))}.json"
     monkeypatch.setattr(
         analyzer,
         "_translate_cache_path",

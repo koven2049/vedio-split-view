@@ -106,7 +106,8 @@ async def test_relay_propagates_exception():
         await asyncio.sleep(0)
         raise RuntimeError("download exploded")
 
-    factory = lambda *, progress_callback=None: download_coro(progress_callback=progress_callback)
+    def factory(*, progress_callback=None):
+        return download_coro(progress_callback=progress_callback)
 
     with pytest.raises(RuntimeError, match="download exploded"):
         async for _ in _relay_download_progress(
@@ -129,7 +130,8 @@ async def test_relay_total_unknown():
         await asyncio.sleep(0)
         return "ok"
 
-    factory = lambda *, progress_callback=None: download_coro(progress_callback=progress_callback)
+    def factory(*, progress_callback=None):
+        return download_coro(progress_callback=progress_callback)
 
     events: list[ProgressEvent] = []
     async for ev in _relay_download_progress(
