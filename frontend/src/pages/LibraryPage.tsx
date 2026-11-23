@@ -18,7 +18,7 @@ import {
   Globe,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import { formatDuration, platformLabel, timeAgo, cn } from '../lib/utils';
+import { formatDuration, platformLabel, timeAgo, cn, tagChipStyle } from '../lib/utils';
 import { useAnalysisStore } from '../stores/analysisStore';
 import { useAuthStore } from '../stores/authStore';
 import { useLocale, useT, type TranslationKey, type TFunction } from '../i18n';
@@ -761,7 +761,7 @@ function VideoCard({
               <span
                 key={tag.id}
                 className="px-2 py-0.5 rounded-full text-[10px]"
-                style={{ background: tag.color + '20', color: tag.color }}
+                style={tagChipStyle(tag.color)}
               >
                 {tag.name}
               </span>

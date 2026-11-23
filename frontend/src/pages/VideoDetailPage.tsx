@@ -24,6 +24,7 @@ import {
   generatePlaybackUrl,
   platformLabel,
   splitParagraphs,
+  tagChipStyle,
   cn,
 } from '../lib/utils';
 import {
@@ -461,7 +462,7 @@ export default function VideoDetailPage() {
               <span
                 key={tag.id}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs"
-                style={{ background: tag.color + '20', color: tag.color }}
+                style={tagChipStyle(tag.color)}
               >
                 {tag.name}
                 {!isViewer && (

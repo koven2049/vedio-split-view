@@ -54,6 +54,38 @@ export function isXStatusUrl(url: string): boolean {
   );
 }
 
+/** Linearize one sRGB channel for the WCAG relative-luminance formula. */
+function linearizeChannel(value: number): number {
+  const c = value / 255;
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+/** WCAG 2.x relative luminance for `#rrggbb`; null when the value is not hex. */
+function relativeLuminance(hex: string): number | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 16);
+  const r = linearizeChannel((value >> 16) & 0xff);
+  const g = linearizeChannel((value >> 8) & 0xff);
+  const b = linearizeChannel(value & 0xff);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Chip style for a tag colour. Near-black colours (relative luminance below
+ * 0.05, e.g. the X platform tag #000000) would render black text on the dark
+ * theme, so they get a solid chip with white text and keep their brand colour;
+ * every other colour keeps the existing 12.5%-alpha tint with matching text.
+ * Unparseable values also keep the legacy tint (`color + '20'`).
+ */
+export function tagChipStyle(color: string): { background: string; color: string } {
+  const luminance = relativeLuminance(color);
+  if (luminance !== null && luminance < 0.05) {
+    return { background: color, color: '#fff' };
+  }
+  return { background: color + '20', color };
+}
+
 export function platformLabel(platform: string): string {
   const labels: Record<string, string> = {
     youtube: 'YouTube',

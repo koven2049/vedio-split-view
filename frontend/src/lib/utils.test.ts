@@ -6,8 +6,27 @@ import {
   parseServerTime,
   platformLabel,
   splitParagraphs,
+  tagChipStyle,
   timeAgo,
 } from './utils';
+
+describe('tagChipStyle', () => {
+  it('renders near-black tags as a solid chip with white text', () => {
+    expect(tagChipStyle('#000000')).toEqual({ background: '#000000', color: '#fff' });
+  });
+
+  it('keeps the tinted style for bright brand colours', () => {
+    expect(tagChipStyle('#ff0000')).toEqual({ background: '#ff000020', color: '#ff0000' });
+    expect(tagChipStyle('#7c3aed')).toEqual({ background: '#7c3aed20', color: '#7c3aed' });
+  });
+
+  it('falls back to the tinted style for unparseable colours', () => {
+    expect(tagChipStyle('not-a-color')).toEqual({
+      background: 'not-a-color20',
+      color: 'not-a-color',
+    });
+  });
+});
 
 describe('isXStatusUrl', () => {
   it('accepts status links on every supported X/Twitter domain', () => {
