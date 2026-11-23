@@ -19,6 +19,7 @@ __pycache__/
 *.pyo
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 
 # ── frontend cache / build ───────────────────────────────────────────────────
 frontend/node_modules
