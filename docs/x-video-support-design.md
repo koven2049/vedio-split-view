@@ -23,7 +23,7 @@
 1. **`backend/src/video_split/service/downloader.py`**
    - **`detect_platform(url)`**：
      - 匹配域名：`(www\.|mobile\.|m\.)?(x|twitter|fxtwitter|vxtwitter|fixupx|fixvx)\.com`
-     - 匹配路径：`/<user>/status/(\d+)`、`/i/status/(\d+)`、`/i/web/status/(\d+)`
+     - 匹配路径：`/<user>/status/(\d+)`、`/i/status/(\d+)`、`/i/web/status/(\d+)`，允许带 `/video/<n>`、`/photo/<n>` 后缀（归一化时剥掉）
      - 返回 `("x", "<tweet_status_id>")`。注意：**`video_id` 必须使用 URL 中的推文 status ID**（如 `2124465845284008268`），而不是 yt-dlp 返回的底层 media ID（`2124465754183725056`），否则入库前 `check_duplicate` 与回链 URL 会对不上。
    - **`normalize_url(url)`**：
      - 将上述所有 X/Twitter/fx/vx 镜像域名统一改写为 `https://x.com/<user>/status/<id>`（或 `https://x.com/i/status/<id>`），并**剥离 query 与 fragment**（如 `?a=...&s=20`），因为 `yt-dlp` 不识别 `fxtwitter`/`vxtwitter` 域名。

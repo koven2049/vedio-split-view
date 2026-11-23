@@ -74,6 +74,11 @@ class TestDetectPlatform:
     def test_mirror_domains(self, url):
         assert detect_platform(url) == ("x", STATUS_ID)
 
+    @pytest.mark.parametrize("suffix", ["video/1", "photo/1"])
+    def test_media_suffix_uses_status_id(self, suffix):
+        url = f"https://x.com/someone/status/{STATUS_ID}/{suffix}"
+        assert detect_platform(url) == ("x", STATUS_ID)
+
     def test_i_web_status_path(self):
         assert detect_platform("https://x.com/i/web/status/1234567890") == (
             "x",
@@ -116,6 +121,11 @@ class TestNormalizeUrl:
 
     def test_strips_query_and_fragment(self):
         assert normalize_url(TWEET_URL) == f"https://x.com/rchen1386/status/{STATUS_ID}"
+
+    @pytest.mark.parametrize("suffix", ["video/1", "photo/1"])
+    def test_media_suffix_stripped(self, suffix):
+        url = f"https://x.com/someone/status/{STATUS_ID}/{suffix}?s=20"
+        assert normalize_url(url) == f"https://x.com/someone/status/{STATUS_ID}"
 
     def test_i_web_status_canonicalized(self):
         assert (
@@ -272,6 +282,10 @@ class TestExtractMetadata:
             ("ERROR: [twitter] 123: NSFW tweet", "x_unavailable"),
             ("ERROR: [twitter] 123: This tweet is unavailable", "x_unavailable"),
             ("ERROR: [twitter] 123: Protected tweet", "x_unavailable"),
+            (
+                "ERROR: Twitter API says: This Tweet was deleted by the Tweet author",
+                "x_unavailable",
+            ),
         ],
     )
     async def test_typed_error_codes(self, fake_ydl, message, code):

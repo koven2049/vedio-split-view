@@ -69,7 +69,9 @@ class XPlatformError(RuntimeError):
 _X_HOST_RE = re.compile(
     r"(?:www\.|mobile\.|m\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx|fixvx)\.com"
 )
-_X_STATUS_PATH_RE = re.compile(r"^/([^/]+)/status/(\d+)/?$")
+_X_STATUS_PATH_RE = re.compile(
+    r"^/([^/]+)/status/(\d+)(?:/(?:video|photo)/\d+)?/?$"
+)
 _X_I_WEB_STATUS_PATH_RE = re.compile(r"^/i/web/status/(\d+)/?$")
 
 
@@ -482,7 +484,10 @@ def _x_platform_error(exc: Exception) -> XPlatformError | None:
     lower = message.lower()
     if "no video could be found" in lower:
         return XPlatformError(message, "x_no_video")
-    if any(token in lower for token in ("nsfw", "protected", "unavailable", "cookies")):
+    if any(
+        token in lower
+        for token in ("nsfw", "protected", "unavailable", "cookies", "deleted")
+    ):
         return XPlatformError(message, "x_unavailable")
     return None
 
