@@ -5,11 +5,6 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-class AuthRegister(BaseModel):
-    username: str = Field(min_length=2, max_length=64)
-    password: str = Field(min_length=4, max_length=128)
-
-
 class AuthLogin(BaseModel):
     username: str
     password: str
@@ -100,10 +95,6 @@ class AnalyzeResponse(BaseModel):
     task_id: int
     platform: str
     resumed: bool = False
-
-
-class ConfirmRequest(BaseModel):
-    task_id: int
 
 
 class SegmentOut(BaseModel):
@@ -306,13 +297,6 @@ class QRCodeOut(BaseModel):
     qr_image_base64: str
 
 
-class PaginatedResponse(BaseModel):
-    items: list
-    total: int
-    page: int
-    page_size: int
-
-
 class ProgressEvent(BaseModel):
     stage: str
     progress: float
@@ -333,19 +317,6 @@ class ChunkInfo(BaseModel):
     path: str
     size_bytes: int
     duration_seconds: float
-
-
-class DebugDownloadResponse(BaseModel):
-    task_id: int
-    platform: str
-    title: str
-    duration_seconds: int
-    audio_path: str
-    audio_size_bytes: int
-    chunks: list[ChunkInfo]
-    chunk_duration_config: int
-    quota_used: int
-    quota_max: int
 
 
 class DebugTranscribeRequest(BaseModel):

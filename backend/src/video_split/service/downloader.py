@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, TypedDict
@@ -41,13 +41,6 @@ class SubtitleEntry:
     # transcription model has no diarization (Whisper) or the entry predates
     # the field.
     speaker: str = ""
-
-
-@dataclass
-class DownloadResult:
-    audio_path: Path | None = None
-    subtitles: list[SubtitleEntry] = field(default_factory=list)
-    subtitle_source: str = ""
 
 
 class XPlatformError(RuntimeError):
