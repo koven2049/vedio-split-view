@@ -19,7 +19,7 @@ from video_split.service.task_manager import (
     create_task,
 )
 from video_split.service.task_runner import runner
-from video_split.service.video_service import get_user_limits
+from video_split.service.video_service import _cred_kwargs, get_user_limits
 
 router = APIRouter(prefix="/api/videos", tags=["analysis"])
 
@@ -29,12 +29,6 @@ async def _get_bilibili_cred(db: AsyncSession, user_id: int) -> BilibiliCredenti
         select(BilibiliCredential).where(BilibiliCredential.user_id == user_id)
     )
     return result.scalar_one_or_none()
-
-
-def _extract_cred_kwargs(cred: BilibiliCredential | None) -> dict[str, str]:
-    if not cred:
-        return {}
-    return {"sessdata": cred.sessdata, "bili_jct": cred.bili_jct, "buvid3": cred.buvid3}
 
 
 def _start_background_analysis(
@@ -94,7 +88,7 @@ async def start_analysis_for_user(db: AsyncSession, user: User, url: str) -> dic
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported video URL")
 
     limits = get_user_limits(user)
-    cred_kw = _extract_cred_kwargs(
+    cred_kw = _cred_kwargs(
         await _get_bilibili_cred(db, user.id) if platform == "bilibili" else None
     )
 

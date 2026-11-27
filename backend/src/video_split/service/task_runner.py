@@ -55,10 +55,6 @@ class TaskRunner:
     def active_for_user(self, user_id: int) -> list[RunningTask]:
         return [t for t in self._tasks.values() if t.user_id == user_id]
 
-    def is_running(self, task_id: int) -> bool:
-        rt = self._tasks.get(task_id)
-        return rt is not None and not rt.finished
-
     def _broadcast(self, rt: RunningTask, entry: dict[str, Any]) -> None:
         rt.events.append(entry)
         rt.last_progress = entry

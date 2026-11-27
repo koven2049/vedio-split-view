@@ -40,20 +40,6 @@ def login(username: str = typer.Option(...), password: str = typer.Option(..., p
 
 
 @app.command()
-def register(username: str = typer.Option(...), password: str = typer.Option(..., prompt=True, hide_input=True)):
-    """Register a new user."""
-    global _token
-    with _client() as client:
-        resp = client.post("/api/auth/register", json={"username": username, "password": password})
-        if resp.status_code != 200:
-            console.print(f"[red]Registration failed: {resp.json().get('detail', resp.text)}[/red]")
-            raise typer.Exit(1)
-        data = resp.json()
-        _token = data["access_token"]
-        console.print(f"[green]Registered and logged in as {data['username']}[/green]")
-
-
-@app.command()
 def analyze(
     url: str = typer.Argument(..., help="Video URL to analyze"),
     token: str = typer.Option("", help="JWT token"),

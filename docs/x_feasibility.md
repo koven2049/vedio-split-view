@@ -26,7 +26,7 @@ X 能复用现有的**通用 yt-dlp 路径**，和 YouTube 走的是同一套 `e
 
 ## 飞书里的 X 链接
 
-飞书收到 X 链接会**转发给 vedio-favorate**；推文含视频时同时发起解析，纯图文推文只收藏不解析。实现见 [`x-video-support-design.md`](x-video-support-design.md) 与 [`feishu-bot.md`](feishu-bot.md)。
+飞书收到 X 链接默认存入视频收藏（转发给 vedio-favorate）；同一条消息里带「分析」二字才发起解析、不收藏。行为细节见 [`feishu-bot.md`](feishu-bot.md)。
 
 ## 风险
 

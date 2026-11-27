@@ -81,8 +81,6 @@ class BackupConfig(BaseModel):
     enabled: bool = False
     dir: str = ""
     max_copies: int = 3
-    # cron-like schedule for launchd/cron: "daily" runs once at 03:00
-    schedule: str = "daily"
 
 
 class LLMBackupConfig(BaseModel):
