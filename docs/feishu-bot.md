@@ -57,4 +57,4 @@ encrypt_key: "..."          # 强烈建议配置；配了之后飞书会加密�
 
 `app_secret` / `verification_token` / `encrypt_key` 落盘时会自动改成 `enc:v1:` 密文。KEK 在 `config/secret.key`（自动生成，0600，git / rsync 均排除）。新机器要重新录入 `feishu.yaml`，不要复制 KEK。
 
-改完后端代码后：`./manage.sh rebuild`（容器未挂载 src）。
+改完后端代码后：`./manage.sh rebuild`。

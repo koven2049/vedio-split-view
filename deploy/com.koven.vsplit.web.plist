@@ -15,8 +15,8 @@
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-        <!-- Mirror compose.yaml: explicit empty proxies so a proxied shell can
-             never leak B站/小宇宙 traffic abroad. -->
+        <!-- Explicit empty proxies so a proxied shell can never leak B站/小宇宙
+             traffic abroad (Bilibili / xiaoyuzhou must never go through the proxy). -->
         <key>http_proxy</key>
         <string></string>
         <key>https_proxy</key>

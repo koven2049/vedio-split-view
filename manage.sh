@@ -30,10 +30,8 @@ DEPLOY_CONFIG_FILE="$CONFIG_DIR/deploy.cfg"
 DEPLOY_CONFIG_EXAMPLE="$CONFIG_DIR/deploy.cfg.example"
 BUILD_CONFIG_FILE="$CONFIG_DIR/build.cfg"
 BUILD_CONFIG_EXAMPLE="$CONFIG_DIR/build.cfg.example"
-PODMAN_CMD="${PODMAN_CMD:-podman}"
 
 DEPLOY_EXCLUDE_FILE=".rsync-exclude"
-BACKEND_CONTAINER="vsplit-backend"
 
 # ── process-mode constants ────────────────────────────────────────────────────
 VENV_PY="$SCRIPT_DIR/backend/.venv/bin/python"
@@ -213,39 +211,24 @@ _admin_login() {
 }
 
 # ── data-health helpers ───────────────────────────────────────────────────────
-# The production DB is a host-side SQLite file bind-mounted read-write into the
-# backend container ($SCRIPT_DIR/data:/app/data). A vanished bind-mount target
-# once let a container write to an orphan inode for two months; a prune then made
-# the data physically disappear. These helpers make the DB's location and row
-# counts VISIBLE so drift/loss is caught by eye instead of silently.
+# A vanished data directory once let the service write to an orphan inode for
+# two months; a prune then made the data physically disappear. These helpers
+# make the DB's location and row counts VISIBLE so drift/loss is caught by eye
+# instead of silently.
 
 # Absolute path of the DB, resolved from $SCRIPT_DIR so it can never be a
 # drifting relative/external path.
 _db_abs_path() { echo "$SCRIPT_DIR/data/video_split.db"; }
 
-# Row count for a table. Prefers host sqlite3; falls back to the backend
-# container's bundled python (sqlite3 is stdlib) so row counts stay visible
-# even when the host lacks sqlite3. Prints a plain integer, or "n/a" when the
-# DB is absent or every path fails. Never aborts under `set -e`.
+# Row count for a table via host sqlite3. Prints a plain integer, or "n/a" when
+# sqlite3 or the DB is absent. Never aborts under `set -e`.
 _db_count() {
     local table="$1" db n
     db="$(_db_abs_path)"
     [[ -f "$db" ]] || { echo "n/a"; return 0; }
-
-    if command -v sqlite3 >/dev/null 2>&1; then
-        n="$(sqlite3 "$db" "SELECT COUNT(*) FROM $table;" 2>/dev/null || true)"
-        [[ "$n" =~ ^[0-9]+$ ]] && { echo "$n"; return 0; }
-    fi
-
-    # Fallback: query inside the running backend container (DB at /app/data).
-    if command -v "$PODMAN_CMD" >/dev/null 2>&1 \
-        && "$PODMAN_CMD" container exists "$BACKEND_CONTAINER" 2>/dev/null; then
-        n="$("$PODMAN_CMD" exec "$BACKEND_CONTAINER" python -c \
-            "import sqlite3;print(sqlite3.connect('/app/data/video_split.db').execute('SELECT COUNT(*) FROM ${table}').fetchone()[0])" \
-            2>/dev/null || true)"
-        [[ "$n" =~ ^[0-9]+$ ]] && { echo "$n"; return 0; }
-    fi
-
+    command -v sqlite3 >/dev/null 2>&1 || { echo "n/a"; return 0; }
+    n="$(sqlite3 "$db" "SELECT COUNT(*) FROM $table;" 2>/dev/null || true)"
+    [[ "$n" =~ ^[0-9]+$ ]] && { echo "$n"; return 0; }
     echo "n/a"
 }
 
@@ -260,7 +243,7 @@ _report_data_health() {
 
     if [[ ! -f "$db" ]]; then
         log_error "DB file does NOT exist — data source may have drifted or been lost!"
-        log_warn  "Expected bind-mount target: $SCRIPT_DIR/data (project-local)."
+        log_warn  "Expected location: $SCRIPT_DIR/data (project-local)."
         return 1
     fi
 
@@ -280,7 +263,7 @@ _report_data_health() {
         log_error "users=0 — DB is EMPTY. Possible data loss or wrong data directory!"
         fail=1
     elif [[ "$users" == "n/a" ]]; then
-        log_warn "Could not read row counts (no host sqlite3 and backend container not running). Inspect $db manually."
+        log_warn "Could not read row counts (sqlite3 unavailable). Inspect $db manually."
     else
         log_ok "Data present: $users user(s)."
     fi
@@ -324,62 +307,15 @@ _smoke_check() {
 }
 
 # ── deploy exclude file ──────────────────────────────────────────────────────
-_ensure_deploy_exclude() {
-    if [[ ! -f "$DEPLOY_EXCLUDE_FILE" ]]; then
-        cat > "$DEPLOY_EXCLUDE_FILE" <<'EXCLUDE'
-# rsync exclude rules for code deployment — edit freely
-# one rule per line, # = comment
-# reference: https://ss64.com/bash/rsync.html
-
-# ── version control & IDE ────────────────────────────────────────────────────
-.git/
-.DS_Store
-.vscode/
-.idea/
-.claude/
-.superpowers/
-.code-review-graph/
-
-# ── python cache / build ─────────────────────────────────────────────────────
-backend/.venv/
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-.pytest_cache/
-
-# ── frontend cache / build ───────────────────────────────────────────────────
-frontend/node_modules
-frontend/node_modules/
-frontend/dist/
-
-# ── test fixtures (large audio / video) ──────────────────────────────────────
-test/
-test_transcribe.py
-
-# ── CI / tooling artefacts ───────────────────────────────────────────────────
-.playwright-cli/
-.mirror_state
-
-# ── sensitive config (never overwrite remote secrets) ────────────────────────
-# exclude all config except examples
-config/app.yaml
-config/deploy.cfg
-config/certs/
-config/*_cookies.txt
-config/feishu.yaml
-config/*.pem
-config/*.key
-
-# ── runtime data & logs (never overwrite remote DB / logs) ───────────────────
-data/
-logs/
-
-# ── this file itself (remote may have its own) ──────────────────────────────
-.rsync-exclude
-EXCLUDE
-        log_info "Created $DEPLOY_EXCLUDE_FILE (edit to customise)"
-    fi
+# The exclusion list is tracked in git (.rsync-exclude) and must never be
+# regenerated from an embedded copy: a copy here drifts from the real rules
+# (deny-by-default config/, data/, logs/) and --delete would then wipe them.
+# Missing file = refuse, same guard as deploy-local.
+_require_deploy_exclude() {
+    [[ -f "$DEPLOY_EXCLUDE_FILE" ]] || {
+        log_error "$DEPLOY_EXCLUDE_FILE 不存在 —— 拒绝裸 --delete 部署（该文件随仓库走，请从 git 恢复）"
+        exit 1
+    }
 }
 
 _ensure_deploy_config() {
@@ -411,7 +347,6 @@ run_init() {
         log_info "$CONFIG_FILE already exists"
     fi
 
-    _ensure_deploy_exclude
     _ensure_deploy_config
     _ensure_build_config
     log_ok "Init complete."
@@ -433,7 +368,6 @@ _ensure_dist() {
     }
 }
 
-# PID launchd reports for a loaded target, or empty.
 # PID launchd reports for a loaded target, or empty.
 service_pid() { confirmed_server_pids | head -n 1; }
 
@@ -833,7 +767,7 @@ run_deploy() {
     # 方向单向（2026-11-13 规约）：生产副本（带部署章）不能作为部署源。
     refuse_if_prod_source && exit 1
 
-    _ensure_deploy_exclude
+    _require_deploy_exclude
 
     local rsync_args=(-avz --progress --delete --exclude-from="$DEPLOY_EXCLUDE_FILE")
     local pat
@@ -1043,9 +977,6 @@ run_clean() {
     log_ok "Clean complete."
 }
 
-# Generate the user LaunchAgent plist from the template (ROOT baked in),
-# install it under ~/Library/LaunchAgents, and neutralize the legacy
-# container-era watchdogs so they cannot fight the process stack.
 # ── install-daemon / uninstall-daemon：生产托管显式安装（需 root 执行打印的命令）──
 # 防呆是本命令的核心：Test 检出（无部署章）一律拒绝——Test 绝不托管给系统
 #（2026-11-13 规约，主人拍板）。
